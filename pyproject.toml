@@ -1,0 +1,37 @@
+[build-system]
+requires = ["poetry>=1.2.0b2"]
+build-backend = "poetry.masonry.api"
+
+[tool.poetry]
+name = "graph-attention-student"
+version = "0.1.0"
+description = "Graph Attention Student Model"
+license = "MIT"
+authors = ["Jonas Teufel <jonseb1998@gmail.com>"]
+maintainers = ["Jonas Teufel <jonseb1998@gmail.com>"]
+readme = "README.rst"
+keywords = ["graph neural network", "attention", "kgcnn"]
+packages = [
+    { include = "graph-attention-student" },
+    { include = "tests" },
+]
+include = [
+    "pycomex/VERSION",
+    "README.rst",
+    "CHANGLELOG.rst"
+]
+
+[tool.poetry.scripts]
+pycomex = 'pycomex.cli:main'
+
+[tool.poetry.dependencies]
+python = ">=3.6.2"
+click = "7.1.2"
+
+[tool.poetry_bumpversion.file."pycomex/__init__.py"]
+search = '__version__ = "{current_version}"'
+replace = '__version__ = "{new_version}"'
+
+[tool.poetry_bumpversion.file."pycomex/VERSION"]
+search = "{current_version}"
+replace = "{new_version}"
