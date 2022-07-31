@@ -15,7 +15,9 @@ EXAMPLES = [name.split('.')[0] for name in os.listdir(EXAMPLES_FOLDER)]
 @click.option("-v", "--version", is_flag=True)
 @click.pass_context
 def cli(ctx: click.Context, version: bool):
-    """Console script for pycomex."""
+    """
+    Console scripts for graph_attention_student
+    """
     if version:
         version = get_version()
         click.secho(version)

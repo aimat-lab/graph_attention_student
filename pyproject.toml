@@ -23,7 +23,7 @@ include = [
 ]
 
 [tool.poetry.scripts]
-graph_attention_student = 'graph_attention_student.cli:main'
+graph_attention_student = 'graph_attention_student.cli:cli'
 
 [tool.poetry.dependencies]
 python = ">=3.6.2"
