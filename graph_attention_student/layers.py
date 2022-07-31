@@ -1,3 +1,4 @@
+import sys
 from typing import List
 
 import tensorflow as tf
@@ -158,4 +159,7 @@ class StaticMultiplicationEmbedding(GraphBaseLayer):
         self.bias = bias
 
     def call(self, inputs):
+        loss = tf.reduce_sum(inputs, axis=-1)
+        loss = tf.reduce_mean(loss)
+        #self.add_loss(0.1 * loss)
         return tf.reduce_sum(inputs * self.values, axis=-1) + self.bias

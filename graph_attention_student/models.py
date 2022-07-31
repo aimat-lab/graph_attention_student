@@ -1,5 +1,6 @@
-from typing import List, Optional, Callable
+from typing import List, Optional, Callable, Tuple
 
+import numpy as np
 import tensorflow as tf
 import tensorflow.keras as ks
 from kgcnn.layers.modules import GraphBaseLayer
@@ -7,6 +8,7 @@ from kgcnn.layers.modules import LazyConcatenate, LazyAverage
 from kgcnn.layers.modules import DenseEmbedding, ActivationEmbedding, DropoutEmbedding
 from kgcnn.layers.pooling import PoolingLocalEdges
 from kgcnn.layers.pooling import PoolingWeightedNodes
+from kgcnn.utils.data import ragged_tensor_from_nested_numpy
 
 from graph_attention_student.layers import MultiChannelGatLayer
 from graph_attention_student.layers import ExplanationSparsityRegularization
@@ -31,7 +33,8 @@ class MultiAttentionStudent(ks.models.Model):
                  sparsity_factor: float = 0.0,
                  exclusivity_factor: float = 0.0,
                  lay_additional_cb: Optional[Callable] = None,
-                 ):
+                 **kwargs):
+        super(MultiAttentionStudent, self).__init__(**kwargs)
         self.units = units
         self.activation = activation
         self.use_bias = use_bias
@@ -46,7 +49,7 @@ class MultiAttentionStudent(ks.models.Model):
         self.exclusivity_factor = exclusivity_factor
         self.lay_additional_cb = lay_additional_cb
 
-        self.lay_concat_input = LazyConcatenate(axis=-1)
+        self.lay_concat_input = LazyConcatenate(axis=-2)
 
         # This list contains all the actual GAT-like layers which do the graph convolutions. How many
         # layers there will be and how many hidden units they have is determined by the "self.units" list.
@@ -72,6 +75,8 @@ class MultiAttentionStudent(ks.models.Model):
         self.lay_dropout_importances = DropoutEmbedding(rate=importance_dropout_rate)
         self.lay_sparsity = ExplanationSparsityRegularization(coef=sparsity_factor)
         self.lay_exclusivity = ExplanationExclusivityRegularization(coef=exclusivity_factor)
+
+        self.lay_act_importance = ActivationEmbedding(importance_activation)
 
         # ~ Edge Importances
         # The edge importances are derived from the edge attention weights which the GAT layers maintain
@@ -101,7 +106,7 @@ class MultiAttentionStudent(ks.models.Model):
         # a graph embedding vector and on top of each of those a dense network then produces the final
         # predictions. Here is is important to note, that each channel does this separately: Each importance
         # channel only works on it's own node embeddings and also has it's own dense final network
-        self.lay_pool_out = PoolingWeightedNodes
+        self.lay_pool_out = PoolingWeightedNodes(pooling_method='sum')
 
         self.final_units = final_units + [1]
         self.final_activations = [final_activation for _ in final_units] + ['linear']
@@ -162,7 +167,7 @@ class MultiAttentionStudent(ks.models.Model):
         # edge_importances: ([batch], [M], K)
         edge_importances = tf.reduce_sum(alphas, axis=-1, keepdims=False)
         # We want importances to also be a [0, 1] attention-like value
-        edge_importances = ks.activations.sigmoid(edge_importances)
+        edge_importances = self.lay_act_importance(edge_importances)
         # Applying all the various regularization layers
         edge_importances = self.lay_dropout_importances(edge_importances)
         self.lay_exclusivity(edge_importances)
@@ -182,7 +187,7 @@ class MultiAttentionStudent(ks.models.Model):
         x_combined = tf.reduce_sum(x, axis=-2)
         # node_importances: ([batch], [N], K)
         node_importances = self.lay_node_importances(x_combined)
-        node_importances = ks.activations.sigmoid(node_importances)
+        node_importances = self.lay_act_importance(node_importances)
 
         # This multiplication of node_importances and pooled edge_importances helps to make the explanation
         # more "consistent" -> There will likely be not too many freely floating node / edge importances.
@@ -212,7 +217,7 @@ class MultiAttentionStudent(ks.models.Model):
             for lay in layers:
                 out = lay(out)
 
-            outs.insert(0, out)
+            outs.append(out)
 
         # out: ([batch], K)
         out = self.lay_concat_out(outs)
@@ -222,3 +227,21 @@ class MultiAttentionStudent(ks.models.Model):
             out = self.lay_additional(out)
 
         return out, node_importances, edge_importances
+
+    def predict_single(self, inputs: Tuple[List[float], List[float], List[float]]):
+        node_input, edge_input, edge_index_input = inputs
+
+        # The input is just normal lists, to be processable by the model we need to turn those into
+        # ragged tensors first
+        label, node_importances, edge_importances = self([
+            ragged_tensor_from_nested_numpy(np.array([node_input])),
+            ragged_tensor_from_nested_numpy(np.array([edge_input])),
+            ragged_tensor_from_nested_numpy(np.array([edge_index_input]))
+        ])
+
+        # The results come out as tensors as well, we convert them back to lists.
+        return (
+            label.numpy().tolist()[0],
+            node_importances.to_list()[0],
+            edge_importances.to_list()[0]
+        )

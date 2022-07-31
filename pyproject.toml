@@ -30,6 +30,8 @@ python = ">=3.6.2"
 click = "7.1.2"
 kgcnn = ">=2.0.1"
 tensorflow = ">=2.8.0"
+pycomex = ">=0.3.0"
+imageio = "==2.19.0"
 
 [tool.poetry_bumpversion.file."graph_attention_student/__init__.py"]
 search = '__version__ = "{current_version}"'
