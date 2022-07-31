@@ -1,0 +1,130 @@
+{
+    "smiles": "C#N",
+    "id": "B-167",
+    "input_type": "classification",
+    "label": "1",
+    "solubility": 1.5682,
+    "value": 1.5682,
+    "name": "hydrocyanic acid",
+    "image_width": 900,
+    "image_height": 900,
+    "graph": {
+        "node_symbol": [
+            "C",
+            "N"
+        ],
+        "node_number": [
+            6,
+            7
+        ],
+        "node_coordinates": [
+            [
+                240.57272727272724,
+                450.0
+            ],
+            [
+                649.6636363636363,
+                450.0
+            ]
+        ],
+        "edge_indices": [
+            [
+                0,
+                1
+            ],
+            [
+                1,
+                0
+            ]
+        ],
+        "edge_number": [
+            [
+                3
+            ],
+            [
+                3
+            ]
+        ],
+        "graph_labels": [
+            "B-167"
+        ],
+        "graph_size": 2,
+        "node_attributes": [
+            [
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                2.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0
+            ],
+            [
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+            ]
+        ],
+        "edge_attributes": [
+            [
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0
+            ],
+            [
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0
+            ]
+        ],
+        "graph_attributes": [
+            27.01089859008789,
+            2.0
+        ],
+        "node_importances": [
+            0.0,
+            0.0
+        ],
+        "edge_importances": [
+            0.0,
+            0.0
+        ],
+        "node_indices": [
+            0,
+            1
+        ],
+        "id": "B-167",
+        "node_adjacency": [
+            [
+                0.0,
+                1.0
+            ],
+            [
+                1.0,
+                0.0
+            ]
+        ]
+    }
+}

@@ -1,0 +1,130 @@
+{
+    "smiles": "S=[Zn]",
+    "id": "A-1869",
+    "input_type": "classification",
+    "label": "",
+    "solubility": -2.9676237394,
+    "value": -2.9676237394,
+    "name": "zinc(2+) ion sulfanediide",
+    "image_width": 900,
+    "image_height": 900,
+    "graph": {
+        "node_symbol": [
+            "S",
+            "Zn"
+        ],
+        "node_number": [
+            16,
+            30
+        ],
+        "node_coordinates": [
+            [
+                235.8090909090909,
+                450.0
+            ],
+            [
+                644.9,
+                450.0
+            ]
+        ],
+        "edge_indices": [
+            [
+                0,
+                1
+            ],
+            [
+                1,
+                0
+            ]
+        ],
+        "edge_number": [
+            [
+                2
+            ],
+            [
+                2
+            ]
+        ],
+        "graph_labels": [
+            "A-1869"
+        ],
+        "graph_size": 2,
+        "node_attributes": [
+            [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+            ],
+            [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+            ]
+        ],
+        "edge_attributes": [
+            [
+                0.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+            ],
+            [
+                0.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+            ]
+        ],
+        "graph_attributes": [
+            95.90121459960938,
+            2.0
+        ],
+        "node_importances": [
+            0.0,
+            0.0
+        ],
+        "edge_importances": [
+            0.0,
+            0.0
+        ],
+        "node_indices": [
+            0,
+            1
+        ],
+        "id": "A-1869",
+        "node_adjacency": [
+            [
+                0.0,
+                1.0
+            ],
+            [
+                1.0,
+                0.0
+            ]
+        ]
+    }
+}

@@ -1,0 +1,130 @@
+{
+    "smiles": "S=[Fe]",
+    "id": "A-5014",
+    "input_type": "classification",
+    "label": "0",
+    "solubility": -3.6218288656,
+    "value": -3.6218288656,
+    "name": "sulfanylideneiron",
+    "image_width": 900,
+    "image_height": 900,
+    "graph": {
+        "node_symbol": [
+            "S",
+            "Fe"
+        ],
+        "node_number": [
+            16,
+            26
+        ],
+        "node_coordinates": [
+            [
+                236.64545454545453,
+                450.0
+            ],
+            [
+                645.7363636363636,
+                450.0
+            ]
+        ],
+        "edge_indices": [
+            [
+                0,
+                1
+            ],
+            [
+                1,
+                0
+            ]
+        ],
+        "edge_number": [
+            [
+                2
+            ],
+            [
+                2
+            ]
+        ],
+        "graph_labels": [
+            "A-5014"
+        ],
+        "graph_size": 2,
+        "node_attributes": [
+            [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+            ],
+            [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+            ]
+        ],
+        "edge_attributes": [
+            [
+                0.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+            ],
+            [
+                0.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+            ]
+        ],
+        "graph_attributes": [
+            87.9070053100586,
+            2.0
+        ],
+        "node_importances": [
+            0.0,
+            0.0
+        ],
+        "edge_importances": [
+            0.0,
+            0.0
+        ],
+        "node_indices": [
+            0,
+            1
+        ],
+        "id": "A-5014",
+        "node_adjacency": [
+            [
+                0.0,
+                1.0
+            ],
+            [
+                1.0,
+                0.0
+            ]
+        ]
+    }
+}

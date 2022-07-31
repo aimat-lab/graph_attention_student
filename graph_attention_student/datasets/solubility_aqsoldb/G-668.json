@@ -1,0 +1,130 @@
+{
+    "smiles": "C=C",
+    "id": "G-668",
+    "input_type": "classification",
+    "label": "1",
+    "solubility": -0.4,
+    "value": -0.4,
+    "name": "Ethylene",
+    "image_width": 900,
+    "image_height": 900,
+    "graph": {
+        "node_symbol": [
+            "C",
+            "C"
+        ],
+        "node_number": [
+            6,
+            6
+        ],
+        "node_coordinates": [
+            [
+                245.45454545454547,
+                450.0
+            ],
+            [
+                654.5454545454545,
+                450.0
+            ]
+        ],
+        "edge_indices": [
+            [
+                0,
+                1
+            ],
+            [
+                1,
+                0
+            ]
+        ],
+        "edge_number": [
+            [
+                2
+            ],
+            [
+                2
+            ]
+        ],
+        "graph_labels": [
+            "G-668"
+        ],
+        "graph_size": 2,
+        "node_attributes": [
+            [
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                3.0,
+                2.0,
+                0.0,
+                0.0,
+                0.0
+            ],
+            [
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                3.0,
+                2.0,
+                0.0,
+                0.0,
+                0.0
+            ]
+        ],
+        "edge_attributes": [
+            [
+                0.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+            ],
+            [
+                0.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+            ]
+        ],
+        "graph_attributes": [
+            28.031299591064453,
+            2.0
+        ],
+        "node_importances": [
+            0.0,
+            0.0
+        ],
+        "edge_importances": [
+            0.0,
+            0.0
+        ],
+        "node_indices": [
+            0,
+            1
+        ],
+        "id": "G-668",
+        "node_adjacency": [
+            [
+                0.0,
+                1.0
+            ],
+            [
+                1.0,
+                0.0
+            ]
+        ]
+    }
+}

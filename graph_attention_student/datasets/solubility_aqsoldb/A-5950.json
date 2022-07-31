@@ -1,0 +1,130 @@
+{
+    "smiles": "S=[SnH2]",
+    "id": "A-5950",
+    "input_type": "classification",
+    "label": "",
+    "solubility": -8.4059550501,
+    "value": -8.4059550501,
+    "name": "stannanethione",
+    "image_width": 900,
+    "image_height": 900,
+    "graph": {
+        "node_symbol": [
+            "S",
+            "Sn"
+        ],
+        "node_number": [
+            16,
+            50
+        ],
+        "node_coordinates": [
+            [
+                218.076,
+                450.0
+            ],
+            [
+                627.166909090909,
+                450.0
+            ]
+        ],
+        "edge_indices": [
+            [
+                0,
+                1
+            ],
+            [
+                1,
+                0
+            ]
+        ],
+        "edge_number": [
+            [
+                2
+            ],
+            [
+                2
+            ]
+        ],
+        "graph_labels": [
+            "A-5950"
+        ],
+        "graph_size": 2,
+        "node_attributes": [
+            [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+            ],
+            [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                3.0,
+                2.0,
+                0.0,
+                0.0,
+                0.0
+            ]
+        ],
+        "edge_attributes": [
+            [
+                0.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+            ],
+            [
+                0.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+            ]
+        ],
+        "graph_attributes": [
+            153.88992309570312,
+            2.0
+        ],
+        "node_importances": [
+            0.0,
+            0.0
+        ],
+        "edge_importances": [
+            0.0,
+            0.0
+        ],
+        "node_indices": [
+            0,
+            1
+        ],
+        "id": "A-5950",
+        "node_adjacency": [
+            [
+                0.0,
+                1.0
+            ],
+            [
+                1.0,
+                0.0
+            ]
+        ]
+    }
+}

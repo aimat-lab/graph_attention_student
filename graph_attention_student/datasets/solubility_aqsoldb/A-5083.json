@@ -1,0 +1,130 @@
+{
+    "smiles": "O=[Mn]",
+    "id": "A-5083",
+    "input_type": "classification",
+    "label": "0",
+    "solubility": -4.921453892,
+    "value": -4.921453892,
+    "name": "oxomanganese",
+    "image_width": 900,
+    "image_height": 900,
+    "graph": {
+        "node_symbol": [
+            "O",
+            "Mn"
+        ],
+        "node_number": [
+            8,
+            25
+        ],
+        "node_coordinates": [
+            [
+                227.2431818181818,
+                450.0
+            ],
+            [
+                636.3340909090908,
+                450.0
+            ]
+        ],
+        "edge_indices": [
+            [
+                0,
+                1
+            ],
+            [
+                1,
+                0
+            ]
+        ],
+        "edge_number": [
+            [
+                2
+            ],
+            [
+                2
+            ]
+        ],
+        "graph_labels": [
+            "A-5083"
+        ],
+        "graph_size": 2,
+        "node_attributes": [
+            [
+                0.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+            ],
+            [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                1.0,
+                0.0,
+                1.0,
+                0.0,
+                0.0
+            ]
+        ],
+        "edge_attributes": [
+            [
+                0.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+            ],
+            [
+                0.0,
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+            ]
+        ],
+        "graph_attributes": [
+            70.9329605102539,
+            2.0
+        ],
+        "node_importances": [
+            0.0,
+            0.0
+        ],
+        "edge_importances": [
+            0.0,
+            0.0
+        ],
+        "node_indices": [
+            0,
+            1
+        ],
+        "id": "A-5083",
+        "node_adjacency": [
+            [
+                0.0,
+                1.0
+            ],
+            [
+                1.0,
+                0.0
+            ]
+        ]
+    }
+}
