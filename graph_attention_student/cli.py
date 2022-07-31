@@ -1,9 +1,11 @@
+import os
 import sys
 import click
 
 from pycomex.experiment import run_experiment
 
 from graph_attention_student.util import get_version
+from graph_attention_student.util import DATASETS_FOLDER
 from graph_attention_student.util import EXAMPLES_FOLDER
 
 EXAMPLES = [name.split('.')[0] for name in os.listdir(EXAMPLES_FOLDER)]
@@ -24,7 +26,7 @@ def cli(ctx: click.Context, version: bool):
 @click.option('-n', '--name', type=click.Choice(EXAMPLES), default='solubility_regression',
               help='the name of the example file to be executed')
 @click.pass_context
-def example(name: str):
+def example(ctx, name: str):
     """
     Executes the example code
     """
@@ -35,8 +37,17 @@ def example(name: str):
     click.secho(f'Experiment completed and saved to: {experiment_path}')
 
 
-cli.add_command(example)
+@click.command(short_help='print a list of all dataset folders')
+@click.pass_context
+def list_datasets(ctx):
+    names = os.listdir(DATASETS_FOLDER)
+    click.secho('datasets found in the dataset folder:')
+    for name in names:
+        click.secho(f'- {name}')
 
+
+cli.add_command(example)
+cli.add_command(list_datasets)
 
 if __name__ == '__main__':
     cli()
