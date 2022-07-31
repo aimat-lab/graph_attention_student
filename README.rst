@@ -63,5 +63,6 @@ The model can be used like this:
 Check out `examples/solubility_regression.py`_ for a detailed example of how the model can be used for a
 regression task.
 
+.. _kgcnn: https://github.com/aimat-lab/gcnn_keras
 .. _examples/solubility_regression.py: https://github.com/aimat-lab/graph_attention_student/tree/master/graph_attention_student/examples/solubility_regression.py
 

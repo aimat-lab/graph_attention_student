@@ -35,7 +35,7 @@ TEST_RATIO = 0.1
 NUM_EXAMPLES = 100
 
 # Model related
-IMPORTANCE_CHANNELS = [10, -10]
+IMPORTANCE_CHANNELS = [-10, 10]
 NUM_CHANNELS = len(IMPORTANCE_CHANNELS)
 DROPOUT_RATE = 0.2
 SPARSITY_FACTOR = 0.1
@@ -47,8 +47,7 @@ BATCH_SIZE = 256
 EPOCHS = 500
 
 NAMESPACE = 'solubility_regression'
-#BASE_PATH = os.getcwd()
-BASE_PATH = os.path.join(PATH, 'experiment_results')
+BASE_PATH = os.getcwd()
 DEBUG = True
 with Experiment(namespace=NAMESPACE, base_path=BASE_PATH, glob=globals()) as e:
     e.prepare()
