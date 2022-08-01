@@ -6,6 +6,12 @@ This module is structured as a ``pycomex`` computational experiment module. Chec
 project to see the benefits this provides:
 
 https://github.com/the16thpythonist/pycomex
+
+You can simply execute this module and the progress of the experiment execution and the model training
+will be logged to the console. Additionally all experiment artifacts will be saved into a new folder, which
+will automatically created in the current working directory. This artifact folder will contain the PDF
+plots, the raw results in form of a JSON file and an analysis.py file which can be modified an executed
+to change the plotting of the results.
 """
 import os
 import pathlib
