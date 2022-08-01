@@ -40,6 +40,7 @@ The model can be used like this:
 
     import tensorflow as tf
     import tensorflow.keras as ks
+    from graph_attention_student.training import NoLoss
     from graph_attention_student.models import MultiChannelAttentionStudent
 
     model = MultiChannelAttentionStudent(
@@ -91,6 +92,5 @@ importances. The node importances are produced by an additional dense layer acti
 embeddings which is produced by the final GAT layer. The final node embeddings are then globally pooled into
 graph embeddings, on top of which each explanation channel defines it's own dense output network to produce
 the final prediction value.
-
 
 .. _`GATv2`: https://github.com/tech-srl/how_attentive_are_gats
