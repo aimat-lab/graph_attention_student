@@ -121,7 +121,7 @@ while red-heavy structures contain a certain positive value.
 This way, every graph has a certain value associated with it, which is between -5 and 5. The network was
 trained to predict this value for each graph.
 
-This shows the explanations for an example prediction of the network. For the regression task, the left
+This image shows the explanations for an example prediction of the network. For the regression task, the left
 channel explains low values while the right channel explains high values. The network correctly identified
 one of the special negative motif to be a chain of 4 blue nodes and one of the special positive motifs to
 be a triangle of 2 red nodes and 1 green node.
@@ -133,8 +133,18 @@ be a triangle of 2 red nodes and 1 green node.
 Aquaous Solubility Dataset
 --------------------------
 
-Another...
+This is the AqSolDB dataset, which consists of ~8000 molecules and measured values for the solubility in
+water (logS value).
+
+The network was trained to predict the solubility value for each molecule.
+
+This image shows the explanations for an example prediction of the network. For this regression task the
+left channel explains which parts of the graph are associated with low values and the right channel
+explains which parts of the network are associated with high values. In this case, the explanations of the
+network are in line with human intuition which says that long carbon chains and rings decrease solubility
+while OH groups increase solubility.
 
 .. image:: solubility_example.png
 
+.. _`GATv2`: https://www.nature.com/articles/s41597-019-0151-1
 
