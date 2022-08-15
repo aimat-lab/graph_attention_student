@@ -4,10 +4,79 @@ from typing import List
 import tensorflow as tf
 import tensorflow.keras as ks
 
+from kgcnn.ops.partition import partition_row_indexing
+from kgcnn.ops.segment import segment_ops_by_name, segment_softmax
 from kgcnn.layers.modules import GraphBaseLayer
-from kgcnn.layers.modules import LazyConcatenate
+from kgcnn.layers.modules import LazyConcatenate, LazyAverage
 from kgcnn.layers.modules import DropoutEmbedding, DenseEmbedding
+from kgcnn.layers.pooling import PoolingLocalEdges
+from kgcnn.layers.conv.attention import PoolingLocalEdgesAttention
 from kgcnn.layers.conv.attention import AttentionHeadGATV2
+
+
+class ExtendedPoolingLocalEdgesAttention(PoolingLocalEdgesAttention):
+    r"""
+    """
+
+    def __init__(self, pooling_index=0, **kwargs):
+        """Initialize layer."""
+        super(PoolingLocalEdgesAttention, self).__init__(**kwargs)
+        self.pooling_index = pooling_index
+
+    def call(self, inputs, **kwargs):
+        """Forward pass.
+        Args:
+            inputs: [node, edges, attention, edge_indices]
+                - nodes (tf.RaggedTensor): Node embeddings of shape (batch, [N], F)
+                - edges (tf.RaggedTensor): Edge or message embeddings of shape (batch, [M], F)
+                - attention (tf.RaggedTensor): Attention coefficients of shape (batch, [M], 1)
+                - edge_indices (tf.RaggedTensor): Edge indices referring to nodes of shape (batch, [M], F)
+        Returns:
+            tf.RaggedTensor: Embedding tensor of pooled edge attentions for each node of shape (batch, [N], F)
+        """
+        # Need ragged input but can be generalized in the future.
+        self.assert_ragged_input_rank(inputs)
+        # We cast to values here
+        nod, node_part = inputs[0].values, inputs[0].row_lengths()
+        edge = inputs[1].values
+        attention = inputs[2].values
+        edgeind, edge_part = inputs[3].values, inputs[3].row_lengths()
+
+        shiftind = partition_row_indexing(edgeind, node_part, edge_part, partition_type_target="row_length",
+                                          partition_type_index="row_length", to_indexing='batch',
+                                          from_indexing=self.node_indexing)
+
+        nodind = shiftind[:, self.pooling_index]  # Pick first index eg. ingoing
+        dens = edge
+        ats = attention
+        if not self.is_sorted:
+            # Sort edgeindices
+            node_order = tf.argsort(nodind, axis=0, direction='ASCENDING', stable=True)
+            nodind = tf.gather(nodind, node_order, axis=0)
+            dens = tf.gather(dens, node_order, axis=0)
+            ats = tf.gather(ats, node_order, axis=0)
+
+        # Apply segmented softmax
+        ats = segment_softmax(ats, nodind)
+        get = dens * ats
+        get = tf.math.segment_sum(get, nodind)
+
+        if self.has_unconnected:
+            # Need to fill tensor since the maximum node may not be also in pooled
+            # Does not happen if all nodes are also connected
+            get = tf.scatter_nd(tf.keras.backend.expand_dims(tf.range(tf.shape(get)[0]), axis=-1), get,
+                                tf.concat([tf.shape(nod)[:1], tf.shape(get)[1:]], axis=0))
+
+        out = tf.RaggedTensor.from_row_lengths(get, node_part, validate=self.ragged_validate)
+        ats = tf.RaggedTensor.from_row_lengths(ats, node_part, validate=self.ragged_validate)
+
+        return out, ats
+
+    def get_config(self):
+        """Update layer config."""
+        config = super(PoolingLocalEdgesAttention, self).get_config()
+        config.update({"pooling_index": self.pooling_index})
+        return config
 
 
 class MultiChannelGatLayer(AttentionHeadGATV2):
@@ -21,6 +90,7 @@ class MultiChannelGatLayer(AttentionHeadGATV2):
                  use_bias: bool = True,
                  channels: int = 1,
                  attention_dropout_rate: float = 0,
+                 share_weights: bool = False,
                  **kwargs):
         super(MultiChannelGatLayer, self).__init__(
             *args,
@@ -34,14 +104,21 @@ class MultiChannelGatLayer(AttentionHeadGATV2):
         self.channels = channels
         self.lay_dropout = DropoutEmbedding(rate=attention_dropout_rate)
 
+        if share_weights:
+            lay_linear = DenseEmbedding(units, activation='linear', use_bias=use_bias)
+
         self.alpha_layers = []
         for i in range(channels):
+            if not share_weights:
+                lay_linear = DenseEmbedding(units, activation='linear', use_bias=use_bias)
+
             lay_alpha_activation = DenseEmbedding(units, activation=activation, use_bias=use_bias)
             lay_alpha = DenseEmbedding(1, activation="linear", use_bias=False)
-            self.alpha_layers.append((lay_alpha_activation, lay_alpha))
+            self.alpha_layers.append((lay_linear, lay_alpha_activation, lay_alpha))
 
         self.lay_concat_alphas = LazyConcatenate(axis=-2)
         self.lay_concat_embeddings = LazyConcatenate(axis=-2)
+        self.lay_pool_attention = ExtendedPoolingLocalEdgesAttention()
 
     def call(self, inputs, **kwargs):
         """Forward pass.
@@ -68,12 +145,12 @@ class MultiChannelGatLayer(AttentionHeadGATV2):
         # concat into the multi-channel tensors.
         a_ijs = []
         h_is = []
-        for k, (lay_alpha_activation, lay_alpha) in enumerate(self.alpha_layers):
+        for k, (lay_linear, lay_alpha_activation, lay_alpha) in enumerate(self.alpha_layers):
 
             node = nodes[:, :, k, :]
 
             # Copied from the original class
-            w_n = self.lay_linear_trafo(node, **kwargs)
+            w_n = lay_linear(node, **kwargs)
             n_in = self.lay_gather_in([node, edge_index], **kwargs)
             n_out = self.lay_gather_out([node, edge_index], **kwargs)
             wn_out = self.lay_gather_out([w_n, edge_index], **kwargs)
@@ -88,13 +165,17 @@ class MultiChannelGatLayer(AttentionHeadGATV2):
             # Added to hopefully improve overfit problem
             a_ij = self.lay_dropout(a_ij)
 
-            h_i = self.lay_pool_attention([node, wn_out, a_ij, edge_index], **kwargs)
+            h_i, ats_ij = self.lay_pool_attention([node, wn_out, a_ij, edge_index], **kwargs)
+            #print(a_ij.shape, ats_ij.shape)
 
             if self.use_final_activation:
                 h_i = self.lay_final_activ(h_i, **kwargs)
 
+            #a_ij = ks.activations.softmax(a_ij, axis=-2)
             a_ij = tf.expand_dims(a_ij, axis=-2)
             a_ijs.append(a_ij)
+            # ats_ij = tf.expand_dims(ats_ij, axis=-2)
+            # a_ijs.append(ats_ij)
 
             h_i = tf.expand_dims(h_i, axis=-2)
             h_is.append(h_i)
@@ -109,6 +190,141 @@ class MultiChannelGatLayer(AttentionHeadGATV2):
         return h_is, a_ijs
 
 
+class MultiHeadGatLayer(AttentionHeadGATV2):
+    """
+    This class is mostly a copy and modification of ``kgcnn.layers.conv.attention.AttentionHeadGATV2``.
+    """
+    def __init__(self,
+                 *args,
+                 units: int,
+                 num_heads: int,
+                 activation: str = 'kgcnn>leaky_relu',
+                 use_bias: bool = True,
+                 concat_heads: bool = False,
+                 attention_dropout_rate: float = 0,
+                 share_weights: bool = False,
+                 **kwargs):
+        super(MultiHeadGatLayer, self).__init__(
+            *args,
+            units=units,
+            activation=activation,
+            use_bias=use_bias,
+            **kwargs
+        )
+
+        self.attention_dropout_rate = attention_dropout_rate
+        self.num_heads = num_heads
+        self.concat_heads = concat_heads
+        self.lay_dropout = DropoutEmbedding(rate=attention_dropout_rate)
+
+        if share_weights:
+            lay_linear = DenseEmbedding(units, activation='linear', use_bias=use_bias)
+
+        self.head_layers: List[Tuple[DenseEmbedding, DenseEmbedding, DenseEmbedding]] = []
+        for _ in range(num_heads):
+            if not share_weights:
+                lay_linear = DenseEmbedding(units, activation='linear', use_bias=use_bias)
+
+            lay_alpha_activation = DenseEmbedding(units, activation=activation, use_bias=use_bias)
+            lay_alpha = DenseEmbedding(1, activation="linear", use_bias=False)
+
+            # Adding all the layers as a tuple to the list as representing one of the heads
+            self.head_layers.append((lay_linear, lay_alpha_activation, lay_alpha))
+
+        self.lay_concat_alphas = LazyConcatenate(axis=-2)
+        self.lay_concat_embeddings = LazyConcatenate(axis=-2)
+        self.lay_pool_attention = PoolingLocalEdgesAttention()
+        self.lay_pool = PoolingLocalEdges()
+
+        self.lay_average_heads = LazyAverage()
+        self.lay_concat_heads = LazyConcatenate(axis=-1)
+
+    def call(self, inputs, **kwargs):
+        """Forward pass.
+
+        N: Number of nodes in the graph
+        V: Number of embeddings per node for the previous layer.
+        Vu: Number of embeddings per node after the this layer
+        K: Number of attention heads
+
+        M: Number of edges in the graph
+        F: Number of edge embeddings
+
+        Brackets [] indicate a ragged dimension
+
+        Args:
+            inputs (list): of [nodes, edges, edge_indices]
+                - nodes (tf.RaggedTensor): Node embeddings of shape ([batch], [N], V)
+                - edges (tf.RaggedTensor): Edge or message embeddings of shape ([batch], [M], F)
+                - edge_indices (tf.RaggedTensor): Edge indices referring to nodes of shape ([batch], [M], 2)
+        Returns:
+            Tuple consisting of:
+                - nodes (tf.RaggedTensor): Node embeddings of shape ([batch], [N], Vu * K) if head concat
+                  is used and ([batch], [N], Vu) if it is not used and heads are averaged instead
+                - attention coefficients (tf.RaggedTensor): The attention coefficients for the graph edges
+                  of the various attention heads of shape ([batch], [M], K)
+        """
+        node, edge, edge_index = inputs
+
+        # "a_ij" is a single-channel edge attention coefficient tensor. "h_i" is a single-channel node
+        # embedding vector. These lists collect the single tensors for each channel and at the end are
+        # concat into the multi-channel tensors.
+        a_ijs = []
+        h_is = []
+        for k, (lay_linear, lay_alpha_activation, lay_alpha) in enumerate(self.head_layers):
+
+            # Copied from the original class
+            w_n = lay_linear(node, **kwargs)
+            n_in = self.lay_gather_in([node, edge_index], **kwargs)
+            n_out = self.lay_gather_out([node, edge_index], **kwargs)
+            wn_out = self.lay_gather_out([w_n, edge_index], **kwargs)
+            if self.use_edge_features:
+                e_ij = self.lay_concat([n_in, n_out, edge], **kwargs)
+            else:
+                e_ij = self.lay_concat([n_in, n_out], **kwargs)
+
+            # a_ij: ([batch], [M], 1)
+            a_ij = lay_alpha_activation(e_ij, **kwargs)
+            a_ij = lay_alpha(a_ij, **kwargs)
+
+            # Added to hopefully improve overfit problem
+            a_ij = self.lay_dropout(a_ij)
+
+            # This is my own attempt at implementing an attention pooling operation. The problem with the
+            # kgcnn PoolingLocalEdgesAttention is that it uses attention values which are not [0, 1] range
+            # and as far as I can see there is also no way to get these actual coefficients out of the
+            # process either.
+            # I think this should work, because I realized that softmax should work on a ragged dimension as
+            # well (at least it did not cause errors till now).
+            # a_ij = ks.activations.softmax(a_ij, axis=-2)
+            # h_i = self.lay_pool([node, wn_out * a_ij, edge_index], **kwargs)
+
+            h_i = self.lay_pool_attention([node, wn_out, a_ij, edge_index], **kwargs)
+            #a_ij = ks.activations.softmax(a_ij, axis=-2)
+
+            if self.use_final_activation:
+                h_i = self.lay_final_activ(h_i, **kwargs)
+
+            a_ij = tf.expand_dims(a_ij, axis=-2)
+            a_ijs.append(a_ij)
+
+            #h_i = tf.expand_dims(h_i, axis=-2)
+            h_is.append(h_i)
+
+        a_ijs = self.lay_concat_alphas(a_ijs)
+
+        if self.concat_heads:
+            h_is = self.lay_concat_heads(h_is)
+        else:
+            h_is = self.lay_average_heads(h_is)
+
+        # An important modification we need here is that this layer also returns the attention coefficients
+        # because we calculate the edge importances from those.
+        # h_is: ([batch], [N], K * Vu) or ([batch], [N], Vu)
+        # a_ijs: ([batch], [M], K, 1)
+        return h_is, a_ijs
+
+
 class ExplanationSparsityRegularization(GraphBaseLayer):
 
     def __init__(self, coef: float = 1.0, **kwargs):
@@ -119,8 +335,10 @@ class ExplanationSparsityRegularization(GraphBaseLayer):
         # importances: ([batch], [N], K)
         importances = inputs
 
-        loss = tf.reduce_sum(importances, axis=-1)
-        loss = tf.reduce_mean(loss)
+        #loss = tf.reduce_sum(tf.abs(importances), axis=-2)
+
+        #loss = tf.reduce_mean(tf.abs(importances))
+        loss = tf.reduce_mean(tf.square(importances - 1))
         self.add_loss(self.coef * loss)
 
         return
@@ -140,12 +358,15 @@ class ExplanationExclusivityRegularization(GraphBaseLayer):
         # This means that every element needs to be explained in some way.
         # It also discourages this sum of 1 to be reached by various small values and rather encourages
         # one item being =1 while the others are 0 - aka an explanation to be exclusive to one channel.
-        square_part = tf.square(tf.reduce_sum(tf.sqrt(importances + 0.1), axis=-1) - 1)
-        sqrt_part = - tf.sqrt(tf.reduce_sum(importances, axis=-1) + 0.1)
-        loss = square_part - sqrt_part
+        #square_part = tf.square(tf.reduce_sum(tf.sqrt(importances + 0.1), axis=-1) - 1)
+        #sqrt_part = - tf.sqrt(tf.reduce_sum(importances, axis=-1) + 0.1)
+        #loss = square_part - sqrt_part
 
+        mean = tf.reduce_mean(importances, axis=-1, keepdims=True)
+        mean = tf.concat([mean for _ in range(importances.shape[-1])], axis=-1)
+        loss = tf.reduce_sum(tf.square(importances - mean), axis=-1)
         loss = tf.reduce_mean(loss)
-        self.add_loss(self.coef * loss)
+        self.add_loss(-self.coef * loss)
 
 
 class StaticMultiplicationEmbedding(GraphBaseLayer):
@@ -159,7 +380,4 @@ class StaticMultiplicationEmbedding(GraphBaseLayer):
         self.bias = bias
 
     def call(self, inputs):
-        loss = tf.reduce_sum(inputs, axis=-1)
-        loss = tf.reduce_mean(loss)
-        #self.add_loss(0.1 * loss)
         return tf.reduce_sum(inputs * self.values, axis=-1) + self.bias

@@ -94,3 +94,5 @@ graph embeddings, on top of which each explanation channel defines it's own dens
 the final prediction value.
 
 .. _`GATv2`: https://github.com/tech-srl/how_attentive_are_gats
+
+[Architecture Overview](./architecture.pdf)
