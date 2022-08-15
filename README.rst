@@ -67,34 +67,74 @@ regression task.
 .. _kgcnn: https://github.com/aimat-lab/gcnn_keras
 .. _examples/solubility_regression.py: https://github.com/aimat-lab/graph_attention_student/tree/master/graph_attention_student/examples/solubility_regression.py
 
-Main Idea
-=========
+Network Architecture
+====================
+
+.. image:: ./architecture.png
+    :width: 800
+    :alt: Architecture Overview
 
 The main idea of this model is to provide a self-explaining graph neural network which employs multiple
 explanation channels, instead of just one as it is commonly done. It is possible to construct the network
-with a given amount of explanation channels. In the basic form each channel will then contribute one value
-to the main prediction of the network. So for a 3-class classification problem, there should be 3
-explanation channels where each channel produces the probability value for one respective class. Regression
-tasks are also possible by adding an additional layer on top of that. Aside from the main prediction, the
+with a predefined amount of explanation channels. This is mainly meant for multi-class graph classification
+problems. The idea is to have as many explanation channels as there are classes, so that every class
+has *it's own explanation*.
+
+Aside from the main prediction, the
 network also returns a tensor of ``node_importances`` and ``edge_importances``, which assign each node of
 the graph as many importance values as there are explanation channels. So basically each channel produces
 it's own node / edge importance mask, which consists of values between 0 and 1. These values indicate how
 important the corresponding node / edge was for the outcome of that particular channel.
-
-By also producing these node and edge importance tensors as outputs, it is possible to train them in a
-supervised manner. This has been primarily used to implement the student teacher analysis, which determines
-the quality of explanations.
 
 Architecturally, the core of the network consists of multiple `GATv2`_ layers. Each layer consists of as many
 attention heads as there are explanation channels. Each head maintains it's own set of edge attention
 coefficients. These attention coefficients are reduced along the number of layers to obtain the edge
 importances. The node importances are produced by an additional dense layer acting on the final node
 embeddings which is produced by the final GAT layer. The final node embeddings are then globally pooled into
-graph embeddings, on top of which each explanation channel defines it's own dense output network to produce
-the final prediction value.
+graph embeddings. Actually there will be as many graph embedding vectors as there are explanation channels:
+The final node embeddings are weighted-pooled with each separate channel's ``node_importances``. All those
+graph embeddings are then concat together and passed into a final network of dense layers to produce the
+final prediction target.
+
+.. note::
+
+    Aside from the actual prediction, the network returns the tensor of all ``node_importances``and all
+    ``edge_importances``. These explanatory importance values are produced by fully differentiable paths,
+    which means that it is also possible to train the network to imitate a dataset of existing explanations,
+    by adding additional explanation-supervising loss terms.
 
 .. _`GATv2`: https://github.com/tech-srl/how_attentive_are_gats
 
-.. image:: ./architecture.png
-    :width: 400
-    :alt: Architecture Overview
+Examples
+========
+
+The following examples show some results achieved with the network.
+
+RB-Motifs Dataset
+-----------------
+
+This is a synthetic dataset, which basically consists of randomly generated graphs with nodes of different
+colors. Some of the graphs contain special sub-graph motifs, which are either blue-heavy or red-heavy
+structures. The blue-heavy sub-graphs contribute a certain negative value to the overall value of the graph,
+while red-heavy structures contain a certain positive value.
+
+This way, every graph has a certain value associated with it, which is between -5 and 5. The network was
+trained to predict this value for each graph.
+
+This shows the explanations for an example prediction of the network. For the regression task, the left
+channel explains low values while the right channel explains high values. The network correctly identified
+one of the special negative motif to be a chain of 4 blue nodes and one of the special positive motifs to
+be a triangle of 2 red nodes and 1 green node.
+
+.. image:: rb_motifs_example.png
+    :width: 800
+    :alt: Rb-Motifs Example
+
+Aquaous Solubility Dataset
+--------------------------
+
+Another...
+
+.. image:: solubility_example.png
+
+
