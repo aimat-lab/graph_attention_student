@@ -277,26 +277,6 @@ class MultiAttentionStudent(RecompilableMixin, ks.models.Model):
             edge_importances.to_list()[0]
         )
 
-    def regression_binning(self,
-                           out_true: tf.RaggedTensor
-                           ) -> Tuple[tf.RaggedTensor, tf.RaggedTensor]:
-        # We basically want to create a one hot encoded classification vector from the true regression
-        # values. We can create these boolean masks which determine if any given true value is above or
-        # below the known center of the regression range.
-        # We then simply cast the boolean values as numeric ones and stack the two masks in the last
-        # dimension to get the one hot encoded vector
-        lo_mask = tf.expand_dims(tf.cast(out_true < self.regression_center, dtype=tf.float32), axis=-1)
-        hi_mask = tf.expand_dims(tf.cast(out_true >= self.regression_center, dtype=tf.float32), axis=-1)
-
-        class_true = tf.concat([lo_mask, hi_mask], axis=-1)
-
-        # Additionally we also want to assign sample weights to each element of the batch which are
-        # proportional to the distance from the center of the regression range. The reasoning being that
-        # the edge cases most likely produce the more discriminative explanations.
-        sample_weight = tf.abs(out_true - self.regression_center / (0.5 * self.regression_width))
-
-        return class_true, sample_weight
-
     def regression_augmentation(self,
                                 out_true: tf.RaggedTensor):
         center_distances = tf.abs(out_true - self.regression_center)
@@ -310,6 +290,80 @@ class MultiAttentionStudent(RecompilableMixin, ks.models.Model):
         reg_true = tf.concat([lo_samples, hi_samples], axis=-1)
         return reg_true
 
+    def train_step_explanation(self,
+                               x: Tuple[tf.RaggedTensor, tf.RaggedTensor, tf.RaggedTensor],
+                               y: Tuple[tf.RaggedTensor, tf.RaggedTensor, tf.RaggedTensor],
+                               ) -> None:
+        """
+        Given the input of one batch ``x`` and the corresponding ground truth values ``y`` performs a single
+        complete train step for the explanation. Calculates a gradient and applies changes immediately to
+        the trainable parameters.
+
+        Generally, the explanation is trained by implicitly assuming that the GAT part of the
+        network outputs a constant value of 1 for every node embedding. With this assumption the same global
+        pooling is performed to create graph embeddings for every explanation channel through a weighted
+        global pooling with the corresponding node importance channel values. The additional output dense
+        layers are then discarded for this step.
+
+        These graph embeddings are then used to solve an augmented problem, which depends on whether the
+        network is doing regression or classification.
+
+        **CLASSIFICATION:**
+
+        The augmented problem uses the same ground truth class labels. The previously described graph
+        embeddings for each channel are submitted to a modified sigmoid activation and then a BCE loss is
+        used to train each channel to individually predict one of the classes.
+
+        **REGRESSION:**
+
+        For regression, we first of all need a-priori knowledge about the range of possible values which are
+        represented in the dataset. This is used to deduce the *center* of this value range.
+
+        :param x: Tuple consisting of the 3 required input tensors: <br>
+            - node_input: ragged tensor of node features ([batch], [V], N0) <br>
+            - edge_input: ragged tensor of edge features ([batch], [E], M0) <br>
+            - edge_indices: ragged tensor of edge index tuples ([batch], [E], 2)
+        :param y: Tuple consisting of ground truth target tensors: <br>
+            - out_true: ragged tensor of shape ([batch], ?). Final dimension depends on whether the network
+              is used for regression or classification. <br>
+            - ni_true: ragged tensor of node importances ([batch], [V], K) <br>
+            - ei_true: ragged tensor of edge importances ([batch], [E], K)
+        :return: None
+        """
+        out_true, ni_true, ei_true = y
+
+        with tf.GradientTape() as tape:
+            y_pred = self(x, training=True)  # Forward pass
+            out_pred, x_pred, ni_pred, ei_pred = y_pred
+
+            outs = []
+            for k in range(self.importance_channels):
+                node_importance_slice = tf.expand_dims(ni_pred[:, :, k], axis=-1)
+                out = self.lay_pool_out(node_importance_slice)
+                outs.append(out)
+
+            out = self.lay_concat_out(outs)
+
+            if self.doing_regression:
+
+                reg_true = self.regression_augmentation(out_true)
+                reg_pred = ks.backend.relu(out)
+                exp_loss = self.compiled_mse_loss(reg_true, reg_pred)
+
+            elif self.doing_classification:
+
+                class_pred = shifted_sigmoid(out)
+                exp_loss = self.compiled_bce_loss(out_true, class_pred)
+
+            exp_loss *= self.importance_factor
+
+        # Compute gradients
+        trainable_vars = self.trainable_variables
+        exp_gradients = tape.gradient(exp_loss, trainable_vars)
+
+        # Update weights
+        self.optimizer.apply_gradients(zip(exp_gradients, trainable_vars))
+
     def train_step(self, data):
         # Unpack the data. Its structure depends on your model and
         # on what you pass to `fit()`.
@@ -319,42 +373,16 @@ class MultiAttentionStudent(RecompilableMixin, ks.models.Model):
             sample_weight = None
             x, y = data
 
-        out_true, ni_true, ei_true = y
-
-        if self.doing_regression:
-
-            with tf.GradientTape() as tape:
-                y_pred = self(x, training=True)  # Forward pass
-                out_pred, x_pred, ni_pred, ei_pred = y_pred
-
-                class_true, class_sample_weight = self.regression_binning(out_true)
-                reg_true = self.regression_augmentation(out_true)
-
-                outs = []
-                for k in range(self.importance_channels):
-                    node_importance_slice = tf.expand_dims(ni_pred[:, :, k], axis=-1)
-                    #out = self.lay_pool_out(node_importance_slice * self.lay_exp(ks.backend.relu(x_pred)))
-                    out = self.lay_pool_out(node_importance_slice)
-                    outs.append(out)
-
-                out = self.lay_concat_out(outs)
-                class_pred = shifted_sigmoid(out)
-                #reg_pred = class_pred * 0.5 * self.regression_width
-                reg_pred = ks.backend.relu(out)
-
-                #exp_loss = self.compiled_bce_loss(class_true, class_pred)
-                exp_loss = self.compiled_mse_loss(reg_true, reg_pred)
-                exp_loss *= self.importance_factor
-
-            # Compute gradients
-            trainable_vars = self.trainable_variables
-            exp_gradients = tape.gradient(exp_loss, trainable_vars)
-
-            # Update weights
-            self.optimizer.apply_gradients(zip(exp_gradients, trainable_vars))
+        # ~ EXPLANATION TRAINING
+        # "train_explanation" actually performs an entire training step just for the attention "explanation"
+        # part of the network. Look up the details in the function. The gist is that it only uses part of
+        # the network to produce a simplified output which is then used to create a single training step
+        # for the explanation part of the network.
+        self.train_explanation(x, y)
 
         # ~ PREDICTION TRAINING
-
+        # This performs a "normal" training step, as it is in the default implementation of the "train_step"
+        out_true, ni_true, ei_true = y
         with tf.GradientTape() as tape:
             y_pred = self(x, training=True)  # Forward pass
             out_pred, x_pred, ni_pred, ei_pred = y_pred

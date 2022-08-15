@@ -70,10 +70,6 @@ regression task.
 Network Architecture
 ====================
 
-.. image:: ./architecture.png
-    :width: 800
-    :alt: Architecture Overview
-
 The main idea of this model is to provide a self-explaining graph neural network which employs multiple
 explanation channels, instead of just one as it is commonly done. It is possible to construct the network
 with a predefined amount of explanation channels. This is mainly meant for multi-class graph classification
@@ -86,6 +82,10 @@ the graph as many importance values as there are explanation channels. So basica
 it's own node / edge importance mask, which consists of values between 0 and 1. These values indicate how
 important the corresponding node / edge was for the outcome of that particular channel.
 
+.. image:: ./architecture.png
+    :width: 800
+    :alt: Architecture Overview
+
 Architecturally, the core of the network consists of multiple `GATv2`_ layers. Each layer consists of as many
 attention heads as there are explanation channels. Each head maintains it's own set of edge attention
 coefficients. These attention coefficients are reduced along the number of layers to obtain the edge
@@ -96,12 +96,12 @@ The final node embeddings are weighted-pooled with each separate channel's ``nod
 graph embeddings are then concat together and passed into a final network of dense layers to produce the
 final prediction target.
 
-.. note::
+**NOTE:**
 
-    Aside from the actual prediction, the network returns the tensor of all ``node_importances``and all
-    ``edge_importances``. These explanatory importance values are produced by fully differentiable paths,
-    which means that it is also possible to train the network to imitate a dataset of existing explanations,
-    by adding additional explanation-supervising loss terms.
+Aside from the actual prediction, the network returns the tensor of all ``node_importances`` and all
+``edge_importances``. These explanatory importance values are produced by fully differentiable paths,
+which means that it is also possible to train the network to imitate a dataset of existing explanations,
+by adding additional explanation-supervising loss terms.
 
 .. _`GATv2`: https://github.com/tech-srl/how_attentive_are_gats
 
@@ -122,8 +122,9 @@ This way, every graph has a certain value associated with it, which is between -
 trained to predict this value for each graph.
 
 This image shows the explanations for an example prediction of the network. For the regression task, the left
-channel explains low values while the right channel explains high values. The network correctly identified
-one of the special negative motif to be a chain of 4 blue nodes and one of the special positive motifs to
+channel explains which areas of the graph are associated with low values while the right channel explains
+which areas of the graph are associated with high values. The network correctly identified
+one of the special negative motifs to be a chain of 4 blue nodes and one of the special positive motifs to
 be a triangle of 2 red nodes and 1 green node.
 
 .. image:: rb_motifs_example.png
@@ -133,7 +134,7 @@ be a triangle of 2 red nodes and 1 green node.
 Aquaous Solubility Dataset
 --------------------------
 
-This is the AqSolDB dataset, which consists of ~8000 molecules and measured values for the solubility in
+This is the `AqSolDB`_ dataset, which consists of ~8000 molecules and measured values for the solubility in
 water (logS value).
 
 The network was trained to predict the solubility value for each molecule.
@@ -146,5 +147,12 @@ while OH groups increase solubility.
 
 .. image:: solubility_example.png
 
-.. _`GATv2`: https://www.nature.com/articles/s41597-019-0151-1
+.. _`AqSolDB`: https://www.nature.com/articles/s41597-019-0151-1
 
+Design Choices
+==============
+
+For a slightly more in-depth explanations and reasoning for certain design choices visit the
+`Design Choices`_ page.
+
+.. _`Design Choices`: ./DESIGN_CHOICES.rst
