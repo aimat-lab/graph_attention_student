@@ -41,27 +41,30 @@ The model can be used like this:
     import tensorflow as tf
     import tensorflow.keras as ks
     from graph_attention_student.training import NoLoss
-    from graph_attention_student.models import MultiChannelAttentionStudent
+    from graph_attention_student.models import MultiAttentionStudent
 
-    model = MultiChannelAttentionStudent(
+    model = MultiAttentionStudent(
         units=[10, 7, 5],
-        # Example for a 3-class classification problem. Regression also possible with some additions
-        importance_channels=3,
-        final_activation='softmax'
+        importance_units=[5],
+        final_units=[5, 2]
+        # Example for a regression problem. We need the prior knowledge about what range the values of the
+        # dataset will be expected to fall into.
+        regression_limits=(-5, 5),
+        final_activation='linear'
     )
 
     # The model output is actually a three tuple: (prediction, node_importances, edge_importances).
     # This allows the importances to be trained in a supervised fashion. If we don't want that, we can simply
     # supply the NoLoss function instead.
     model.compile(
-        loss=[ks.losses.CategoricalCrossentropy(), NoLoss(), NoLoss()],
+        loss=[ks.losses.MeanSquaredError(), NoLoss(), NoLoss()],
         loss_weights=[1, 0, 0],
         optimizer=ks.optimizers.Adam(0.01)
     )
 
     # model.fit() ...
 
-Check out `examples/solubility_regression.py`_ for a detailed example of how the model can be used for a
+Check out `examples/regression.py`_ for a detailed example of how the model can be used for a
 regression task.
 
 .. _kgcnn: https://github.com/aimat-lab/gcnn_keras
@@ -108,7 +111,7 @@ by adding additional explanation-supervising loss terms.
 Examples
 ========
 
-The following examples show some results achieved with the network.
+The following examples show some of the *best* results achieved with the network.
 
 RB-Motifs Dataset
 -----------------

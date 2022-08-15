@@ -41,6 +41,25 @@ class MultiAttentionStudent(RecompilableMixin, ks.models.Model):
                  importance_factor: float = 0.0,
                  regression_limits: Optional[Union[Tuple[float, float], List[tuple]]] = None,
                  **kwargs):
+        """
+        Constructs a new ``MultiAttentionStudent`` model.
+
+        :param units:
+        :param activation:
+        :param use_bias:
+        :param dropout_rate:
+        :param use_edge_features:
+        :param importance_units:
+        :param importance_channels:
+        :param importance_activation:
+        :param importance_dropout_rate:
+        :param final_units:
+        :param final_dropout_rate:
+        :param final_activation:
+        :param importance_factor:
+        :param regression_limits:
+        :param kwargs:
+        """
         ks.models.Model.__init__(self, **kwargs)
         RecompilableMixin.__init__(self)
 
@@ -316,8 +335,26 @@ class MultiAttentionStudent(RecompilableMixin, ks.models.Model):
 
         **REGRESSION:**
 
-        For regression, we first of all need a-priori knowledge about the range of possible values which are
-        represented in the dataset. This is used to deduce the *center* of this value range.
+        For regression we first need a-priori knowledge about the range of values to be expected from the
+        dataset. From that we can deduce the center of that value range. By default we map a regression
+        problem to be composed of 2 channels: One which explains high values and one which explains low
+        values (relative to the center of the expected value range).
+        We then set up two separate regression problems by only considering the absolute distance from this
+        center value. One of the channels is then only trained on all the samples which have values below
+        the center value and the other is only trained with the samples which have original values above
+        this center value.
+
+        .. code-block:: text
+
+            # pseudocode
+            lo_true = abs(y_true - center) where y_true < center
+            hi_true = abs(y_true - center) where y_true >= center
+
+            reg_true = concat(lo_true, hi_true)
+
+        The predictions of the network are computed by applying a relu activation on the previously described
+        simplified graph embeddings of each channel and then using MSE loss to train on the vector of
+        constructed regression values ``reg_true``.
 
         :param x: Tuple consisting of the 3 required input tensors: <br>
             - node_input: ragged tensor of node features ([batch], [V], N0) <br>
@@ -364,7 +401,26 @@ class MultiAttentionStudent(RecompilableMixin, ks.models.Model):
         # Update weights
         self.optimizer.apply_gradients(zip(exp_gradients, trainable_vars))
 
-    def train_step(self, data):
+    def train_step(self,
+                   data: Tuple[tuple, tuple]
+                   ) -> None:
+        """
+        Performs one training step with the given ``data`` consisting of the input data ``x`` of one batch
+        as well as the corresponding ground truth labels ``y``.
+
+        :param data: Tuple consisting of the input data x of a batch as well as the corresponding ground
+            truth labels y. <br>
+            x: Tuple consisting of the 3 required input tensors: <br>
+            - node_input: ragged tensor of node features ([batch], [V], N0) <br>
+            - edge_input: ragged tensor of edge features ([batch], [E], M0) <br>
+            - edge_indices: ragged tensor of edge index tuples ([batch], [E], 2)
+            y: Tuple consisting of ground truth target tensors: <br>
+            - out_true: ragged tensor of shape ([batch], ?). Final dimension depends on whether the network
+              is used for regression or classification. <br>
+            - ni_true: ragged tensor of node importances ([batch], [V], K) <br>
+            - ei_true: ragged tensor of edge importances ([batch], [E], K)
+        :return: None
+        """
         # Unpack the data. Its structure depends on your model and
         # on what you pass to `fit()`.
         if len(data) == 3:
@@ -378,7 +434,7 @@ class MultiAttentionStudent(RecompilableMixin, ks.models.Model):
         # part of the network. Look up the details in the function. The gist is that it only uses part of
         # the network to produce a simplified output which is then used to create a single training step
         # for the explanation part of the network.
-        self.train_explanation(x, y)
+        self.train_step_explanation(x, y)
 
         # ~ PREDICTION TRAINING
         # This performs a "normal" training step, as it is in the default implementation of the "train_step"

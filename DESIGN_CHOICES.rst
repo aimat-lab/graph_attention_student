@@ -72,4 +72,68 @@ via a parallel training objective.
 How the explanation train step works
 ------------------------------------
 
-The idea of the additional explanation train step is to
+The idea of the additional explanation train step is to use a very simplified and restricted version of the
+network to train the attention part. Afterwards, the actual prediction training step can make full use of
+the final MLP to predict the target values.
+
+For this simplified version we perform essentially the same weighted global pooling step, only under the
+assumption that the GAT part of the network always outputs a constant value of 1 as the node embedding of
+every node. This is basically the same as pooling just the importance values themselves without any
+additional information from the preceding GAT layers. Doing it this way the network is forced to
+approximately solve the task at hand using *only the attention mechanism*. For example it has to do it's
+best to make a classification for or against a certain class solely on the basis of selecting nodes which
+are important for this class association versus de-prioritizing those that are not.
+
+How exactly this explanation training step is structured depends on whether the model is supposed to be
+doing classification or regression.
+
+**CLASSIFICATION:**
+
+For classification the same one-hot encoded vectors of ground truth class labels are used as the target.
+The prediction is created by applying a shifted sigmoid activation on the previously described pooled
+graph embeddings of each channel. A BCE loss is then used for training.
+
+**REGRESSION:**
+
+For regression we first need a-priori knowledge about the range of values to be expected from the dataset.
+From that we can deduce the center of that value range. By default we map a regression problem to be
+composed of 2 channels: One which explains high values and one which explains low values (relative to the
+center of the expected value range). We then set up two separate regression problems by only considering the
+absolute distance from this center value. One of the channels is then only trained on all the samples which
+have values below the center value and the other is only trained with the samples which have original values
+above this center value.
+
+.. code-block:: text
+
+    lo_true = abs(y_true - center) where y_true < center
+    hi_true = abs(y_true - center) where y_true >= center
+
+    reg_true = concat(lo_true, hi_true)
+
+The predictions of the network are computed by applying a relu activation on the previously described
+simplified graph embeddings of each channel and then using MSE loss to train on the vector of
+constructed regression values ``reg_true``.
+
+Why do we use this shifted sigmoid for the classification training step instead of softmax?
+-------------------------------------------------------------------------------------------
+
+During development we noticed that the softmax activation itself was also a possible problem that decreased
+the quality of the explanations. The softmax operation is also a point that introduces a cross dependency
+between the individual channels, which may lead to certain explanations appearing in a channel to which the
+should not belong according to expectations. You can imagine this is the case, because the same output of
+a softmax operation can equally be achieved by increasing the value of one component as well as by reducing
+the values of all other components.
+
+Instead we use a shifted version of sigmoid activation:
+
+.. code-block:: text
+
+    def shifted_sigmoid(x, multiplier=10, shift=10):
+        return sigmoid(multiplier * x - shift)
+
+    shifted_sigmoid(0) ~= 0.03
+    shifted_sigmoid(2) ~= 0.97
+
+Since the important values are between 0 and 1, the global sum pooling will always be a positive value. This
+is why we cannot use a normal sigmoid here because sigmoid(0) is only 0.5 and we would not be able to use
+the full value range.
