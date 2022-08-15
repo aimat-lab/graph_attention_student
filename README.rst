@@ -95,4 +95,6 @@ the final prediction value.
 
 .. _`GATv2`: https://github.com/tech-srl/how_attentive_are_gats
 
-[Architecture Overview](./architecture.pdf)
+.. image:: ./architecture.pdf
+    :width: 400
+    :alt: Architecture Overview
