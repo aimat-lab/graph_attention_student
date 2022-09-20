@@ -12,6 +12,9 @@
 .. |made-with-python| image:: https://img.shields.io/badge/Made%20with-Python-1f425f.svg
    :target: https://www.python.org/
 
+.. image:: architecture.png
+    :width: 800
+    :alt: Architecture Overview
 
 ================================================
 MEGAN: Multi Explanation Graph Attention Student
