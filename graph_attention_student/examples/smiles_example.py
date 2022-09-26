@@ -1,6 +1,7 @@
 """
 This example shows how to train a MEGAN model based on a chemistry dataset consisting of a CSV files
 containing the SMILES representations of the molecules.
+
 """
 import os
 import csv
