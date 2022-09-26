@@ -32,6 +32,15 @@ GraphDict = dict
 RgbList = list
 
 
+def numpy_to_native(value):
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    elif isinstance(value, np.generic):
+        return value.item()
+    else:
+        return value
+
+
 def process_graph_dataset(dataset: List[dict],
                           test_indices: List[int]
                           ) -> Tuple[tuple, tuple, tuple, tuple]:
@@ -162,7 +171,7 @@ def create_molecule_eye_tracking_dataset(molecule_infos: Dict[str, dict],
             optimize_conformer=False
         )
         moleculenet.read_in_memory(
-            label_column_name=['id'],
+            label_column_name='smiles',
             add_hydrogen=False,
             has_conformers=False
         )
@@ -226,11 +235,16 @@ def create_molecule_eye_tracking_dataset(molecule_infos: Dict[str, dict],
             for i, j in g['edge_indices']:
                 g['node_adjacency'][i, j] = 1
 
+            # Adding empty importance tensors here because it will be required that these keys generally
+            # exist in further processing steps.
+            g['node_importances'] = np.zeros(shape=(g['node_indices'].shape[0], 1))
+            g['edge_importances'] = np.zeros(shape=(g['edge_indices'].shape[0], 1))
+
             metadata = {
                 **mol_info,
                 'image_width': image_height,
                 'image_height': image_height,
-                'graph': {k: v.tolist() if isinstance(v, np.ndarray) else v for k, v in g.items()}
+                'graph': {k: numpy_to_native(v) for k, v in g.items()}
             }
 
             with open(json_path, mode='wb') as json_file:
@@ -241,9 +255,7 @@ def create_molecule_eye_tracking_dataset(molecule_infos: Dict[str, dict],
                 logger.info(f'* ({c}/{dataset_length}) {mol_id}')
 
 
-
 # == TEXT GRAPHS ============================================================================================
-
 
 def load_text_graph_dataset(folder_path: str,
                             logger: Optional[logging.Logger] = None,

@@ -205,7 +205,7 @@ class MultiAttentionStudent(RecompilableMixin, ks.models.Model):
 
     @property
     def doing_regression(self) -> bool:
-        return self.regression_bins is not None
+        return self.regression_limits is not None
 
     @property
     def doing_classification(self) -> bool:
