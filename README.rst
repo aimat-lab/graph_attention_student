@@ -38,6 +38,14 @@ Installation
 *DISCLAIMER.* For convenience, we package the used datasets directly with the code. This however increases
 the size of the package to ~3GB, which means that a slightly longer download time can be expected.
 
+First of all you need to *Install RDKit*. For detailed instructions on how to do this visit
+https://www.rdkit.org/docs/Install.html .
+On Linux you can simply do it like this:
+
+.. code-block:: shell
+
+    sudo apt-get install python3-rdkit
+
 Clone the repository from github:
 
 .. code-block:: shell
