@@ -5,7 +5,7 @@ build-backend = "poetry.masonry.api"
 [tool.poetry]
 name = "graph_attention_student"
 version = "0.1.0"
-description = "Graph Attention Student Model"
+description = "MEGAN: Multi Explanation Graph Attention Network"
 license = "MIT"
 authors = ["xxx <xxx>"]
 maintainers = ["xxx <xxx>"]
@@ -28,7 +28,7 @@ graph_attention_student = 'graph_attention_student.cli:cli'
 [tool.poetry.dependencies]
 python = ">=3.8.0"
 pycomex = ">=0.3.0"
-click = "7.1.2"
+click = ">=7.1.2"
 jinja2 = "==3.0.3"
 matplotlib = ">=3.5.3"
 imageio = "==2.19.0"
