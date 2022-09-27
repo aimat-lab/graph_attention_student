@@ -12,8 +12,7 @@ maintainers = ["xxx <xxx>"]
 readme = "README.rst"
 keywords = ["graph neural network", "attention", "kgcnn"]
 packages = [
-    { include = "graph_attention_student" },
-    { include = "tests" },
+    { include = "graph_attention_student" }
 ]
 include = [
     "README.rst",
