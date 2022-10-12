@@ -215,10 +215,17 @@ def create_molecule_eye_tracking_dataset(molecule_infos: Dict[str, dict],
         if 'additional_callbacks' not in kwargs:
             kwargs['additional_callbacks'] = {}
 
+        logger.info('creating custom properties in moleculenet dataset...')
         kwargs['additional_callbacks']['node_coordinates'] = node_coordinates_cb
         kwargs['additional_callbacks']['node_indices'] = node_indices_cb
         kwargs['additional_callbacks']['id'] = lambda mg, ds: str(ds['id'])
         moleculenet.set_attributes(**kwargs)
+
+        # 12.10.2022: Added this section in response to a bug which would cause the program to break if
+        # there were some corrupted elements in the original dataset.
+        logger.info(f'cleaning moleculenet dataset with {len(moleculenet)} elements...')
+        moleculenet.clean(['id', 'node_attributes', 'edge_indices'])
+        logger.info(f'dataset length after cleaning: {len(moleculenet)}')
 
         dataset_length = len(moleculenet)
         logger.info('start writing output files...')

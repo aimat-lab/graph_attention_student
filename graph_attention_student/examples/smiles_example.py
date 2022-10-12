@@ -32,11 +32,12 @@ from graph_attention_student.visualization import plot_edge_importances
 # == DATASET PARAMETERS ==
 # [!] Insert the absolute path to the CSV file here
 CSV_PATH = os.path.join(DATASETS_FOLDER, 'dataset-E.csv')
+
 # [!] Insert the column name of the smiles column here
 SMILES_COLUMN = "SMILES"
 # [!] Insert the column name of the target value here
 TARGET_COLUMN = 'Solubility'
-TRAIN_SPLIT = 0.8
+TRAIN_SPLIT = 0.90
 
 # == MODEL PARAMETERS ==
 
@@ -46,7 +47,7 @@ UNITS = [50, 40, 30]
 
 # The dropout rate which is applied after EVERY graph convolutional layer of the network. Especially for
 # large networks (>20 hidden units and multiple importance channels, this dropout proves very useful)
-DROPOUT_RATE = 0.1
+DROPOUT_RATE = 0.2
 
 # This is the weight of the additional explanation-only step which is being applied to the network.
 # This explanation only step is important to develop actually interpretable explanations. Refer to the

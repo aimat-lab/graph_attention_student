@@ -203,6 +203,10 @@ class MultiAttentionStudent(RecompilableMixin, ks.models.Model):
 
         self.lay_sparsity = ExplanationSparsityRegularization(coef=sparsity_factor)
 
+    # def build(self, *args, **kwargs):
+    #     print('BUILD', args, kwargs)
+    #     super(MultiAttentionStudent, self).build(*args, **kwargs)
+
     @property
     def doing_regression(self) -> bool:
         return self.regression_limits is not None
@@ -216,7 +220,7 @@ class MultiAttentionStudent(RecompilableMixin, ks.models.Model):
 
     def call(self,
              inputs,
-             training=True,
+             training=False,
              external_node_importances: Optional[np.ndarray] = None,
              mask_channel: Optional[int] = None,
              **kwargs):
@@ -236,8 +240,9 @@ class MultiAttentionStudent(RecompilableMixin, ks.models.Model):
         for lay in self.attention_layers:
             # x: ([batch], [N], V)
             # alpha: ([batch], [M], K, 1)
-            x = self.lay_dropout(x)
             x, alpha = lay([x, edge_input, edge_index_input])
+            if training:
+                x = self.lay_dropout(x, training=training)
 
             xs.append(x)
             alphas.append(alpha)
@@ -309,8 +314,9 @@ class MultiAttentionStudent(RecompilableMixin, ks.models.Model):
         out = self.lay_concat_out(outs)
 
         for lay in self.out_layers:
-            out = self.lay_final_dropout(out)
             out = lay(out)
+            if training:
+                out = self.lay_final_dropout(out, training=training)
 
         logits = out
         out = self.lay_final_activation(logits)
