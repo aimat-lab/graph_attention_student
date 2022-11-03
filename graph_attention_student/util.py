@@ -48,6 +48,16 @@ def get_version():
         return file.read().replace(' ', '').replace('\n', '')
 
 
+def update_nested_dict(original: dict, extension: dict):
+    result = original.copy()
+    for key, value in extension.items():
+        if isinstance(value, dict) and key in result:
+            result[key] = update_nested_dict(result[key], value)
+        else:
+            result[key] = value
+
+    return result
+
 # == GENERAL GRAPH OPERATIONS ===============================================================================
 
 

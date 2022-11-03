@@ -249,15 +249,15 @@ class LogProgressCallback(EpochCounterCallback):
 
             message_parts = [
                 f'   epoch {str(self.epoch):<5}: ',
-                f'{self.identifier}={value:.2f} ',
+                f'{self.identifier}={value:.3f} ',
                 f'elapsed_time={self.elapsed_time:.1f}s'
             ]
             if 'output_1_loss' in logs:
-                message_parts.append(f'training_loss={logs["output_1_loss"]:.2f} ')
+                message_parts.append(f'training_loss={logs["output_1_loss"]:.3f} ')
             if 'loss' in logs:
-                message_parts.append(f'total_training_loss={logs["loss"]:.2f} ')
+                message_parts.append(f'total_training_loss={logs["loss"]:.3f} ')
             if 'exp_loss' in logs:
-                message_parts.append(f'exp_loss={logs["exp_loss"]:.4f}')
+                message_parts.append(f'exp_loss={logs["exp_loss"]:.3f}')
 
             self.logger.info(' '.join(message_parts))
 

@@ -1,4 +1,5 @@
 import sys
+import typing as t
 from typing import List
 
 import tensorflow as tf
@@ -220,7 +221,7 @@ class MultiHeadGatLayer(AttentionHeadGATV2):
         if share_weights:
             lay_linear = DenseEmbedding(units, activation='linear', use_bias=use_bias)
 
-        self.head_layers: List[Tuple[DenseEmbedding, DenseEmbedding, DenseEmbedding]] = []
+        self.head_layers: t.List[t.Tuple[DenseEmbedding, DenseEmbedding, DenseEmbedding]] = []
         for _ in range(num_heads):
             if not share_weights:
                 lay_linear = DenseEmbedding(units, activation='linear', use_bias=use_bias)
@@ -327,16 +328,21 @@ class MultiHeadGatLayer(AttentionHeadGATV2):
 
 class ExplanationSparsityRegularization(GraphBaseLayer):
 
-    def __init__(self, coef: float = 1.0, **kwargs):
+    def __init__(self,
+                 coef: float = 1.0,
+                 factor: t.Optional[float] = None,
+                 **kwargs):
         super(ExplanationSparsityRegularization, self).__init__(**kwargs)
-        self.coef = coef
+        self.factor = coef
+        if factor is not None:
+            self.factor = factor
 
     def call(self, inputs):
         # importances: ([batch], [N], K)
         importances = inputs
 
         loss = tf.reduce_mean(tf.math.abs(importances))
-        self.add_loss(loss * self.coef)
+        self.add_loss(loss * self.factor)
 
 
 class ExplanationExclusivityRegularization(GraphBaseLayer):
@@ -376,3 +382,98 @@ class StaticMultiplicationEmbedding(GraphBaseLayer):
 
     def call(self, inputs):
         return tf.reduce_sum(inputs * self.values, axis=-1) + self.bias
+
+
+class MultiHeadGATV2Layer(AttentionHeadGATV2):
+
+    def __init__(self,
+                 units: int,
+                 num_heads: int,
+                 activation: str = 'kgcnn>leaky_relu',
+                 use_bias: bool = True,
+                 concat_heads: bool = True,
+                 **kwargs):
+        super(MultiHeadGATV2Layer, self).__init__(
+            units=units,
+            activation=activation,
+            use_bias=use_bias,
+            **kwargs
+        )
+        self.num_heads = num_heads
+        self.concat_heads = concat_heads
+
+        self.head_layers = []
+        for _ in range(num_heads):
+            lay_linear = DenseEmbedding(units, activation=activation, use_bias=use_bias)
+            lay_alpha_activation = DenseEmbedding(units, activation=activation, use_bias=use_bias)
+            lay_alpha = DenseEmbedding(1, activation='linear', use_bias=False)
+
+            self.head_layers.append((lay_linear, lay_alpha_activation, lay_alpha))
+
+        self.lay_concat_alphas = LazyConcatenate(axis=-2)
+        self.lay_concat_embeddings = LazyConcatenate(axis=-2)
+        self.lay_pool_attention = PoolingLocalEdgesAttention()
+        # self.lay_pool = PoolingLocalEdges()
+
+        if self.concat_heads:
+            self.lay_combine_heads = LazyConcatenate(axis=-1)
+        else:
+            self.lay_combine_heads = LazyAverage()
+
+    def __call__(self, inputs, **kwargs):
+        node, edge, edge_index = inputs
+
+        # "a_ij" is a single-channel edge attention logits tensor. "a_ijs" is consequently the list which
+        # stores these tensors for each attention head.
+        # "h_i" is a single-channel node embedding tensor. "h_is" is consequently the list which stores
+        # these tensors for each attention head.
+        a_ijs = []
+        h_is = []
+        for k, (lay_linear, lay_alpha_activation, lay_alpha) in enumerate(self.head_layers):
+
+            # Copied from the original class
+            w_n = lay_linear(node, **kwargs)
+            n_in = self.lay_gather_in([node, edge_index], **kwargs)
+            n_out = self.lay_gather_out([node, edge_index], **kwargs)
+            wn_out = self.lay_gather_out([w_n, edge_index], **kwargs)
+            if self.use_edge_features:
+                e_ij = self.lay_concat([n_in, n_out, edge], **kwargs)
+            else:
+                e_ij = self.lay_concat([n_in, n_out], **kwargs)
+
+            # a_ij: ([batch], [M], 1)
+            a_ij = lay_alpha_activation(e_ij, **kwargs)
+            a_ij = lay_alpha(a_ij, **kwargs)
+
+            # h_i: ([batch], [N], F)
+            h_i = self.lay_pool_attention([node, wn_out, a_ij, edge_index], **kwargs)
+
+            if self.use_final_activation:
+                h_i = self.lay_final_activ(h_i, **kwargs)
+
+            # a_ij after expand: ([batch], [M], 1, 1)
+            a_ij = tf.expand_dims(a_ij, axis=-2)
+            a_ijs.append(a_ij)
+
+            # h_i = tf.expand_dims(h_i, axis=-2)
+            h_is.append(h_i)
+
+        a_ijs = self.lay_concat_alphas(a_ijs)
+
+        h_is = self.lay_combine_heads(h_is)
+
+        # An important modification we need here is that this layer also returns the attention coefficients
+        # because in MEGAN we need those to calculate the edge attention values with!
+        # h_is: ([batch], [N], K * Vu) or ([batch], [N], Vu)
+        # a_ijs: ([batch], [M], K, 1)
+        return h_is, a_ijs
+
+    def get_config(self):
+        """Update layer config."""
+        config = super(MultiHeadGATV2Layer, self).get_config()
+        config.update({
+            'num_heads': self.num_heads,
+            'concat_heads': self.concat_heads
+        })
+
+        return config

@@ -1,5 +1,6 @@
 from collections import defaultdict
 from typing import List, Dict, Callable, Optional
+import typing as t
 
 import numpy as np
 import networkx as nx
@@ -138,6 +139,48 @@ def pdf_from_eye_tracking_dataset(eye_tracking_dataset: List[dict],
 
             pdf.savefig(fig)
             plt.close(fig)
+
+
+def plot_distribution(ax: plt.Axes,
+                      values: t.Union[t.List[float], np.ndarray],
+                      bins: int,
+                      show_mean: bool = True,
+                      show_std: bool = True,
+                      line_width: int = 2):
+    histogram, bins, patches = ax.hist(values, bins=bins)
+    mean = float(np.mean(values))
+    std = float(np.std(values))
+
+    # ~ plot the mean
+    if show_mean:
+        ax.axvline(
+            x=mean,
+            color='black',
+            ls='--',
+            linewidth=line_width,
+            label=f'mean: {mean:.2f}'
+        )
+
+    # ~ Plot the standard deviation
+    if show_std:
+        y_min, y_max = ax.get_ylim()
+        y_middle = np.mean([y_min, y_max])
+        ax.plot(
+            [mean - std, mean + std],
+            [y_middle, y_middle],
+            color='black',
+            ls='-',
+            linewidth=line_width,
+            label=f'std: {std:.2f}'
+        )
+
+    return {
+        'histogram': histogram,
+        'bins': bins,
+        'patches': patches,
+        'mean': mean,
+        'std': std
+    }
 
 
 # == COLORED GRAPHS VIS. ====================================================================================

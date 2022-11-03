@@ -1,10 +1,10 @@
 [build-system]
-requires = ["poetry>=1.2.0b2"]
-build-backend = "poetry.masonry.api"
+requires = ["poetry-core>=1.2.0b2"]
+build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name = "graph_attention_student"
-version = "0.1.0"
+version = "0.2.0"
 description = "MEGAN: Multi Explanation Graph Attention Network"
 license = "MIT"
 authors = ["xxx <xxx>"]
@@ -18,14 +18,18 @@ include = [
     "README.rst",
     "CHANGLELOG.rst",
     "graph_attention_student/VERSION",
-    "graph_attention_student/datasets/*"
+]
+exclude = [
+    "graph_attention_student/datasets/tadf",
+    "graph_attention_student/datasets/aqsoldb",
+    "graph_attention_student/datasets/movie_reviews",
 ]
 
 [tool.poetry.scripts]
 graph_attention_student = 'graph_attention_student.cli:cli'
 
 [tool.poetry.dependencies]
-python = ">=3.8.0"
+python = ">=3.8.0,<3.11"
 pycomex = ">=0.3.0"
 click = ">=7.1.2"
 jinja2 = "==3.0.3"
@@ -37,6 +41,8 @@ tensorflow = ">=2.8.0"
 kgcnn = ">=2.0.1"
 orjson = "==3.8.0"
 nltk = ">=3.7"
+rdkit = ">=2022.9.1"
+poetry-bumpversion = ">=0.3.0"
 
 [tool.poetry_bumpversion.file."graph_attention_student/__init__.py"]
 search = '__version__ = "{current_version}"'

@@ -1,11 +1,13 @@
 import os
+import sys
 import csv
 import time
 import json
 import random
-import orjson as json
+import orjson
 import logging
 import tempfile
+import typing as t
 from copy import copy
 from typing import List, Tuple, Optional, Dict, Callable
 from collections import defaultdict
@@ -21,15 +23,24 @@ from rdkit.Chem.Draw.rdMolDraw2D import MolDraw2DSVG
 from rdkit.Chem import rdDepictor
 rdDepictor.SetPreferCoordGen(True)
 
+import graph_attention_student.typing as tc
 from graph_attention_student.util import NULL_LOGGER
 from graph_attention_student.util import graph_dict_to_list_values
-from graph_attention_student.util import graph_dict_to_numpy_values
+from graph_attention_student.util import update_nested_dict
 from graph_attention_student.visualization import draw_extended_colors_graph
 from graph_attention_student.visualization import draw_edge_black
 from graph_attention_student.visualization import draw_node_color_scatter
 
-GraphDict = dict
-RgbList = list
+
+class NumericJsonEncoder(json.JSONEncoder):
+
+    def default(self, o: t.Any) -> t.Any:
+        if isinstance(o, np.ndarray):
+            return o.tolist()
+        elif isinstance(o, np.generic):
+            return o.item()
+        else:
+            return super(NumericJsonEncoder, self).default(o)
 
 
 def numpy_to_native(value):
@@ -127,6 +138,100 @@ def load_eye_tracking_dataset(folder_path: str) -> List[dict]:
     return [data
             for data in dataset_map.values()
             if 'metadata_path' in data and 'image_path' in data]
+
+
+def load_eye_tracking_dataset_dict(dataset_path: str,
+                                   ratio: float = 1.0,
+                                   logger: logging.Logger = NULL_LOGGER,
+                                   log_step: int = 1000,
+                                   sanitize_dict: bool = False) -> tc.EtDatasetDict:
+    """
+
+    *25.10.2022*
+    Recently I was confronted with a new dataset that has about half a million entries, and this required
+    a serious restructuring of this method due to higher requirements of computational and storage
+    efficiency.
+    Previously the function worked by iterating the os.listdir() list directly and then checking each
+    file's extension and only the correct extensions were added to the dict. This was a more robust
+    solution but it required a longer primary loop, which is why I switched to the solution with the
+    set of file names now.
+
+    :param dataset_path:
+    :param logger:
+    :param log_step:
+    :param sanitize_dict:
+    :return:
+    """
+    logger.info(f'determining the file names...')
+    files = os.listdir(dataset_path)
+    names = set()
+    for file_name in files:
+        name, extension = file_name.split('.')
+        if extension in ['png', 'json']:
+            png_path = os.path.join(dataset_path, f'{name}.png')
+            json_path = os.path.join(dataset_path, f'{name}.json')
+            if os.path.exists(png_path) and os.path.exists(json_path):
+                names.add(name)
+
+    if ratio < 1.0:
+        names = random.sample(names, k=int(len(names) * ratio))
+
+    num_names = len(names)
+    num_files = len(files)
+    logger.info(f'loading eye tracking dataset from folder {dataset_path} with {num_files} files...')
+
+    start_time = time.time()
+    dataset_map = {}
+    for c, name in enumerate(names):
+
+        # The dataset canonically represents each element either as png (graph visualization) or
+        # json (metadata) if any other files contaminate the folder we do a skip here because afterwards
+        # is some code we want to execute for either json or png
+        dataset_map[name] = {}
+        dataset_map[name]['name'] = name
+
+        # ~ image
+        image_path = os.path.join(dataset_path, f'{name}.png')
+        dataset_map[name]['image_path'] = image_path
+
+        # ~ metadata
+        metadata_path = os.path.join(dataset_path, f'{name}.json')
+        dataset_map[name]['index'] = c
+        with open(metadata_path, mode='rb') as file:
+            content = file.read()
+            metadata = orjson.loads(content)
+            dataset_map[name]['metadata'] = metadata
+
+        if isinstance(metadata, dict) and 'graph' in metadata:
+            dataset_map[name]['metadata'] = metadata
+            # At this point there is already a field "graph" in metadata but the values in that
+            # dict are just lists after being loaded from the JSON file, so we need to convert
+            # them all into numpy arrays (this is actually important!) here
+            dataset_map[name]['metadata']['graph'] = {key: np.array(value)
+                                                      for key, value in metadata['graph'].items()}
+
+        if c % log_step == 0:
+            elapsed_time = time.time() - start_time
+            time_per_element = elapsed_time / (c + 1)
+            remaining_time = time_per_element * (num_names - c)
+            logger.info(f' * loaded ({c}/{num_names})'
+                        f' - name: {name}'
+                        f' - elapsed time: {elapsed_time:.1f}s ({elapsed_time/3600:.1f}hrs)'
+                        f' - remaining time: {remaining_time:.1f}s ({remaining_time/3600:.1f}hrs)'
+                        f' - dict overhead: {sys.getsizeof(dataset_map)/1024**2:.2f}MB')
+
+    # It can happen that a dataset is damaged. Maybe it wasn't properly created or maybe there was a problem
+    # when copy-pasting or something. It is possible that there is only one of the two required files for
+    # an element. In this case there is this optional post-processing which removes such faulty entries
+    # from the dict.
+    if sanitize_dict:
+        logger.info('sanitizing incomplete entries in dataset dict...')
+        keys = list(dataset_map.keys())
+        for key in keys:
+            if 'metadata' not in dataset_map[key] or 'image_path' not in dataset_map[key]:
+                del dataset_map[key]
+
+    return dataset_map
 
 
 # == CHEMISTRY RELATED ======================================================================================
@@ -255,11 +360,115 @@ def create_molecule_eye_tracking_dataset(molecule_infos: Dict[str, dict],
             }
 
             with open(json_path, mode='wb') as json_file:
-                content = json.dumps(metadata)
+                content = orjson.dumps(metadata)
                 json_file.write(content)
 
             if c % log_step == 0:
                 logger.info(f'* ({c}/{dataset_length}) {mol_id}')
+
+
+def eye_tracking_dataset_from_moleculenet_dataset(moleculenet: MoleculeNetDataset,
+                                                  dest_path: str,
+                                                  set_attributes_kwargs: t.Dict[str, t.Any],
+                                                  smiles_column_name: str = 'smiles',
+                                                  clean_keys: t.List[str] = ['edge_attributes'],
+                                                  image_width: int = 900,
+                                                  image_height: int = 900,
+                                                  return_dataset: bool = True,
+                                                  logger: logging.Logger = NULL_LOGGER,
+                                                  log_step: int = 1000
+                                                  ) -> tc.EtDatasetDict:
+    dataset_length = len(moleculenet)
+
+    logger.info(f'setting moleculenet attributes...')
+    kwargs = {'additional_callbacks': {
+        'smiles': lambda mg, ds: str(ds[smiles_column_name])
+    }}
+    # The way that this function works is that the default options for 'additional_callbacks' are the ones
+    # defined above here, but IF the arg "set_attributes_kwargs" also contains an "additional_callbacks"
+    # dict, then it is even possible to override the default options we define here, which is probably
+    # especially useful for defining custom indexing and naming schemes for the elements.
+    kwargs = update_nested_dict(kwargs, set_attributes_kwargs)
+    moleculenet.set_attributes(**kwargs)
+
+    logger.info(f'cleaning moleculenet with keys: {clean_keys}')
+    moleculenet.clean(clean_keys)
+
+    logger.info(f'generating dataset files...')
+    start_time = time.time()
+    dataset_map = {}
+    for c, d in enumerate(moleculenet):
+        index = d['index'] if 'index' in d else c
+        name = d['name'] if 'name' in d else str(c)
+        smiles = d['smiles']
+
+        # ~ Render the image
+        # Technically we are being a bit redundant here:
+        mol = Chem.MolFromSmiles(str(smiles))
+        # mol = mg.mol
+
+        mol_drawer = MolDraw2DSVG(image_width, image_height)
+        mol_drawer.SetLineWidth(3)
+        mol_drawer.DrawMolecule(mol)
+        mol_drawer.FinishDrawing()
+        svg_string = mol_drawer.GetDrawingText()
+        image_path = os.path.join(dest_path, name + '.png')
+        cairosvg.svg2png(
+            bytestring=svg_string.encode(),
+            write_to=image_path,
+            output_height=image_height,
+            output_width=image_width,
+        )
+
+        node_coordinates = []
+        for point in [mol_drawer.GetDrawCoords(i) for i, _ in enumerate(mol.GetAtoms())]:
+            node_coordinates.append([
+                point.x,
+                image_height - point.y
+            ])
+
+        node_coordinates = np.array(node_coordinates)
+        d['node_coordinates'] = np.array(node_coordinates)
+
+        # "numpy_to_native" will convert any kind of numpy array to a native datatype such as a list of
+        # floats for example. We need to do this to be able to turn it into JSON later.
+        graph: tc.GraphDict = {key: numpy_to_native(value)
+                               for key, value in d.items()
+                               if isinstance(value, np.ndarray) or isinstance(value, np.generic)}
+
+        metadata = {
+            'name': name,
+            'index': index,
+            'image_width': image_width,
+            'image_height': image_height,
+            'graph': graph
+        }
+        if 'target' in d:
+            metadata['target'] = d['target']
+
+        metadata_path = os.path.join(dest_path, f'{name}.json')
+        with open(metadata_path, mode='w') as file:
+            content = json.dumps(metadata, cls=NumericJsonEncoder)
+            file.write(content)
+
+        if return_dataset:
+            dataset_map[name] = {
+                'index': index,
+                'image_path': image_path,
+                'metadata_path': metadata_path,
+                'metadata': metadata,
+            }
+
+        if c % log_step == 0:
+            elapsed_time = time.time() - start_time
+            time_per_element = elapsed_time / (c+1)
+            remaining_time = time_per_element * (dataset_length - c+1)
+            logger.info(f' * created ({c}/{dataset_length})'
+                        f' - index: {index} - name: {name}'
+                        f' - elapsed time: {elapsed_time:.1f}s ({elapsed_time/3600:.1f}hrs)'
+                        f' - remaining time: {remaining_time/3600:.1f}hrs')
+
+    return dataset_map
 
 
 # == TEXT GRAPHS ============================================================================================
@@ -459,9 +668,9 @@ def create_colors_eye_tracking_dataset(graph_infos: Dict[str, dict],
                                        image_height: int = 900,
                                        layout_cb: Callable[[nx.Graph], List[int]] =
                                             nx.layout.kamada_kawai_layout,
-                                       draw_node_cb: Callable[[plt.Axes, GraphDict, int], None] =
+                                       draw_node_cb: Callable[[plt.Axes, tc.GraphDict, int], None] =
                                             draw_node_color_scatter,
-                                       draw_edge_cb: Callable[[plt.Axes, GraphDict, int, int], None] =
+                                       draw_edge_cb: Callable[[plt.Axes, tc.GraphDict, int, int], None] =
                                             draw_edge_black,
                                        dpi: int = 100,
                                        image_extension: str = 'png'
@@ -623,11 +832,11 @@ class ExtendedColorsGraphGenerator:
     def __init__(self,
                  node_count: int,
                  additional_edge_count: int,
-                 color_attributes_cb: Callable[[GraphDict, int], RgbList],
-                 additional_attributes_cb: Callable[[GraphDict, int], List[float]],
-                 edge_attributes_cb: Callable[[GraphDict, int, int], List[float]],
-                 edge_valid_cb: Callable[[GraphDict, int, int], bool] = lambda g, i, j: True,
-                 seed_graphs: List[GraphDict] = [],
+                 color_attributes_cb: Callable[[tc.GraphDict, int], list],
+                 additional_attributes_cb: Callable[[tc.GraphDict, int], List[float]],
+                 edge_attributes_cb: Callable[[tc.GraphDict, int, int], List[float]],
+                 edge_valid_cb: Callable[[tc.GraphDict, int, int], bool] = lambda g, i, j: True,
+                 seed_graphs: List[tc.GraphDict] = [],
                  is_directed: bool = False,
                  prevent_edges_in_seed_graphs: bool = True):
         assert additional_edge_count >= len(seed_graphs) - 1, \
@@ -724,7 +933,7 @@ class ExtendedColorsGraphGenerator:
             'seed_graph_indices': self.seed_graph_indices
         }
 
-    def generate(self) -> GraphDict:
+    def generate(self) -> tc.GraphDict:
         self.reset()
 
         # ~ Seeding
