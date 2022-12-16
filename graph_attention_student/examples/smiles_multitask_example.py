@@ -10,7 +10,7 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 import csv
 import random
-from typing import List, Dict, Any
+import typing as t
 
 from pycomex.experiment import Experiment
 from pycomex.util import Skippable
@@ -43,9 +43,8 @@ np.set_printoptions(precision=3)
 # == DATASET PARAMETERS ==
 # [!] Insert the absolute path to the CSV file here
 CSV_PATH = os.path.join(DATASETS_FOLDER, 'dataset-E.csv')
-
-# This is just a mock dataset
-CSV_PATH = os.path.join(DATASETS_FOLDER, 'Multitask', 'Multitask.csv')
+VISUAL_GRAPH_DATASET: t.Optional[str] = 'organic_solvents'
+VISUAL_GRAPH_DATASET: t.Optional[str] = None
 
 # [!] Insert the column name of the smiles column here
 SMILES_COLUMN = "smiles"

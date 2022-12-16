@@ -189,6 +189,27 @@ def bce(y_true, y_pred):
     return tf.reduce_mean(loss)
 
 
+def mae(y_true, y_pred):
+    y_true = tf.cast(y_true, tf.float32)
+    loss = tf.abs(y_true - y_pred)
+    return tf.reduce_mean(loss)
+
+
+def mse(y_true, y_pred):
+    multiplier = tf.where(tf.math.is_nan(y_true), 0., 1.)
+
+    y_true = tf.cast(y_true, tf.float32)
+    y_true = tf.where(tf.math.is_nan(y_true), 0., y_true)
+
+    loss = tf.square(y_true - y_pred)
+
+    loss *= multiplier
+    loss = tf.reduce_sum(loss, axis=-1)
+    # print(loss)
+
+    return tf.reduce_mean(loss)
+
+
 class ExplanationLoss(ks.losses.Loss):
 
     def __init__(self,
@@ -253,7 +274,11 @@ class LogProgressCallback(EpochCounterCallback):
                 f'elapsed_time={self.elapsed_time:.1f}s'
             ]
             if 'output_1_loss' in logs:
-                message_parts.append(f'training_loss={logs["output_1_loss"]:.3f} ')
+                message_parts.append(f'output_1_loss={logs["output_1_loss"]:.3f} ')
+            if 'output_2_loss' in logs:
+                message_parts.append(f'output_2_loss={logs["output_2_loss"]:.3f}')
+            if 'output_3_loss' in logs:
+                message_parts.append(f'output_3_loss={logs["output_3_loss"]:.3f}')
             if 'loss' in logs:
                 message_parts.append(f'total_training_loss={logs["loss"]:.3f} ')
             if 'exp_loss' in logs:

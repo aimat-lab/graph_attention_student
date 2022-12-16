@@ -306,14 +306,20 @@ def text_to_graph(text: str,
 
 
 def latex_table_element_mean(values: List[float],
-                             template_name: str = 'table_element_mean.tex.j2') -> str:
-    mean = np.mean(values)
-    std = np.std(values)
+                             template_name: str = 'table_element_mean.tex.j2',
+                             vertical: bool = True,
+                             raw: bool = False) -> str:
+    if raw:
+        mean, std = values
+    else:
+        mean = np.mean(values)
+        std = np.std(values)
 
     template = TEMPLATE_ENV.get_template(template_name)
     return template.render(
         mean=mean,
-        std=std
+        std=std,
+        vertical=vertical
     )
 
 

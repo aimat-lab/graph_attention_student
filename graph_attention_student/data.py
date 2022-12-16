@@ -52,11 +52,19 @@ def numpy_to_native(value):
         return value
 
 
-def process_graph_dataset(dataset: List[dict],
-                          test_indices: List[int]
-                          ) -> Tuple[tuple, tuple, tuple, tuple]:
+def process_graph_dataset(dataset: t.List[dict],
+                          test_indices: t.Optional[t.List[int]] = None,
+                          train_indices: t.Optional[List[int]] = None,
+                          ) -> t.Tuple[tuple, tuple, tuple, tuple]:
     indices = list(range(len(dataset)))
-    train_indices = [index for index in indices if index not in test_indices]
+
+    # It has to be possible to determine the dataset by either the train or the test indices because now
+    # there are cases were we need to be explicitly sure to have an exact number of train elements
+    # that has to be divisible by the batch size
+    if train_indices is not None and test_indices is None:
+        test_indices = [index for index in indices if index not in train_indices]
+    elif test_indices is not None and train_indices is None:
+        train_indices = [index for index in indices if index not in test_indices]
 
     labels_train = [dataset[i]['graph_labels'] for i in train_indices]
     labels_test = [dataset[i]['graph_labels'] for i in test_indices]
@@ -87,14 +95,14 @@ def process_graph_dataset(dataset: List[dict],
     # The importance scores
     ytrain = (
         # ragged_tensor_from_nested_numpy(labels_train),
-        np.array(labels_train),
+        np.array(labels_train, dtype=np.float),
         ragged_tensor_from_nested_numpy(node_importances_train),
         ragged_tensor_from_nested_numpy(edge_importances_train)
     )
 
     ytest = (
         # ragged_tensor_from_nested_numpy(labels_test),
-        np.array(labels_test),
+        np.array(labels_test, dtype=np.float),
         ragged_tensor_from_nested_numpy(node_importances_test),
         ragged_tensor_from_nested_numpy(edge_importances_test)
     )
@@ -196,6 +204,7 @@ def load_eye_tracking_dataset_dict(dataset_path: str,
 
         # ~ metadata
         metadata_path = os.path.join(dataset_path, f'{name}.json')
+        dataset_map[name]['metadata_path'] = metadata_path
         dataset_map[name]['index'] = c
         with open(metadata_path, mode='rb') as file:
             content = file.read()

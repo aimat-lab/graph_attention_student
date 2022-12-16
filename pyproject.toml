@@ -43,6 +43,7 @@ orjson = "==3.8.0"
 nltk = ">=3.7"
 rdkit = ">=2022.9.1"
 poetry-bumpversion = ">=0.3.0"
+visual_graph_datasets = ">=0.7.2"
 
 [tool.poetry_bumpversion.file."graph_attention_student/__init__.py"]
 search = '__version__ = "{current_version}"'

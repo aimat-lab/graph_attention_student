@@ -35,8 +35,28 @@ with human intuition, opening the way to learning from our model in less well-un
 Installation
 ============
 
-*DISCLAIMER.* For convenience, we package the used datasets directly with the code. This however increases
-the size of the package to ~3GB, which means that a slightly longer download time can be expected.
+Prerequisite - Datasets
+-----------------------
+
+We choose to package our datasets separately from the main code as they are multiple GB in size.
+The datasets are this large because we choose to provide the already pre-processed versions of these
+datasets, which drastically simplify data loading, pre-processing and visualization of results here in
+the main code. More details can be found at visual_graph_datasets_.
+
+The datasets can be installed via this package:
+
+.. code-block:: console
+
+    git clone https://github.com/awa59kst120df/visual_graph_datasets.git
+    cd visual_graph_datasets
+    pip3 install -e .
+
+    **NOTE** The dataset package has to be installed in editable mode!
+
+.. _visual_graph_datasets: https://github.com/awa59kst120df/visual_graph_datasets
+
+Main Installation
+-----------------
 
 First of all you need to *Install RDKit*. For detailed instructions on how to do this visit
 https://www.rdkit.org/docs/Install.html .
@@ -57,7 +77,7 @@ Then in the main folder run a ``pip install``:
 .. code-block:: shell
 
     cd graph_attention_student
-    python3 -m pip install .
+    pip3 install -e .
 
 Afterwards, you can check the install by invoking the CLI:
 
@@ -75,9 +95,10 @@ Computational Experiments
 It is possible to list, show and execute all the computational experiments using a command line interface
 CLI.
 
-*DISCLAIMER.* Most of the experiments have a long runtime, ranging from ~2hrs to ~2days. Furthermore, all
-of the experiments which do model training are currently configured to run on a GPU and might crash if the
-GPU can either not be detected or does not have enough VRAM.
+    *NOTE* Most of the experiments have a long runtime, ranging from ~2hrs to ~2days.
+    Furthermore, all of the experiments which do model training are currently configured to run on a GPU
+    and might crash if the GPU can either not be detected or does not have enough VRAM. This setting can
+    be changed in the corresponding experiment scripts
 
 All the available experiments can be listed like this:
 
@@ -124,14 +145,14 @@ This is a simple example of how to use the model in the regression case:
     import tensorflow as tf
     import tensorflow.keras as ks
     from graph_attention_student.training import NoLoss
-    from graph_attention_student.models import MultiAttentionStudent
+    from graph_attention_student.models import Megan
 
-    model = MultiAttentionStudent(
+    model = Megan(
         # These lists define the number of layers and the number of hidden units in each layer for the
         # various parts of the architecture
         units=[9, 9, 9],  # The main convolutional layers
-        importance_units=[5],  # The MLP that creates the node importances
-        final_units=[5, 2],  # The final MLP for graph embeddings
+        importance_units=[],  # The MLP that creates the node importances
+        final_units=[5, 1],  # The final MLP for graph embeddings
         # Example for a regression problem. We need the prior knowledge about what range the values of the
         # dataset will be expected to fall into...
         regression_limits=(-3, +3),
@@ -139,7 +160,7 @@ This is a simple example of how to use the model in the regression case:
         regression_reference=0,
         # This controls the weight of the explanation-only train step (gamma)
         importance_factor=1.0,
-        importance_multiplier=10,
+        importance_multiplier=5,
         # This is the weight of the sparsity regularization
         sparsity_factor=0.1,
     )
@@ -149,7 +170,7 @@ This is a simple example of how to use the model in the regression case:
     # we can simply supply the NoLoss function instead.
     model.compile(
         loss=[ks.losses.MeanSquaredError(), NoLoss(), NoLoss()],
-        loss_weights=[1, 0, 0],
+        loss_weights=[1, 1, 1],
         optimizer=ks.optimizers.Adam(0.001)
     )
 
@@ -158,8 +179,9 @@ This is a simple example of how to use the model in the regression case:
 
 .. _kgcnn: https://github.com/aimat-lab/gcnn_keras
 .. _examples/solubility_regression.py: https://github.com/aimat-lab/graph_attention_student/tree/master/graph_attention_student/examples/solubility_regression.py
-
 .. _`GATv2`: https://github.com/tech-srl/how_attentive_are_gats
+
+---
 
 Examples
 ========
