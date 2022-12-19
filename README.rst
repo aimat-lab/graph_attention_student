@@ -35,36 +35,8 @@ with human intuition, opening the way to learning from our model in less well-un
 Installation
 ============
 
-Prerequisite - Datasets
------------------------
-
-We choose to package our datasets separately from the main code as they are multiple GB in size.
-The datasets are this large because we choose to provide the already pre-processed versions of these
-datasets, which drastically simplify data loading, pre-processing and visualization of results here in
-the main code. More details can be found at visual_graph_datasets_.
-
-The datasets can be installed via this package:
-
-.. code-block:: console
-
-    git clone https://github.com/awa59kst120df/visual_graph_datasets.git
-    cd visual_graph_datasets
-    pip3 install -e .
-
-    **NOTE** The dataset package has to be installed in editable mode!
-
-.. _visual_graph_datasets: https://github.com/awa59kst120df/visual_graph_datasets
-
 Main Installation
 -----------------
-
-First of all you need to *Install RDKit*. For detailed instructions on how to do this visit
-https://www.rdkit.org/docs/Install.html .
-On Linux you can simply do it like this:
-
-.. code-block:: shell
-
-    sudo apt-get install python3-rdkit
 
 Clone the repository from github:
 
