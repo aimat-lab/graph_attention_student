@@ -17,7 +17,7 @@ import numpy as np
 import networkx as nx
 import matplotlib.pyplot as plt
 import tensorflow as tf
-from kgcnn.utils.data import ragged_tensor_from_nested_numpy
+from kgcnn.data.utils import ragged_tensor_from_nested_numpy
 from kgcnn.data.moleculenet import MoleculeNetDataset
 from rdkit import Chem
 from rdkit.Chem.Draw.rdMolDraw2D import MolDraw2DSVG
@@ -117,14 +117,14 @@ def process_graph_dataset(dataset: t.List[dict],
 
     y_train = (
         # ragged_tensor_from_nested_numpy(labels_train),
-        np.array(labels_train, dtype=np.float),
+        np.array(labels_train, dtype=np.single),
         ragged_tensor_from_nested_numpy(node_importances_train),
         ragged_tensor_from_nested_numpy(edge_importances_train)
     )
 
     y_test = (
         # ragged_tensor_from_nested_numpy(labels_test),
-        np.array(labels_test, dtype=np.float),
+        np.array(labels_test, dtype=np.single),
         ragged_tensor_from_nested_numpy(node_importances_test),
         ragged_tensor_from_nested_numpy(edge_importances_test)
     )

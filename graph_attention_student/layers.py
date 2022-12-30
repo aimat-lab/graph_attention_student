@@ -11,8 +11,8 @@ from kgcnn.layers.modules import GraphBaseLayer
 from kgcnn.layers.modules import LazyConcatenate, LazyAverage
 from kgcnn.layers.modules import DropoutEmbedding, DenseEmbedding
 from kgcnn.layers.pooling import PoolingLocalEdges
-from kgcnn.layers.conv.attention import PoolingLocalEdgesAttention
-from kgcnn.layers.conv.attention import AttentionHeadGATV2
+from kgcnn.layers.conv.gat_conv import PoolingLocalEdgesAttention
+from kgcnn.layers.conv.gat_conv import AttentionHeadGATV2
 
 
 class ExtendedPoolingLocalEdgesAttention(PoolingLocalEdgesAttention):

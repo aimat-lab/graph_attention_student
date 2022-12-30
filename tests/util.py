@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 
 PATH = pathlib.Path(__file__).parent.absolute()
 ASSETS_PATH = os.path.join(PATH, 'assets')
+ARTIFACTS_PATH = os.path.join(PATH, 'artifacts')
 
 LOG_TESTING = True
 LOG = logging.Logger('Test')
@@ -16,7 +17,7 @@ if LOG_TESTING:
 
 
 def save_fig(fig: plt.Figure) -> str:
-    path = os.path.join(ASSETS_PATH, 'fig.pdf')
+    path = os.path.join(ARTIFACTS_PATH, 'fig.pdf')
     fig.savefig(path)
 
     return path

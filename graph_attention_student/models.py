@@ -7,7 +7,7 @@ import numpy as np
 import tensorflow as tf
 import tensorflow.keras as ks
 from tensorflow.python.keras.engine import compile_utils
-from kgcnn.utils.data import ragged_tensor_from_nested_numpy
+from kgcnn.data.utils import ragged_tensor_from_nested_numpy
 from kgcnn.layers.modules import GraphBaseLayer
 from kgcnn.layers.modules import LazyConcatenate, LazyAverage
 from kgcnn.layers.modules import DenseEmbedding, ActivationEmbedding, DropoutEmbedding
@@ -15,8 +15,7 @@ from kgcnn.layers.pooling import PoolingLocalEdges
 from kgcnn.layers.pooling import PoolingNodes
 from kgcnn.layers.pooling import PoolingWeightedNodes
 from kgcnn.layers.conv.gcn_conv import GCN
-from kgcnn.layers.conv.attention import AttentionHeadGAT
-from kgcnn.layers.conv.attention import AttentionHeadGATV2
+from kgcnn.layers.conv.gat_conv import AttentionHeadGAT, AttentionHeadGATV2
 from kgcnn.literature.GNNExplain import GNNInterface
 
 from graph_attention_student.layers import MultiHeadGatLayer
@@ -896,20 +895,21 @@ class Megan(ks.models.Model):
         self.mae_loss = ks.losses.MeanAbsoluteError()
         self.compiled_regression_loss = compile_utils.LossesContainer(mae)
 
-        # If regression_limits have been supplied, we interprete this as the intent to perform explanation co-training
-        # for a regression dataset. So the content of this if condition makes sure to perform the necessary
-        # pre-processing steps for this case.
+        # If regression_limits have been supplied, we interprete this as the intent to perform explanation
+        # co-training for a regression dataset.
+        # So the content of this if condition makes sure to perform the necessary pre-processing steps
+        # for this case.
         if self.regression_limits is not None:
             # first of all we do some simple assertions to handle some common error cases
             assert regression_reference is not None, ('You have to supply a "regression_reference" value for '
                                                       'explanation co-training!')
 
-            # This is the first and simpler case for regression explanation co-training: In this case the regression
-            # reference value is only a single value. In that case, there is only one target value that is supposed to
-            # be regressed. The alternative would be that it is a list in which case it would have to have as many
-            # elements as target values to be predicted.
-            # However in this case we convert it into a list as well to be able to treat everything from this point on
-            # as the multi-value case guaranteed.
+            # This is the first and simpler case for regression explanation co-training: In this case the
+            # regression reference value is only a single value. In that case, there is only one target
+            # value that is supposed to be regressed. The alternative would be that it is a list in which
+            # case it would have to have as many elements as target values to be predicted.
+            # However in this case we convert it into a list as well to be able to treat everything from
+            # this point on as the multi-value case guaranteed.
             if isinstance(regression_reference, (int, float)):
                 self.regression_reference = [regression_reference]
 
@@ -980,11 +980,11 @@ class Megan(ks.models.Model):
         """
 
         # 17.11.2022
-        # Added support for global graph attributes. If the corresponding flag is set in the constructor of the model
-        # then it is expected that the input tuple consists of 4 elements instead of the usual 3 elements, where the
-        # fourth element is the vector of the graph attributes.
-        # We can't use these graph attributes right away, but later on we will simply append them to the vector which
-        # enters the MLP tail end.
+        # Added support for global graph attributes. If the corresponding flag is set in the constructor of
+        # the model then it is expected that the input tuple consists of 4 elements instead of the usual
+        # 3 elements, where the fourth element is the vector of the graph attributes.
+        # We can't use these graph attributes right away, but later on we will simply append them to the
+        # vector which enters the MLP tail end.
 
         # node_input: ([B], [V], N)
         # edge_input: ([B], [E], M)
@@ -1048,17 +1048,19 @@ class Megan(ks.models.Model):
         # were each time we use the same node embeddings x but a different slice of the node importances as
         # the weights! We concatenate all the individual results in the end.
         outs = []
+        n = self.final_units[-1]
         for k in range(self.importance_channels):
             node_importance_slice = tf.expand_dims(node_importances[:, :, k], axis=-1)
             out = self.lay_pool_out(x * node_importance_slice)
+            # out = self.lay_pool_out(x[:, :, k*n:(k+1)*n] * node_importance_slice)
 
             outs.append(out)
 
         # out: ([B], N*K²)
         out = self.lay_concat_out(outs)
 
-        # At this point, after the global pooling of the node embeddings, we can append the global graph attributes,
-        # should those exist
+        # At this point, after the global pooling of the node embeddings, we can append the global graph
+        # attributes, should those exist
         if self.use_graph_attributes:
             out = self.lay_concat_out([out, graph_input])
 
@@ -1067,7 +1069,7 @@ class Megan(ks.models.Model):
         for lay in self.final_layers:
             out = lay(out)
             if training:
-                self.lay_final_dropout(out, training=training)
+                out = self.lay_final_dropout(out, training=training)
 
         if self.doing_regression:
             reference = tf.ones_like(out) * tf.constant(self.regression_reference, dtype=tf.float32)

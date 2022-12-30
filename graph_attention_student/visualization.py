@@ -13,6 +13,74 @@ from imageio.v2 import imread
 from graph_attention_student.typing import GraphDict, RgbList
 
 
+reds_cmap: mcolors.Colormap = mcolors.LinearSegmentedColormap.from_list(
+    'reds',
+    [
+        '#FFFFFF',
+        '#FF6F00',
+        '#8E0000'
+    ]
+)
+
+
+# == MISC. VISUALIZATIONS ==
+
+def plot_regression_fit(values_true: t.Union[np.ndarray, t.List[float]],
+                        values_pred: t.Union[np.ndarray, t.List[float]],
+                        ax: plt.Axes,
+                        num: int = 40,
+                        cmap: t.Union[str, mcolors.Colormap] = reds_cmap,
+                        plot_reference: bool = True,
+                        reference_color: str = 'gray',
+                        ):
+    """
+
+    :param values_true: A one dimensional array
+    :param values_pred:
+    :param ax:
+    :param num:
+    :param cmap:
+    :param plot_reference:
+    :param reference_color:
+    :return:
+    """
+    min_value = min(np.min(values_true), np.min(values_pred))
+    max_value = max(np.max(values_true), np.max(values_pred))
+    xs = np.linspace(min_value, max_value, num)
+    ys = np.linspace(min_value, max_value, num)
+    z, x_edges, y_edges = np.histogram2d(
+        x=values_true,
+        y=values_pred,
+        bins=[xs, ys],
+    )
+
+    y, x = np.meshgrid(
+        np.linspace(min_value, max_value, num),
+        np.linspace(min_value, max_value, num)
+    )
+    ax.set_xlabel('true values')
+    ax.set_xlim([min_value, max_value])
+    ax.set_ylabel('predicted values')
+    ax.set_ylim([min_value, max_value])
+    c = ax.pcolormesh(
+        x, y, z,
+        linewidth=0,
+        cmap=cmap,
+        rasterized=True,
+    )
+
+    if plot_reference:
+        ax.plot(
+            [min_value, max_value],
+            [min_value, max_value],
+            color=reference_color,
+            zorder=1,
+        )
+
+    return c
+
+# == EXPLANATION VISUALIZATION ===
+
 def plot_node_importances(g: dict,
                           node_importances: np.ndarray,
                           node_coordinates: np.ndarray,
