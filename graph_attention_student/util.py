@@ -346,7 +346,8 @@ def latex_table(column_names: List[str],
                 content_template_name: str = 'table_content.tex.j2',
                 table_template_name: str = 'table.tex.j2',
                 list_element_cb: Callable[[List[float]], str] = latex_table_element_mean,
-                prefix_lines: List[str] = []
+                prefix_lines: List[str] = [],
+                caption: str = '',
                 ) -> Tuple[str, str]:
 
     # ~ Pre Processing the row elements into strings
@@ -374,7 +375,8 @@ def latex_table(column_names: List[str],
         alignment=alignment,
         column_names=column_names,
         content=content,
-        header='\n'.join(prefix_lines)
+        header='\n'.join(prefix_lines),
+        caption=caption,
     )
 
     return content, table

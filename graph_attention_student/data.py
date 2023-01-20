@@ -56,12 +56,14 @@ def numpy_to_native(value):
 def process_graph_dataset(dataset: t.List[dict],
                           test_indices: t.Optional[t.List[int]] = None,
                           train_indices: t.Optional[List[int]] = None,
+                          use_importances: bool = True,
                           use_graph_attributes: bool = False,
                           ) -> t.Tuple[tuple, tuple, tuple, tuple]:
     """
-    Given a list ``dataset`` of GraphDict objects representing the elements of a dataset, this function will firstly
-    split these elements according to the given ``train_indices`` and ``test_indices`` and also turn this list of
-    graph objects into the appropriate RaggedTensors which can be used to train a tensorflow model.
+    Given a list ``dataset`` of GraphDict objects representing the elements of a dataset, this function will
+    firstly split these elements according to the given ``train_indices`` and ``test_indices`` and also turn
+    this list of graph objects into the appropriate RaggedTensors which can be used to train a
+    tensorflow model.
     """
     indices = list(range(len(dataset)))
 
@@ -81,10 +83,6 @@ def process_graph_dataset(dataset: t.List[dict],
     edges_test = [dataset[i]['edge_attributes'] for i in test_indices]
     edge_indices_train = [dataset[i]['edge_indices'] for i in train_indices]
     edge_indices_test = [dataset[i]['edge_indices'] for i in test_indices]
-    node_importances_train = [dataset[i]['node_importances'] for i in train_indices]
-    node_importances_test = [dataset[i]['node_importances'] for i in test_indices]
-    edge_importances_train = [dataset[i]['edge_importances'] for i in train_indices]
-    edge_importances_test = [dataset[i]['edge_importances'] for i in test_indices]
 
     x_train = (
         ragged_tensor_from_nested_numpy(nodes_train),
@@ -98,9 +96,9 @@ def process_graph_dataset(dataset: t.List[dict],
         ragged_tensor_from_nested_numpy(edge_indices_test)
     )
 
-    # Optionally it is also possible to use graph attributes, these are features which describe the graph as a whole
-    # rather than its individual elements (nodes / edges). This is however not part of every dataset by default because
-    # not all graph neural networks are able to deal with this appropriately.
+    # Optionally it is also possible to use graph attributes, these are features which describe the graph
+    # as a whole rather than its individual elements (nodes / edges). This is however not part of every
+    # dataset by default because not all graph neural networks are able to deal with this appropriately.
     # So we also only add this as the fourth element of the X tuple, if the corresponding flag is given
     if use_graph_attributes:
         graph_attributes_train = [dataset[i]['graph_attributes'] for i in train_indices]
@@ -116,18 +114,32 @@ def process_graph_dataset(dataset: t.List[dict],
         )
 
     y_train = (
-        # ragged_tensor_from_nested_numpy(labels_train),
-        np.array(labels_train, dtype=np.single),
-        ragged_tensor_from_nested_numpy(node_importances_train),
-        ragged_tensor_from_nested_numpy(edge_importances_train)
+          np.array(labels_train, dtype=np.single),
     )
 
     y_test = (
-        # ragged_tensor_from_nested_numpy(labels_test),
         np.array(labels_test, dtype=np.single),
-        ragged_tensor_from_nested_numpy(node_importances_test),
-        ragged_tensor_from_nested_numpy(edge_importances_test)
     )
+
+    # Optionally (although in this project this is the true most of the time) it is possible to load
+    # node and edge importances (explanations) as additional training targets from the datasets as well.
+    if use_importances:
+        node_importances_train = [dataset[i]['node_importances'] for i in train_indices]
+        node_importances_test = [dataset[i]['node_importances'] for i in test_indices]
+        edge_importances_train = [dataset[i]['edge_importances'] for i in train_indices]
+        edge_importances_test = [dataset[i]['edge_importances'] for i in test_indices]
+
+        y_train = (
+            *y_train,
+            ragged_tensor_from_nested_numpy(node_importances_train),
+            ragged_tensor_from_nested_numpy(edge_importances_train)
+        )
+
+        y_test = (
+            *y_test,
+            ragged_tensor_from_nested_numpy(node_importances_test),
+            ragged_tensor_from_nested_numpy(edge_importances_test)
+        )
 
     return x_train, y_train, x_test, y_test
 

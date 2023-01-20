@@ -1,0 +1,7 @@
+{% for row in rows -%}
+% row {{ loop.index }}
+{% for element in row -%}
+{{ element }} {% if not loop.last %}&{% endif %}
+{% endfor -%}
+\\
+{% endfor -%}

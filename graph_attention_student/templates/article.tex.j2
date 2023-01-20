@@ -1,0 +1,40 @@
+% This template automatically fits the width of the produced page to the content that is to be
+% rendered. So to actually achieve a fixed with you first have to wrap the "content" in something
+% like a "minipage"
+% https://tex.stackexchange.com/questions/299005/automatic-page-size-to-fit-arbitrary-content
+\documentclass{article}
+
+% math related packages
+\usepackage{amsmath}
+\usepackage{relsize}
+
+% color related packages
+\usepackage{xcolor}
+\usepackage{soul}
+
+% Table related packages
+\usepackage{caption}
+\usepackage{booktabs}
+\usepackage{tabulary}
+\usepackage{multirow}
+\usepackage{placeins}
+\usepackage{longtable,array,ragged2e}
+
+\newcommand{\reducedstrut}{\vrule width 0pt height .9\ht\strutbox depth .9\dp\strutbox\relax}
+\newcolumntype{R}[1]{>{\raggedleft\arraybackslash}p{ #1 }}
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{ #1 }}
+
+\begin{document}
+\hoffset=-1in
+\voffset=-1in
+\setbox0\hbox{
+
+{% block content %}
+{{ content }}
+{% endblock %}
+
+}
+\pdfpageheight=\dimexpr\ht0+\dp0\relax
+\pdfpagewidth=\wd0
+\shipout\box0
+\stop

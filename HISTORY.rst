@@ -20,3 +20,16 @@ Changelog
   realized in various experiment scripts. This function will create a heatmap to be more efficient. With
   large amounts of data a scatter plot becomes very memory inefficient when exported as a vector graphic
   PDF!
+
+0.5.0 - 20.01.2022
+------------------
+
+- Added the ``templates`` folder and some templates to create latex code for the automatic generation
+  of tables to represent the experiment results.
+- Refactored ``examples.vgd_multitask`` to ``examples.vgd_multitask_megan``: The experiment now utilizes
+  the "hook" system of the newest pycomex version. The experiment now does multiple independent experiments
+  and the analysis produces a latex table with the mean results for each of the targets.
+- Added ``examples.vgd_multitask_gnn`` as a base experiment which trains a classic GCN model on a multitask
+  VGD dataset
+- Added ``examples.vgd_multitask_gatv2`` which trains a GATv2 model on a multitask VGD dataset
+- Added ``examples.vgd_multitask_gin`` which trains a GIN model on a multitask VGD dataset.
