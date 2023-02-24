@@ -9,10 +9,27 @@ from kgcnn.ops.partition import partition_row_indexing
 from kgcnn.ops.segment import segment_ops_by_name, segment_softmax
 from kgcnn.layers.modules import GraphBaseLayer
 from kgcnn.layers.modules import LazyConcatenate, LazyAverage
-from kgcnn.layers.modules import DropoutEmbedding, DenseEmbedding
+from kgcnn.layers.modules import DropoutEmbedding, DenseEmbedding, ActivationEmbedding
 from kgcnn.layers.pooling import PoolingLocalEdges
 from kgcnn.layers.conv.gat_conv import PoolingLocalEdgesAttention
 from kgcnn.layers.conv.gat_conv import AttentionHeadGATV2
+
+
+class CoefficientActivation(GraphBaseLayer):
+
+    def __init__(self,
+                 activation: str = 'relu',
+                 coefficient: float = 1.0,
+                 ):
+        super(CoefficientActivation, self).__init__()
+        self.activation = activation
+        self.coefficient = coefficient
+
+        self.lay_activation = ActivationEmbedding(activation=activation)
+
+    def call(self, inputs, *args, **kwargs):
+        x = inputs
+        return self.coefficient * self.lay_activation(x)
 
 
 class ExtendedPoolingLocalEdgesAttention(PoolingLocalEdgesAttention):

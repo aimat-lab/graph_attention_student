@@ -748,6 +748,7 @@ class Megan(ks.models.Model):
                  importance_dropout_rate: float = 0.0,  # do not change
                  importance_factor: float = 0.0,
                  importance_multiplier: float = 10.0,
+                 importance_transformations: t.Optional[t.List[ks.layers.Layer]] = None,
                  sparsity_factor: float = 0.0,
                  concat_heads: bool = True,
                  separate_explanation_step: bool = False,
@@ -819,6 +820,7 @@ class Megan(ks.models.Model):
         self.importance_dropout_rate = importance_dropout_rate
         self.importance_factor = importance_factor
         self.importance_multiplier = importance_multiplier
+        self.importance_transformations = importance_transformations
         self.sparsity_factor = sparsity_factor
         self.concat_heads = concat_heads
         self.final_units = final_units
@@ -1051,7 +1053,16 @@ class Megan(ks.models.Model):
         n = self.final_units[-1]
         for k in range(self.importance_channels):
             node_importance_slice = tf.expand_dims(node_importances[:, :, k], axis=-1)
-            out = self.lay_pool_out(x * node_importance_slice)
+            masked_embeddings = x * node_importance_slice
+
+            # 26.03.2023
+            # Optionally, if given we apply an additional non-linear transformation in the form of an
+            # additional layer on each of the masked node embeddings separately.
+            if self.importance_transformations is not None:
+                lay_transform = self.importance_transformations[k]
+                masked_embeddings = lay_transform(masked_embeddings)
+
+            out = self.lay_pool_out(masked_embeddings)
             # out = self.lay_pool_out(x[:, :, k*n:(k+1)*n] * node_importance_slice)
 
             outs.append(out)
@@ -1686,9 +1697,11 @@ def gnnx_importances(model,
     logger.info('creating explanations with gnn explainer')
     start_time = time.time()
 
-    optimizer = ks.optimizers.Adam(learning_rate=learning_rate)
+    optimizer = ks.optimizers.Nadam(learning_rate=learning_rate)
 
-    node_input, edge_input, edge_index_input = x
+    node_input = x[0]
+    edge_input = x[1]
+    edge_index_input = x[2]
 
     node_mask_ragged = tf.reduce_mean(tf.ones_like(node_input), axis=-1, keepdims=True)
     node_mask_variables = tf.Variable(node_mask_ragged.flat_values, trainable=True, dtype=tf.float64)
@@ -1714,7 +1727,8 @@ def gnnx_importances(model,
             out = model([
                 node_masked,
                 edge_masked,
-                edge_index_input
+                edge_index_input,
+                *x[3:]
             ], **model_kwargs)
 
             loss = tf.cast(tf.reduce_mean(tf.square(y - out)), dtype=tf.float64)

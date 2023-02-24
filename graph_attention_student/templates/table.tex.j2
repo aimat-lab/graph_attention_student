@@ -7,7 +7,7 @@
 % -- table header --
 \toprule
 {% for name in column_names -%}
-{{ name }} {% if loop.last %}\\{% else %}&{% endif -%}
+{{ name }} {% if loop.last %}\\{% else %}&{% endif %}
 {% endfor %}
 \midrule
 % -- table content --
