@@ -12,7 +12,7 @@ import tensorflow.keras as ks
 # ===========================================================================================================
 
 def shifted_sigmoid(x, multiplier: float = 1, shift: float = 10) -> float:
-    return ks.backend.sigmoid(multiplier * x - shift)
+    return ks.backend.sigmoid(multiplier * (x - shift))
 
 
 # == TRAINING SEGMENTATION ==================================================================================

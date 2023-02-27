@@ -933,8 +933,6 @@ class Megan(ks.models.Model):
     def get_config(self):
         config = super(Megan, self).get_config()
         config.update({
-            "name": self.name,
-            "variant": self.variant,
             "units": self.units,
             "activation": self.activation,
             "use_bias": self.use_bias,
@@ -1161,8 +1159,8 @@ class Megan(ks.models.Model):
 
             else:
                 # out_pred = ks.backend.sigmoid(outs)
-                out_pred = shifted_sigmoid(outs, multiplier=self.importance_multiplier)
-                exp_loss = self.compiled_classification_loss(out_true, out_pred)
+                out_pred = shifted_sigmoid(outs, shift=self.importance_multiplier, multiplier=2)
+                exp_loss = self.compiled_classification_loss(out_true, out_pred * out_true)
 
             exp_loss *= self.importance_factor
 
@@ -1228,7 +1226,12 @@ class Megan(ks.models.Model):
 
                 else:
                     # out_pred = ks.backend.sigmoid(outs)
-                    _out_pred = shifted_sigmoid(outs, multiplier=self.importance_multiplier)
+                    #_out_pred = shifted_sigmoid(outs, multiplier=self.importance_multiplier)
+                    _out_pred = shifted_sigmoid(
+                        outs,
+                        shift=self.importance_multiplier,
+                        multiplier=1
+                    ) * out_true
                     exp_loss = self.compiled_classification_loss(out_true, _out_pred)
 
                 exp_loss *= self.importance_factor

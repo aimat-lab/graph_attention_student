@@ -21,7 +21,7 @@ Changelog
   large amounts of data a scatter plot becomes very memory inefficient when exported as a vector graphic
   PDF!
 
-0.5.0 - 20.01.2022
+0.5.0 - 20.01.2023
 ------------------
 
 - Added the ``templates`` folder and some templates to create latex code for the automatic generation
@@ -33,3 +33,10 @@ Changelog
   VGD dataset
 - Added ``examples.vgd_multitask_gatv2`` which trains a GATv2 model on a multitask VGD dataset
 - Added ``examples.vgd_multitask_gin`` which trains a GIN model on a multitask VGD dataset.
+
+0.6.0 - 27.02.2023
+------------------
+
+- Fixed the classification explanation step in MEGAN
+- Added the ``keras`` model which is important for loading MEGAN models from persistent representation
+  on the disk
