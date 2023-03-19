@@ -1,3 +1,7 @@
+"""
+DEPRECATED - The contents of this module have been split into individual modules within the "models"
+package.
+"""
 from typing import List, Optional, Callable, Tuple, Union
 import time
 import logging
@@ -761,7 +765,7 @@ class Megan(ks.models.Model):
                  regression_bins: t.Optional[t.List[t.Tuple[float, float]]] = None,
                  regression_reference: t.Optional[float] = None,
                  return_importances: bool = True,
-                 use_graph_attributes: bool = True,
+                 use_graph_attributes: bool = False,
                  **kwargs):
         """
         Args:
@@ -861,7 +865,7 @@ class Megan(ks.models.Model):
 
         # ~ NODE IMPORTANCES
         self.node_importance_units = importance_units + [self.importance_channels]
-        self.node_importance_acts = ['relu' for _ in importance_units] + ['linear']
+        self.node_importance_acts = ['kgcnn>leaky_relu' for _ in importance_units] + ['linear']
         self.node_importance_layers = []
         for u, act in zip(self.node_importance_units, self.node_importance_acts):
             lay = DenseEmbedding(
@@ -876,10 +880,10 @@ class Megan(ks.models.Model):
         self.lay_concat_out = LazyConcatenate(axis=-1)
         self.lay_final_dropout = DropoutEmbedding(rate=self.final_dropout_rate)
 
-        self.final_acts = ["relu" for _ in self.final_units]
+        self.final_acts = ['kgcnn>leaky_relu' for _ in self.final_units]
         self.final_acts[-1] = self.final_activation
         self.final_biases = [True for _ in self.final_units]
-        self.final_biases[-1] = False
+        self.final_biases[-1] = True
         self.final_layers = []
         for u, act, bias in zip(self.final_units, self.final_acts, self.final_biases):
             lay = DenseEmbedding(
@@ -964,7 +968,8 @@ class Megan(ks.models.Model):
              inputs,
              training: bool = False,
              return_importances: bool = False,
-             node_importances_mask: t.Optional[tf.RaggedTensor] = None):
+             node_importances_mask: t.Optional[tf.RaggedTensor] = None,
+             **kwargs):
         """
         Forward pass of the model.
 
@@ -1075,9 +1080,10 @@ class Megan(ks.models.Model):
 
         # Now "out" is a graph embedding vector of known dimension so we can simply apply the normal dense
         # mlp to get the final output value.
-        for lay in self.final_layers:
+        num_final_layers = len(self.final_layers)
+        for c, lay in enumerate(self.final_layers):
             out = lay(out)
-            if training:
+            if training and c < num_final_layers - 2:
                 out = self.lay_final_dropout(out, training=training)
 
         if self.doing_regression:
@@ -1552,27 +1558,31 @@ class GcnGradientModel(AbstractGradientModel, GNNInterface):
     def __init__(self,
                  batch_size: int,
                  units: t.List[int],
-                 num_outputs: int,
-                 pooling_method: str = 'mean'):
+                 final_units: t.List[int],
+                 layer_cb: t.Callable = lambda units: GCN(units=units),
+                 pooling_method: str = 'mean',
+                 final_activation: str = 'linear'):
         AbstractGradientModel.__init__(self)
         GNNInterface.__init__(self)
 
         self.batch_size = batch_size
         self.units = units
-        self.num_outputs = num_outputs
+        self.num_outputs = final_units[-1]
 
         self.conv_layers = []
         for k in self.units:
-            lay = GCN(
-                units=k,
-                pooling_method='sum',
-                activation='relu'
-            )
+            lay = layer_cb(k)
             self.conv_layers.append(lay)
 
         self.lay_pooling = PoolingNodes(pooling_method=pooling_method)
-        self.lay_dense = DenseEmbedding(units=num_outputs)
-        self.lay_activation = ActivationEmbedding(activation='linear')
+
+        self.final_units = final_units
+        self.final_acts = ['kgcnn>leaky_relu' for _ in final_units]
+        self.final_acts[-1] = final_activation
+        self.final_layers = []
+        for k, act in zip(self.final_units, self.final_acts):
+            lay = DenseEmbedding(units=k, activation=act)
+            self.final_layers.append(lay)
 
     def call_with_gradients(self, inputs, training=True, create_gradients=True, batch_size=None):
         if batch_size is None:
@@ -1592,8 +1602,10 @@ class GcnGradientModel(AbstractGradientModel, GNNInterface):
                 node_activations.append(x)
 
             out = self.lay_pooling(x)
-            out = self.lay_dense(out)
-            out = self.lay_activation(out)
+
+            for lay in self.final_layers:
+                out = lay(out)
+
             outs = [out[b, :] for b in range(batch_size)]
             outs_multi = [[out[b, o] for o in range(self.num_outputs)] for b in range(batch_size)]
 
@@ -1605,7 +1617,6 @@ class GcnGradientModel(AbstractGradientModel, GNNInterface):
             edge_gradient_info = []
 
         return out, node_gradient_info, edge_gradient_info, tape
-        # return out, node_information, edge_information, tape
 
     def call(self,
              inputs,
@@ -1757,28 +1768,39 @@ class GnesGradientModel(AbstractGradientModel):
 
     def __init__(self,
                  units: t.List[int],
-                 num_outputs: int,
                  batch_size: int,
                  importance_func: t.Callable,
+                 layer_cb: t.Callable = lambda units: GCN(units=units, activation='kgcnn>leaky_relu'),
                  sparsity_factor: float = 0.1,
-                 activation: str = 'linear',
-                 pooling_method: str = 'mean'):
+                 final_units: t.List[int] = [1],
+                 final_activation: str = 'linear',
+                 pooling_method: str = 'sum'):
         super(GnesGradientModel, self).__init__()
         self.importance_func = importance_func
         self.batch_size = batch_size
-        self.num_outputs = num_outputs
+        self.num_outputs = final_units[-1]
 
         self.conv_layers = []
         for k in units:
-            lay = GCN(
-                units=k,
-            )
+            lay = layer_cb(k)
             self.conv_layers.append(lay)
 
+        # ~ global pooling
         self.lay_pooling = PoolingNodes(pooling_method=pooling_method)
-        self.lay_dense = DenseEmbedding(units=num_outputs)
-        self.lay_act = ActivationEmbedding(activation=activation)
 
+        # ~ mlp tail-end
+        self.final_units = final_units
+        self.final_acts = ['kgcnn>leaky_relu' for _ in self.final_units]
+        self.final_acts[-1] = final_activation
+        self.final_layers = []
+        for k, act in zip(self.final_units, self.final_acts):
+            lay = DenseEmbedding(
+                units=k,
+                activation=act
+            )
+            self.final_layers.append(lay)
+
+        # ~ regularization
         self.lay_sparsity = ExplanationSparsityRegularization(factor=sparsity_factor)
 
     def call_with_gradients(self, inputs, training=True, batch_size=None, create_gradients=True):
@@ -1792,15 +1814,19 @@ class GnesGradientModel(AbstractGradientModel):
             tape.watch(node_input)
             tape.watch(edge_input)
 
+            # ~ convolutional layers
             edge_activations = [edge_input]
             node_activations = [node_input]
             for lay in self.conv_layers:
                 x = lay([x, edge_input, edge_index_input])
                 node_activations.append(x)
 
+            # ~ global pooling
             out = self.lay_pooling(x)
-            out = self.lay_dense(out)
-            out = self.lay_act(out)
+
+            # ~ mlp tail end
+            for lay in self.final_layers:
+                out = lay(out)
 
             outs = [[out[b, o] for o in range(self.num_outputs)] for b in range(batch_size)]
 
@@ -1817,7 +1843,7 @@ class GnesGradientModel(AbstractGradientModel):
             return out, node_importances, edge_importances
 
         else:
-            return out
+            return out, None, None
 
     def call(self, inputs, *args, **kwargs):
         return self.call_with_gradients(inputs, *args, **kwargs)

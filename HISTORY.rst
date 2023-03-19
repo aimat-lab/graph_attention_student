@@ -40,3 +40,10 @@ Changelog
 - Fixed the classification explanation step in MEGAN
 - Added the ``keras`` model which is important for loading MEGAN models from persistent representation
   on the disk
+
+0.7.0 -
+------------------
+
+- Moved the contents of ``model.py`` into individual modules of the ``models`` package because that module
+  was getting way too big.
+- Small improvements for the gradient based models and the GNES implementation.

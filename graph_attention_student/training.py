@@ -190,9 +190,9 @@ def bce(y_true, y_pred):
 
 
 def mae(y_true, y_pred):
+    y_true = tf.cast(y_true, tf.float32)
     nan_multiplier = tf.where(tf.math.is_nan(y_true), 0., 1.)
 
-    y_true = tf.cast(y_true, tf.float32)
     y_true = tf.where(tf.math.is_nan(y_true), 0., y_true)
     loss = tf.abs(y_true - y_pred)
 

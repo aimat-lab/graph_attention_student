@@ -7,8 +7,8 @@ name = "graph_attention_student"
 version = "0.6.0"
 description = "MEGAN: Multi Explanation Graph Attention Network"
 license = "MIT"
-authors = ["xxx <xxx>"]
-maintainers = ["xxx <xxx>"]
+authors = ["xxx <jonseb1998@gmail.com>"]
+maintainers = ["xxx <jonseb1998@gmail.com>"]
 readme = "README.rst"
 keywords = ["graph neural network", "attention", "kgcnn"]
 packages = [
@@ -20,9 +20,9 @@ include = [
     "graph_attention_student/VERSION",
 ]
 exclude = [
-    "graph_attention_student/datasets/tadf",
-    "graph_attention_student/datasets/aqsoldb",
-    "graph_attention_student/datasets/movie_reviews",
+    "graph_attention_student/experiments/results",
+    "graph_attention_student/examples/results",
+    "venv"
 ]
 
 [tool.poetry.scripts]
@@ -41,6 +41,7 @@ tensorflow = ">=2.8.0"
 kgcnn = ">=2.2.1"
 nltk = ">=3.7"
 rdkit = ">=2022.9.1"
+orjson = ">=3.8.0"
 poetry-bumpversion = ">=0.3.0"
 visual_graph_datasets = ">=0.7.2"
 
