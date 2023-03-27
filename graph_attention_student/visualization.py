@@ -34,16 +34,33 @@ def plot_regression_fit(values_true: t.Union[np.ndarray, t.List[float]],
                         reference_color: str = 'gray',
                         ):
     """
+    Plots a regression plot in the Axes ``ax`` using the true target values ``values_true`` and the
+    predicted values ``values_pred``. The plot is in the format of a heatmap, where ``num`` defines the
+    granularity of that heat map in x and y direction of the plot.
 
-    :param values_true: A one dimensional array
-    :param values_pred:
-    :param ax:
-    :param num:
-    :param cmap:
-    :param plot_reference:
-    :param reference_color:
-    :return:
+    It is important that the arrays for the true and predicted values have the same number of elements!
+
+    :param values_true: An array containing the ground truth float target values.
+    :param values_pred: An array containing the predicted values which were created by some sort of
+        regression model.
+    :param ax: The matplotlib Axes on which to draw the plot
+    :param num: The integer number which defines the granularity of the heatmap plot. The heatmap is
+        discretized in x and y direction using binning with ``num`` bins.
+    :param cmap: The matplotlib color map, to be used for the heatmap visualization.
+    :param plot_reference: This flag determines if the regression reference line is also to be drawn onto
+        the plot. The reference line is a line from the bottom left corner to the top right corner of the
+        plot. If all the elements of the regression plot are exactly on that line, it is considered to be a
+        perfect regression result.
+    :param reference_color: The color to be used for the reference line.
+
+    :return: The binned value map which is the basis for the heatmap.
     """
+    # 27.03.2023 - Here we turn the input into a numpy array but more important is the squeeze operation,
+    # which fixes a bug, where the function cannot be directly applied to the output of a neural network
+    # as that has an additional (redundant) dimension for the output tensor.
+    values_true = np.squeeze(np.array(values_true))
+    values_pred = np.squeeze(np.array(values_pred))
+
     min_value = min(np.min(values_true), np.min(values_pred))
     max_value = max(np.max(values_true), np.max(values_pred))
     xs = np.linspace(min_value, max_value, num)

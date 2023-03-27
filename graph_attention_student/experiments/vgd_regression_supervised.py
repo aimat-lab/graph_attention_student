@@ -499,6 +499,15 @@ with Skippable(), e.analysis:
 
     # ~ Latex table with the results over all repetitions
     e.info('rendering latex table with the results...')
+
+    # :hook additional_columns:
+    #       This hook can be used to add additional columns to the final latex evaluation table from
+    #       within the child experiments. It has to return a tuple of two lists of same size.
+    #       the first is a list of string names for the columns and the second list is a list of
+    #       callback functions, which if given the repetition index and the key, return all the values
+    #       for the corresponding metric to be used as a base for the table columns contents.
+    additional_column_names, additional_callbacks = e.apply_hook('additional_columns', default=([], []))
+
     column_names = [
         r'Model Key',
         r'$\text{MSE} \downarrow$',
@@ -508,7 +517,7 @@ with Skippable(), e.analysis:
         r'$\text{Node Sparsity} \downarrow$',
         r'$\text{Edge Sparsity} \downarrow$',
         r'$\text{Fidelity} \uparrow$',
-    ]
+    ] + additional_column_names
     rows = []
     for key in e['keys']:
         row = []
@@ -527,6 +536,11 @@ with Skippable(), e.analysis:
                     for rep in REPETITIONS_CLEAN])
         row.append([np.mean(list(e[f'diff_fidelity/{key}/{rep}'].values()))
                     for rep in REPETITIONS_CLEAN])
+
+        # Each one of the additional callbacks is supposed to return a list of all the values corresponding
+        # to the metrics for exactly that key and that repetition
+        for cb in additional_callbacks:
+            row.append([np.mean(cb(key, rep)) for rep in REPETITIONS_CLEAN])
 
         rows.append(row)
 

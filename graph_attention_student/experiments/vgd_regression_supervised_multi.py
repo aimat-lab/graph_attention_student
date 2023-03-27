@@ -20,8 +20,8 @@ NODE_IMPORTANCES_KEY = 'node_importances_2'
 EDGE_IMPORTANCES_KEY = 'edge_importances_2'
 
 # == MODEL PARAMETERS ==
-UNITS: t.List[int] = [5, 5, 5]
-FINAL_UNITS: t.List[int] = [5, 1]
+UNITS: t.List[int] = [6, 6, 6]
+FINAL_UNITS: t.List[int] = [3, 1]
 FINAL_ACTIVATION: str = 'linear'
 IMPORTANCE_CHANNELS: int = 2
 IMPORTANCE_FACTOR: float = 1.0
@@ -34,7 +34,7 @@ CHANNEL_DIRECTIONS = {0: -1, 1: 1}
 # == EXPERIMENT PARAMETERS ==
 EXPERIMENT_PATH = os.path.join(PATH, 'vgd_regression_supervised.py')
 BASE_PATH = PATH
-NAMESPACE = os.path.basename(__file__).strip('.py')
+NAMESPACE = 'results/' + os.path.basename(__file__).strip('.py')
 DEBUG = True
 with Skippable(), (se := SubExperiment(EXPERIMENT_PATH, BASE_PATH, NAMESPACE, globals())):
 
@@ -104,7 +104,7 @@ with Skippable(), (se := SubExperiment(EXPERIMENT_PATH, BASE_PATH, NAMESPACE, gl
                 node_masks = []
                 for c, index in enumerate(test_indices):
                     ni = ni_pred[c]
-                    node_mask = ni.copy()
+                    node_mask = np.ones_like(ni)
                     node_mask[:, i] = 0
                     node_masks.append(node_mask)
 
@@ -127,3 +127,13 @@ with Skippable(), (se := SubExperiment(EXPERIMENT_PATH, BASE_PATH, NAMESPACE, gl
                    f' * median: {np.median(fidelities):.3f}\n'
                    f' * mean: {np.mean(fidelities):.3f}\n'
                    f' * std: {np.std(fidelities):.3f}\n')
+
+    # This hook adds the "fidelity_ast" metric results as an additional column to the final latex
+    # evaluation table.
+    @se.hook('additional_columns')
+    def additional_columns(e):
+
+        def fidelity_ast_callback(key, rep):
+            return list(e[f'fidelity_ast/{rep}/{key}'].values())
+
+        return [r'$\text{fidelity}^{*}$'], [fidelity_ast_callback]

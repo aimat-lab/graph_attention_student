@@ -46,7 +46,7 @@ GNES_LAYER_CB: t.Callable = lambda units: AttentionHeadGATV2(
 # == EXPERIMENT PARAMETERS ==
 EXPERIMENT_PATH = os.path.join(PATH, 'vgd_regression_supervised.py')
 BASE_PATH = PATH
-NAMESPACE = os.path.basename(__file__).strip('.py')
+NAMESPACE = 'results/' + os.path.basename(__file__).strip('.py')
 DEBUG = True
 with Skippable(), (se := SubExperiment(EXPERIMENT_PATH, BASE_PATH, NAMESPACE, globals())):
 
