@@ -53,6 +53,44 @@ def numpy_to_native(value):
         return value
 
 
+def process_index_data_map(index_data_map: t.Dict[int, dict],
+                           insert_empty_importances: bool = True,
+                           importance_channels: int = 1,
+                           ) -> t.Tuple[list, list]:
+    """
+    Given the ``index_data_map`` which was loaded from a visual graph dataset, this function will return a
+    tuple of two values: The first is the list of integer indices of the all the dataset elements and the
+    second element is the list of graph dicts representing each corresponding element.
+
+    :param index_data_map: A dict whose keys are the integer indices of the dataset elements and the values
+        the corresponding dictionaries containing all the relevant data about those elements. The format
+        of this data structure should be exactly as returned by the "load_visual_graph_dataset" function.
+    :param insert_empty_importances: boolean flag, if true empty (zero) numpy arrays will be inserted into
+        each graph dict for the "node_importances" and "edge_importances" field.
+    :param importance_channels: The integer number of importance channels to be used for the insertion of
+        the zero importance arrays.
+
+    :returns: A tuple of two lists.
+    """
+    dataset_length = len(index_data_map)
+    dataset_indices = []
+    dataset = [None for _ in range(dataset_length)]
+    for index, data in index_data_map.items():
+        g = data['metadata']['graph']
+
+        if insert_empty_importances:
+            num_nodes = len(g['node_indices'])
+            g['node_importances'] = np.zeros(shape=(num_nodes, importance_channels), dtype=float)
+
+            num_edges = len(g['edge_indices'])
+            g['edge_importances'] = np.zeros(shape=(num_edges, importance_channels), dtype=float)
+
+        dataset[index] = g
+        dataset_indices.append(index)
+
+    return dataset_indices, dataset
+
+
 def process_graph_dataset(dataset: t.List[dict],
                           test_indices: t.Optional[t.List[int]] = None,
                           train_indices: t.Optional[List[int]] = None,

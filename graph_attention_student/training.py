@@ -1,6 +1,7 @@
 import time
 import types
 import logging
+import typing as t
 from typing import List, Dict, Optional, Callable
 from collections import defaultdict
 
@@ -189,11 +190,30 @@ def bce(y_true, y_pred):
     return tf.reduce_mean(loss)
 
 
-def mae(y_true, y_pred):
-    y_true = tf.cast(y_true, tf.float32)
-    nan_multiplier = tf.where(tf.math.is_nan(y_true), 0., 1.)
+def mae(y_true: t.Union[tf.Tensor, tf.RaggedTensor],
+        y_pred: t.Union[tf.Tensor, tf.RaggedTensor],
+        ) -> float:
+    """
+    A custom implementation of the "mean absolute error" loss.
 
-    y_true = tf.where(tf.math.is_nan(y_true), 0., y_true)
+    Unlike the default keras implementation, this custom implementation supports two additional features:
+    1. It is able to handle RaggedTensors properly
+    2. It is able to handle NaN values in y_true. This is especially important for multitask learning where
+       not every element may have a defined target value for all targets. NaN values will be handled such
+       that there will result NO gradients from those elements.
+
+    :param y_true: The tensor of ground truth values
+    :param y_pred: The tensor of predicted values from the model
+
+    :returns: A single float loss value
+    """
+    y_true = tf.cast(y_true, tf.float32)
+    # 01.04.2023 - Changed the way in which the nan_multiplier is created here because it turned out that
+    # the previous method with tf.where was not supported for RaggedTensors.
+    # nan_multiplier = tf.where(tf.math.is_nan(y_true), 0., 1.)
+    nan_multiplier = tf.cast(tf.math.is_nan(y_true), tf.float32)
+    nan_multiplier = tf.ones_like(nan_multiplier) - nan_multiplier
+
     loss = tf.abs(y_true - y_pred)
 
     loss *= nan_multiplier
@@ -205,16 +225,34 @@ def mae(y_true, y_pred):
 mae.name = 'mean_absolute_error'
 
 
-def mse(y_true, y_pred):
-    nan_multiplier = tf.where(tf.math.is_nan(y_true), 0., 1.)
+def mse(y_true: t.Union[tf.Tensor, tf.RaggedTensor],
+        y_pred: t.Union[tf.Tensor, tf.RaggedTensor],
+        ) -> float:
+    """
+    A custom implementation of the "mean squared error" loss.
 
+    Unlike the default keras implementation, this custom implementation supports two additional features:
+    1. It is able to handle RaggedTensors properly
+    2. It is able to handle NaN values in y_true. This is especially important for multitask learning where
+       not every element may have a defined target value for all targets. NaN values will be handled such
+       that there will result NO gradients from those elements.
+
+    :param y_true: The tensor of ground truth values
+    :param y_pred: The tensor of predicted values from the model
+
+    :returns: A single float loss value
+    """
     y_true = tf.cast(y_true, tf.float32)
-    y_true = tf.where(tf.math.is_nan(y_true), 0., y_true)
+    # 01.04.2023 - Changed the way in which the nan_multiplier is created here because it turned out that
+    # the previous method with tf.where was not supported for RaggedTensors.
+    # nan_multiplier = tf.where(tf.math.is_nan(y_true), 0., 1.)
+    nan_multiplier = tf.cast(tf.math.is_nan(y_true), tf.float32)
+    nan_multiplier = tf.ones_like(nan_multiplier) - nan_multiplier
+
     loss = tf.square(y_true - y_pred)
 
     loss *= nan_multiplier
     loss = tf.reduce_sum(loss, axis=-1)
-    # print(loss)
 
     return tf.reduce_mean(loss)
 
@@ -223,7 +261,24 @@ mse.name = 'mean_squared_error'
 
 
 class ExplanationLoss(ks.losses.Loss):
+    """
+    Implementation of keras Loss specifically for attributional explanations.
 
+    The thing which makes the loss for attributional explanations special is that the corresponding
+    ground truth and predicted tensors are tf.RaggedTensors, which are made up of graphs with different
+    sizes.
+
+    :param loss_function: A python function which accepts two positional parameters (y_true, y_pred) and
+        returns a single float loss value. NOTE: This function must explicitly support RaggedTensors, which
+        is usually not the case for the keras built-in loss functions!
+    :param mask_empty_explanations: A boolean flag of whether completely empty explanations should be masked
+        out completely. If this is True, a completely empty ground truth explanation will not be used to
+        train the predicted explanations to be empty as well, but rather all gradients will be stopped
+        for that case entirely, such that it does not affect the model training process at all.
+    :param reduce: A boolean flag of whether the last explanation dimension should be reduced before
+        attempting to calculate the loss. Default is False.
+    :param factor: An additional float value which is multiplied with the final loss value. Default is 1.0
+    """
     def __init__(self,
                  loss_function: ks.losses.Loss = bce,
                  mask_empty_explanations: bool = False,

@@ -208,7 +208,13 @@ class GcnGradientModel(AbstractGradientModel, GNNInterface):
 def grad_importances(gradient_info: t.List[t.Tuple[tf.Tensor, tf.Tensor]],
                      use_relu: bool = False,
                      use_absolute: bool = False,
-                     keepdims: bool = False):
+                     use_sigmoid: bool = False,
+                     keepdims: bool = False
+                     ) -> tf.RaggedTensor:
+    """
+
+    """
+
     # shapes as we get them:
     # gradients: ([B], [V], O, F)
     # activation: ([B], [V], F)
@@ -225,6 +231,8 @@ def grad_importances(gradient_info: t.List[t.Tuple[tf.Tensor, tf.Tensor]],
         importances = ks.backend.relu(importances)
     if use_absolute:
         importances = tf.abs(importances)
+    if use_sigmoid:
+        importances = ks.backend.sigmoid(importances)
 
     return importances
 

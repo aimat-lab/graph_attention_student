@@ -49,3 +49,41 @@ Changelog
 - Small improvements for the gradient based models and the GNES implementation.
 - Changed the version dependency for numpy
 - improved the ``visualization.plot_regression_map`` function
+
+0.7.1 - 01.04.2023
+------------------
+
+- Added documentation
+- Fixed a bug related to RaggedTensor support in the functions ``training.mae`` and ``training.mse``
+- Minor Bug fixes
+
+0.7.2 - 27.04.2023
+------------------
+
+- Added an alternative explanation co-training parameter to the MEGAN model ``regression_weights`` which
+  will now slowly replace ``regression_limits``. The old version will still work but be deprecated in the
+  future. This new parameter can be used in junction with ``importance_multiplier`` to set relative weights
+  for negative and positive individually.
+
+0.8.0 - 27.04.2023
+------------------
+
+- Started moving towards the pycomex functional interface which was introduced in the newest version of
+  pycomex
+- Changed the pycomex version dependency
+
+0.9.0 - 01.05.2023
+------------------
+
+- fixed an important bug with the loading of a previously saved Megan model
+- Megan model now implements the ``PredictGraphMixin`` from ``visual_graph_datasets``
+- Added the ``vgd_counterfactuals`` library to the dependencies
+- Started to generally move towards the new Functional API of ``pycomex``
+
+Examples
+
+- Started working on some actual documented examples
+    - ``examples/02_saving_models.py``
+    - ``examples/03_loading_models.py``
+    - ``examples/04_counterfactuals.py``
+- Added ``examples/README.rst``

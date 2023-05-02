@@ -6,7 +6,7 @@ from pycomex.util import Skippable
 from pycomex.experiment import SubExperiment
 
 # == DATASET PARAMETERS ==
-VISUAL_GRAPH_DATASET_PATH: str = os.path.expanduser('~/.visual_graph_datasets/datasets/aqsoldb')
+VISUAL_GRAPH_DATASET_PATH: str = os.path.expanduser('/media/ssd/.visual_graph_datasets/datasets/aqsoldb')
 USE_DATASET_SPLIT: t.Optional[int] = 0
 TRAIN_RATIO: float = 0.8
 NUM_EXAMPLES: int = 100
@@ -19,14 +19,22 @@ USE_EDGE_ATTRIBUTES: bool = True
 USE_EDGE_LENGTHS: bool = False
 
 # == MODEL PARAMETERS ==
-UNITS = [32, 32, 32]
+UNITS = [64, 64, 64]
+DROPOUT_RATE = 0.3
 FINAL_UNITS = [64, 32, 1]
-REGRESSION_REFERENCE = -3
-REGRESSION_LIMITS = [[-12, 3]]
+REGRESSION_LIMITS = None
+REGRESSION_REFERENCE = [-1.0]
+REGRESSION_WEIGHTS = [[1.0, 2.0]]
+IMPORTANCE_CHANNELS: int = 2
+IMPORTANCE_FACTOR = 1.0
+IMPORTANCE_MULTIPLIER = 1.0
+SPARSITY_FACTOR = 3.0
+CONCAT_HEADS = False
 
 # == TRAINING PARAMETERS ==
-BATCH_SIZE = 128
-REPETITIONS = 5
+BATCH_SIZE = 32
+EPOCHS = 50
+REPETITIONS = 1
 
 # == EXPERIMENT PARAMETERS ==
 PATH = pathlib.Path(__file__).parent.absolute()

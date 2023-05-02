@@ -2,6 +2,7 @@ import typing as t
 
 import tensorflow as tf
 import tensorflow.keras as ks
+import visual_graph_datasets.typing as tv
 from tensorflow.python.keras.engine import compile_utils
 from kgcnn.data.utils import ragged_tensor_from_nested_numpy
 from kgcnn.layers.modules import GraphBaseLayer
@@ -10,6 +11,8 @@ from kgcnn.layers.modules import DenseEmbedding, ActivationEmbedding, DropoutEmb
 from kgcnn.layers.pooling import PoolingLocalEdges
 from kgcnn.layers.pooling import PoolingNodes
 from kgcnn.layers.pooling import PoolingWeightedNodes
+
+from graph_attention_student.data import process_graph_dataset
 from graph_attention_student.layers import ExplanationSparsityRegularization
 from graph_attention_student.layers import MultiHeadGATV2Layer
 from graph_attention_student.training import mae
@@ -51,6 +54,7 @@ class Megan(ks.models.Model):
                  final_activation: str = 'linear',
                  final_pooling: str = 'sum',
                  regression_limits: t.Optional[t.Tuple[float, float]] = None,
+                 regression_weights: t.Optional[t.Tuple[float, float]] = None,
                  regression_bins: t.Optional[t.List[t.Tuple[float, float]]] = None,
                  regression_reference: t.Optional[float] = None,
                  return_importances: bool = True,
@@ -121,6 +125,7 @@ class Megan(ks.models.Model):
         self.final_activation = final_activation
         self.final_pooling = final_pooling
         self.regression_limits = regression_limits
+        self.regression_weights = regression_weights
         self.regression_reference = regression_reference
         self.regression_bins = regression_bins
         self.return_importances = return_importances
@@ -184,20 +189,18 @@ class Megan(ks.models.Model):
 
         # ~ EXPLANATION ONLY TRAIN STEP
         self.bce_loss = ks.losses.BinaryCrossentropy()
-        self.compiled_classification_loss = compile_utils.LossesContainer(self.bce_loss)
+        self.compiled_classification_loss = compile_utils.LossesContainer(bce)
 
         self.mse_loss = ks.losses.MeanSquaredError()
         self.mae_loss = ks.losses.MeanAbsoluteError()
         self.compiled_regression_loss = compile_utils.LossesContainer(mae)
 
+        # TODO: Clean up this mess
         # If regression_limits have been supplied, we interprete this as the intent to perform explanation
         # co-training for a regression dataset.
         # So the content of this if condition makes sure to perform the necessary pre-processing steps
         # for this case.
-        if self.regression_limits is not None:
-            # first of all we do some simple assertions to handle some common error cases
-            assert regression_reference is not None, ('You have to supply a "regression_reference" value for '
-                                                      'explanation co-training!')
+        if self.regression_reference is not None:
 
             # This is the first and simpler case for regression explanation co-training: In this case the
             # regression reference value is only a single value. In that case, there is only one target
@@ -209,7 +212,16 @@ class Megan(ks.models.Model):
                 self.regression_reference = [regression_reference]
 
             num_references = len(self.regression_reference)
-            num_limits = len(self.regression_limits)
+
+            if self.regression_weights is not None:
+                num_values = len(self.regression_weights)
+            elif self.regression_limits is not None:
+                num_values = len(self.regression_limits)
+            else:
+                raise AssertionError(f'You have supplied a non-null value for regression_reference: '
+                                     f'{self.regression_reference}. That means you need to either supply '
+                                     f'a valid value for regression_limits or regression_weights as well')
+
             assert num_references * 2 == importance_channels, (
                 f'for explanation co-training, the number of regression_references (currently {num_references}) has '
                 f'to be exactly half the number of importance channels (currently {importance_channels})!'
@@ -218,9 +230,9 @@ class Megan(ks.models.Model):
                 f'For explanation co-training, the number of regression_references (currently {num_references}) has '
                 f'to be exactly the same as the final unit count in the MLP tail end (currently {final_units[-1]})'
             )
-            assert num_references == num_limits, (
+            assert num_references == num_values, (
                 f'For explanation co-training, the number of regression_references (currently {num_references}) has '
-                f'to be exactly the same as the number of regression_limits intervals (currently {num_limits})'
+                f'to be exactly the same as the number of regression_limits intervals (currently {num_values})'
             )
 
     def get_config(self):
@@ -244,14 +256,24 @@ class Megan(ks.models.Model):
             "final_activation": self.final_activation,
             "final_pooling": self.final_pooling,
             "regression_limits": self.regression_limits,
+            "regression_weights": self.regression_weights,
             "regression_reference": self.regression_reference,
-            "return_importances": self.return_importances
+            "return_importances": self.return_importances,
+            "use_graph_attributes": self.use_graph_attributes,
         })
 
         return config
+
+    # ~ Properties
+
     @property
     def doing_regression(self) -> bool:
-        return self.regression_limits is not None
+        return (self.regression_limits is not None) or (self.regression_weights is not None)
+
+    def doing_regression_weights(self) -> bool:
+        return self.regression_weights is not None
+
+    # ~ Forward Pass Implementation
 
     def call(self,
              inputs,
@@ -391,13 +413,23 @@ class Megan(ks.models.Model):
                                 out_true):
         samples = []
         masks = []
-        for i, (regression_reference, regression_limits) in enumerate(zip(self.regression_reference,
-                                                                          self.regression_limits)):
 
-            regression_width = abs(regression_limits[1] - regression_limits[0])
+        for i, regression_reference in enumerate(self.regression_reference):
             values = tf.expand_dims(out_true[:, i], axis=-1)
             center_distances = tf.abs(values - regression_reference)
-            center_distances = (center_distances * self.importance_multiplier) / (0.5 * regression_width)
+
+            if self.doing_regression_weights:
+                regression_weights = self.regression_weights[i]
+                center_distances = tf.where(
+                    values < regression_reference,
+                    center_distances * (self.importance_multiplier * regression_weights[0]),
+                    center_distances * (self.importance_multiplier * regression_weights[1]),
+                )
+
+            else:
+                regression_limits = self.regression_limits[i]
+                regression_width = abs(regression_limits[1] - regression_limits[0])
+                center_distances = (center_distances * self.importance_multiplier) / (0.5 * regression_width)
 
             # So we need two things: a "samples" tensor and a "mask" tensor. We are going to use the samples
             # tensor as the actual ground truth which acts as the regression target during the explanation
@@ -550,3 +582,21 @@ class Megan(ks.models.Model):
             **{m.name: m.result() for m in self.metrics},
             **exp_metrics
         }
+
+    # -- Implements "PredictGraphMixin"
+    # These following method implementations are required to
+
+    def predict_graphs(self, graph_list: t.List[tv.GraphDict]):
+        indices = list(range(len(graph_list)))
+        x, _, _, _ = process_graph_dataset(
+            dataset=graph_list,
+            train_indices=indices,
+            test_indices=indices,
+            use_importances=False,
+            use_graph_attributes=False,
+        )
+
+        return list(zip(*[v.numpy() for v in self(x)]))
+
+    def predict_graph(self, graph: tv.GraphDict):
+        return self.predict_graphs([graph])[0]

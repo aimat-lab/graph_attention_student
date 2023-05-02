@@ -1,3 +1,9 @@
+"""
+
+CHANGELOG
+
+0.1.0
+"""
 import os
 import pathlib
 import typing as t
@@ -60,8 +66,9 @@ CONCAT_HEADS: bool = False
 # network for the regression case. The regression limits should be as complete as possible. The reference
 # does not have to be in the middle, changing it will influence the development of the explanations quite
 # a bit.
-REGRESSION_REFERENCE = 0
+REGRESSION_REFERENCE = [0]
 REGRESSION_LIMITS = [[-3, 3]]
+REGRESSION_WEIGHTS = [[1, 1]]
 
 CHANNEL_DIRECTIONS = {
     0: -1,
@@ -79,7 +86,7 @@ FINAL_DROPOUT = 0.0
 
 # == TRAINING PARAMETERS ==
 EPOCHS = 250
-OPTIMIZER_CB = lambda: ks.optimizers.Nadam(learning_rate=0.01)
+OPTIMIZER_CB = lambda: ks.optimizers.Nadam(learning_rate=0.001)
 
 
 # == EVALUATION PARAMETERS ==
@@ -97,6 +104,7 @@ with Skippable(), (se := SubExperiment(EXPERIMENT_PATH, BASE_PATH, NAMESPACE, gl
     @se.hook('create_model')
     def create_model(e):
         e.info('MEGAN')
+        e.info(f' * SPARSITY_FACTOR: {e.parameters["SPARSITY_FACTOR"]}')
         model = Megan(
             units=e.parameters['UNITS'],
             dropout_rate=e.parameters['DROPOUT_RATE'],
@@ -106,6 +114,7 @@ with Skippable(), (se := SubExperiment(EXPERIMENT_PATH, BASE_PATH, NAMESPACE, gl
             sparsity_factor=e.parameters['SPARSITY_FACTOR'],
             regression_reference=e.parameters['REGRESSION_REFERENCE'],
             regression_limits=e.parameters['REGRESSION_LIMITS'],
+            regression_weights=e.parameters['REGRESSION_WEIGHTS'],
             final_units=e.parameters['FINAL_UNITS'],
             final_dropout_rate=e.parameters['FINAL_DROPOUT'],
             use_graph_attributes=False,
@@ -163,6 +172,9 @@ with Skippable(), (se := SubExperiment(EXPERIMENT_PATH, BASE_PATH, NAMESPACE, gl
     def calculate_fidelity(e, model, indices_true, x_true, y_true, out_pred, ni_pred, ei_pred):
         rep = e['rep']
 
+        if e.p['IMPORTANCE_CHANNELS'] != len(e.p['CHANNEL_DIRECTIONS']):
+            return [0]
+
         # ~ fidelity
         # For each importance channel we construct a mask which only masks out that very channel
         # and then we query the model using that mask, which effectively means that this channel
@@ -197,3 +209,9 @@ with Skippable(), (se := SubExperiment(EXPERIMENT_PATH, BASE_PATH, NAMESPACE, gl
 
         return fidelities
 
+    @se.hook('save_model')
+    def save_model(e, model):
+        e.info('saving the MEGAN model...')
+        model_path = os.path.join(e.path, 'model')
+        e['model_path'] = model_path
+        model.save(model_path)
