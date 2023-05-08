@@ -87,3 +87,11 @@ Examples
     - ``examples/03_loading_models.py``
     - ``examples/04_counterfactuals.py``
 - Added ``examples/README.rst``
+
+0.10.0 - 08.05.2023
+------------------
+
+- Added a development version of ``FidelityMegan`` model which can be trained directly to match a
+  fidelity target.
+- Added a ``keras.load_model`` utility function
+- Added the ``layers.ExplanationGiniRegularization`` layer

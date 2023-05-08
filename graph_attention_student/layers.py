@@ -362,6 +362,44 @@ class ExplanationSparsityRegularization(GraphBaseLayer):
         self.add_loss(loss * self.factor)
 
 
+class ExplanationGiniRegularization(GraphBaseLayer):
+
+    def __init__(self,
+                 factor: float,
+                 num_channels: int,
+                 **kwargs):
+        super(ExplanationGiniRegularization, self).__init__(**kwargs)
+        self.factor = factor
+        self.num_channels = num_channels
+
+    def call(self, inputs, *args, **kwargs):
+        # importances: ([batch], [N], K)
+        importances = inputs
+        importances_reduced = tf.reduce_mean(importances, axis=-2)
+
+        values = []
+        values_reduced = []
+        for i in range(self.num_channels):
+            for j in range(self.num_channels):
+                diff = tf.abs(importances[:, :, i] - importances[:, :, j])
+                diff = tf.expand_dims(diff, axis=-1)
+                values.append(diff)
+
+                diff_reduced = tf.abs(importances_reduced[:, i] - importances_reduced[:, j])
+                diff_reduced = tf.expand_dims(diff_reduced, axis=-1)
+                values_reduced.append(diff_reduced)
+
+        values = tf.concat(values, axis=-1)
+        loss = tf.reduce_sum(values, axis=-1)
+        loss /= ((2 * self.num_channels**2 - self.num_channels) * tf.reduce_mean(importances, axis=-1))
+        self.add_loss(-1.0 * self.factor * tf.reduce_mean(loss))
+
+        values_reduced = tf.concat(values_reduced, axis=-1)
+        loss_reduced = tf.reduce_sum(values_reduced, axis=-1)
+        loss_reduced /= ((2 * self.num_channels**2 - self.num_channels) * tf.reduce_mean(importances_reduced, axis=-1))
+        # self.add_loss(1.5 * self.factor * tf.reduce_mean(loss_reduced))
+
+
 class ExplanationExclusivityRegularization(GraphBaseLayer):
 
     def __init__(self, coef: float = 1.0, **kwargs):

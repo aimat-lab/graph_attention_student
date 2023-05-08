@@ -248,14 +248,15 @@ def mse(y_true: t.Union[tf.Tensor, tf.RaggedTensor],
     # nan_multiplier = tf.where(tf.math.is_nan(y_true), 0., 1.)
     nan_multiplier = tf.cast(tf.math.is_nan(y_true), tf.float32)
     nan_multiplier = tf.ones_like(nan_multiplier) - nan_multiplier
+    y_true = tf.math.multiply_no_nan(y_true, nan_multiplier)
 
     loss = tf.square(y_true - y_pred)
 
     loss *= nan_multiplier
     loss = tf.reduce_sum(loss, axis=-1)
+    loss_reduced = tf.reduce_mean(loss)
 
-    return tf.reduce_mean(loss)
-
+    return loss_reduced
 
 mse.name = 'mean_squared_error'
 

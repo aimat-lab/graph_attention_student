@@ -74,7 +74,7 @@ def process_index_data_map(index_data_map: t.Dict[int, dict],
     """
     dataset_length = len(index_data_map)
     dataset_indices = []
-    dataset = [None for _ in range(dataset_length)]
+    dataset = [None for _ in range(max(index_data_map.keys()) + 1)]
     for index, data in index_data_map.items():
         g = data['metadata']['graph']
 
