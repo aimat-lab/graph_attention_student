@@ -3,12 +3,44 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 
+from graph_attention_student.testing import get_mock_graphs
+from graph_attention_student.models.megan import MockMegan
+from graph_attention_student.fidelity import leave_one_out_analysis
+
 from graph_attention_student.visualization import plot_distribution
 from graph_attention_student.visualization import plot_regression_fit
+from graph_attention_student.visualization import plot_leave_one_out_analysis
 
 from .util import ASSETS_PATH, LOG
 from .util import ARTIFACTS_PATH
 from .util import save_fig
+
+
+def test_plot_leave_one_out_analysis():
+    num_channels = 2
+    num_targets = 3
+    num_graphs = 20
+    model = MockMegan(
+        importance_channels=num_channels,
+        final_units=[num_targets]
+    )
+    graphs = get_mock_graphs(num_graphs)
+
+    results = leave_one_out_analysis(
+        model=model,
+        graphs=graphs,
+        num_targets=num_targets,
+        num_channels=num_channels
+    )
+
+    fig = plot_leave_one_out_analysis(
+        results=results,
+        num_targets=num_targets,
+        num_channels=num_channels,
+    )
+
+    path = os.path.join(ARTIFACTS_PATH, 'leave_one_out.pdf')
+    fig.savefig(path)
 
 
 def test_plot_distribution():

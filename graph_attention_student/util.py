@@ -7,6 +7,7 @@ import tempfile
 import logging
 import subprocess
 import shutil
+import typing as t
 from typing import List, Dict, Any, Tuple, Optional, Union, Callable
 from collections import defaultdict
 
@@ -57,6 +58,39 @@ def update_nested_dict(original: dict, extension: dict):
             result[key] = value
 
     return result
+
+
+class PathDict:
+
+    def __init__(self,
+                 dtype: type = str,
+                 data: t.Optional[dict] = None):
+        self.dtype = dtype
+        self.data = {}
+        if data is not None:
+            self.data = data
+
+    def __getitem__(self, item):
+        keys = item.split('/')
+        current_dict = self.data
+        for current_key in keys:
+            current_key = self.dtype(current_key)
+            current_dict = current_dict[current_key]
+
+        return current_dict
+
+    def __setitem__(self, key, value):
+        keys = key.split('/')
+        current_dict = self.data
+        for i, current_key in enumerate(keys):
+            current_key = self.dtype(current_key)
+            if current_key not in current_dict:
+                current_dict[current_key] = {}
+
+            if i < len(keys) - 1:
+                current_dict = current_dict[current_key]
+
+        current_dict[current_key] = value
 
 # == GENERAL GRAPH OPERATIONS ===============================================================================
 

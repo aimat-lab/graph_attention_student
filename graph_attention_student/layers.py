@@ -8,7 +8,7 @@ import tensorflow.keras as ks
 from kgcnn.ops.partition import partition_row_indexing
 from kgcnn.ops.segment import segment_ops_by_name, segment_softmax
 from kgcnn.layers.modules import GraphBaseLayer
-from kgcnn.layers.modules import LazyConcatenate, LazyAverage
+from kgcnn.layers.modules import LazyConcatenate, LazyAverage, LazyAdd
 from kgcnn.layers.modules import DropoutEmbedding, DenseEmbedding, ActivationEmbedding
 from kgcnn.layers.pooling import PoolingLocalEdges
 from kgcnn.layers.conv.gat_conv import PoolingLocalEdgesAttention
@@ -392,12 +392,13 @@ class ExplanationGiniRegularization(GraphBaseLayer):
         values = tf.concat(values, axis=-1)
         loss = tf.reduce_sum(values, axis=-1)
         loss /= ((2 * self.num_channels**2 - self.num_channels) * tf.reduce_mean(importances, axis=-1))
-        self.add_loss(-1.0 * self.factor * tf.reduce_mean(loss))
+        self.add_loss(-self.factor * tf.reduce_mean(loss))
+        #self.add_loss(self.factor / tf.reduce_mean(loss))
 
         values_reduced = tf.concat(values_reduced, axis=-1)
         loss_reduced = tf.reduce_sum(values_reduced, axis=-1)
         loss_reduced /= ((2 * self.num_channels**2 - self.num_channels) * tf.reduce_mean(importances_reduced, axis=-1))
-        # self.add_loss(1.5 * self.factor * tf.reduce_mean(loss_reduced))
+        self.add_loss(2 * self.factor * tf.reduce_mean(loss_reduced))
 
 
 class ExplanationExclusivityRegularization(GraphBaseLayer):

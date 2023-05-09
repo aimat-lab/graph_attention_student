@@ -1,5 +1,6 @@
 import typing as t
 
+import numpy as np
 import tensorflow as tf
 import tensorflow.keras as ks
 import visual_graph_datasets.typing as tv
@@ -13,12 +14,36 @@ from kgcnn.layers.pooling import PoolingNodes
 from kgcnn.layers.pooling import PoolingWeightedNodes
 
 from graph_attention_student.data import process_graph_dataset
+from graph_attention_student.data import tensors_from_graphs
 from graph_attention_student.layers import ExplanationSparsityRegularization
 from graph_attention_student.layers import ExplanationGiniRegularization
 from graph_attention_student.layers import MultiHeadGATV2Layer
 from graph_attention_student.training import mae
 from graph_attention_student.training import bce
 from graph_attention_student.training import shifted_sigmoid
+
+
+class MockMegan:
+
+    def __init__(self,
+                 importance_channels: int,
+                 final_units: t.List[int],
+                 *args,
+                 **kwargs,
+                 ):
+        self.importance_channels = importance_channels
+        self.final_units = final_units
+        self.num_targets = final_units[-1]
+
+    def __call__(self, x, *args, **kwargs):
+        node_input, edge_input, edge_indices = [v.numpy() for v in x]
+
+        results = [
+            [np.random.random(size=(self.num_targets, )) for _ in node_input],
+            [np.random.random(size=(len(n), self.importance_channels)) for n in node_input],
+            [np.random.random(size=(len(e), self.importance_channels)) for e in edge_input]
+        ]
+        return [ragged_tensor_from_nested_numpy(v) for v in results]
 
 
 class Megan(ks.models.Model):
@@ -50,6 +75,9 @@ class Megan(ks.models.Model):
                  gini_factor: float = 0.0,
                  concat_heads: bool = True,
                  separate_explanation_step: bool = False,
+                 # fidelity training
+                 fidelity_factor: float = 0.0,
+                 fidelity_funcs: t.List[t.Callable] = [],
                  # mlp tail end related arguments
                  final_units: t.List[int] = [1],
                  final_dropout_rate: float = 0.0,
@@ -134,6 +162,10 @@ class Megan(ks.models.Model):
         self.return_importances = return_importances
         self.separate_explanation_step = separate_explanation_step
         self.use_graph_attributes = use_graph_attributes
+
+        # Fidelity Training
+        self.fidelity_factor = fidelity_factor
+        self.fidelity_funcs = fidelity_funcs
 
         # ~ MAIN CONVOLUTIONAL / ATTENTION LAYERS
         self.attention_layers: t.List[GraphBaseLayer] = []
@@ -267,6 +299,8 @@ class Megan(ks.models.Model):
             "regression_reference": self.regression_reference,
             "return_importances": self.return_importances,
             "use_graph_attributes": self.use_graph_attributes,
+            "fidelity_factor": self.fidelity_factor,
+            "fidelity_funcs": self.fidelity_funcs,
         })
 
         return config
@@ -459,57 +493,55 @@ class Megan(ks.models.Model):
             tf.concat(masks, axis=-1)
         )
 
-    def train_step_explanation(self, x, y,
-                               update_weights: bool = True):
+    def train_step_fidelity(self, x, out_pred, ni_pred, ei_pred):
+        """
+        This is an additional training step function. It will calculate a loss, it's gradients and apply
+        the weight updates on the network.
 
-        if self.return_importances:
-            out_true, _, _ = y
-        else:
-            out_true = y
+        The loss that is implemented here is the "fidelity loss". The model will first perform a forward
+        pass with normally with the input ``x`` and then it will perform additional forward passes for
+        each of the importance channels of the model, where in each step a leave-one-in mask will be
+        applied to that corresponding importance channel during the inference. The loss will then be
+        calculated based on the difference of the prediction that is caused by the masking operation.
 
-        exp_loss = 0
+        Generally, one wants to maximize these masking differences into different directions which
+        is basically the same as a large fidelity of that channel.
+
+        :returns: The loss value
+        """
+        ones = tf.reduce_mean(tf.ones_like(ni_pred, dtype=tf.float32), axis=-1, keepdims=True)
+        zeros = tf.reduce_mean(tf.zeros_like(ni_pred, dtype=tf.float32), axis=-1, keepdims=True)
+
         with tf.GradientTape() as tape:
+            loss = 0
+            out_pred, ni_pred, ei_pred = self(x, training=True, return_importances=True)
+            # ! The specific function to calculate the difference for each channel and then also compute
+            # the loss from can be custom defined by the user in ``fidelity_funcs``.
+            for channel_index, func in enumerate(self.fidelity_funcs):
+                mask = [ones if i == channel_index else zeros for i in range(self.importance_channels)]
+                mask = tf.concat(mask, axis=-1)
+                out_mod, _, _ = self(
+                    x,
+                    training=True,
+                    return_importances=True,
+                    node_importances_mask=mask,
+                )
+                diff = func(out_pred, out_mod)
+                loss += tf.reduce_mean(diff)
+                # loss += tf.reduce_mean(tf.exp(-tf.reduce_mean(ni_pred[:, :, channel_index], axis=-1)))
 
-            y_pred = self(x, training=True, return_importances=True)
-            out_pred, ni_pred, ei_pred = y_pred
+            loss *= self.fidelity_factor
 
-            # ~ explanation loss
-            # First of all we need to assemble the approximated model output, which is simply calculated
-            # by applying a global pooling operation on the corresponding slice of the node importances.
-            # So for each slice (each importance channel) we get a single value, which we then
-            # concatenate into an output vector with K dimensions.
-            outs = []
-            for k in range(self.importance_channels):
-                node_importances_slice = tf.expand_dims(ni_pred[:, :, k], axis=-1)
-                out = self.lay_pool_out(node_importances_slice)
+        # So what we do here is we only want to train the weights which are not part of the final MLP tail
+        # end! We only want to train the weights of the convolutional and importance layers with this
+        # loss. Because if we could use the MLP tail end as well then the network could completely "cheat".
+        mlp_vars = [weight.name for lay in self.final_layers for weight in lay.weights]
+        trainable_vars = [var for var in self.trainable_variables if var.name not in mlp_vars]
+        gradients = tape.gradient(loss, trainable_vars)
 
-                outs.append(out)
+        self.optimizer.apply_gradients(zip(gradients, trainable_vars))
 
-            # outs: ([batch], K)
-            outs = self.lay_concat_out(outs)
-
-            if self.doing_regression:
-                out_true, mask = self.regression_augmentation(out_true)
-                out_pred = outs
-                exp_loss = self.importance_channels * self.compiled_regression_loss(out_true * mask,
-                                                                                    out_pred * mask)
-
-            else:
-                # out_pred = ks.backend.sigmoid(outs)
-                out_pred = shifted_sigmoid(outs, shift=self.importance_multiplier, multiplier=2)
-                exp_loss = self.compiled_classification_loss(out_true, out_pred * out_true)
-
-            exp_loss *= self.importance_factor
-
-        # Compute gradients
-        trainable_vars = self.trainable_variables
-        exp_gradients = tape.gradient(exp_loss, trainable_vars)
-
-        # Update weights
-        if update_weights:
-            self.optimizer.apply_gradients(zip(exp_gradients, trainable_vars))
-
-        return {'exp_loss': exp_loss}
+        return loss
 
     def train_step(self, data):
         if len(data) == 3:
@@ -518,17 +550,9 @@ class Megan(ks.models.Model):
             sample_weight = None
             x, y = data
 
-        # The "train_step_explanation" method will execute the entire explanation train step once. This
-        # mainly involves creating an approximate solution of the original regression / classification
-        # problem using ONLY the node importances of the different channels and then performing one
-        # complete weight update based on the corresponding loss.
-        if self.importance_factor != 0 and self.separate_explanation_step:
-            exp_metrics = self.train_step_explanation(x, y)
-        else:
-            exp_metrics = {}
-
-        exp_loss = 0
+        exp_metrics = {'exp_loss': 0}
         with tf.GradientTape() as tape:
+            exp_loss = 0
 
             out_true, ni_true, ei_true = y
             out_pred, ni_pred, ei_pred = self(x, training=True, return_importances=True)
@@ -572,7 +596,6 @@ class Megan(ks.models.Model):
                     exp_loss = self.compiled_classification_loss(out_true, _out_pred)
 
                 exp_loss *= self.importance_factor
-                exp_metrics['exp_loss'] = exp_loss
                 loss += exp_loss
 
         trainable_vars = self.trainable_variables
@@ -580,6 +603,15 @@ class Megan(ks.models.Model):
 
         self.optimizer.apply_gradients(zip(gradients, trainable_vars))
 
+        # 09.05.23 - Optionally, we execute another additional train step here which can be used to
+        # directly train the fidelity contributions of each of the channels to behave according to some
+        # given functions. Specifically the thing that is being trained here is the difference between
+        # the original prediction another new prediction in a leave-one-in channel masking.
+        if self.fidelity_factor != 0:
+            fidelity_loss = self.train_step_fidelity(x, out_pred, ni_pred, ei_pred)
+            exp_loss += fidelity_loss
+
+        exp_metrics['exp_loss'] = exp_loss
         self.compiled_metrics.update_state(
             y,
             out_pred if not self.return_importances else [out_pred, ni_pred, ei_pred],
@@ -596,21 +628,62 @@ class Megan(ks.models.Model):
     # -- Implements "PredictGraphMixin"
     # These following method implementations are required to
 
-    def predict_graphs(self, graph_list: t.List[tv.GraphDict]):
-        indices = list(range(len(graph_list)))
-        x, _, _, _ = process_graph_dataset(
-            dataset=graph_list,
-            train_indices=indices,
-            test_indices=indices,
-            use_importances=False,
-            use_graph_attributes=False,
-        )
+    def predict_graphs(self,
+                       graph_list: t.List[tv.GraphDict],
+                       **kwargs) -> t.Any:
+        """
+        Given a list of GraphDicts, returns the predictions of the network. The output will be a list
+        consisting of a tuple for each of the input graphs. Each of these tuples consists of 3 values:
+        (prediction, node_importances, edge_importances)
 
+        :returns: list
+        """
+        x = tensors_from_graphs(graph_list)
         return list(zip(*[v.numpy() for v in self(x)]))
 
     def predict_graph(self, graph: tv.GraphDict):
+        """
+        Predicts the output for a single GraphDict.
+        """
         return self.predict_graphs([graph])[0]
 
+    # -- Implements "FidelityGraphMixin"
+
+    def calculate_fidelity(self,
+                           graph_list: t.List[tv.GraphDict],
+                           channel_funcs: t.List[t.Callable],
+                           **kwargs) -> np.ndarray:
+        """
+        Given a list of GraphDict's as input elements to the network, this method will calculate the
+        fidelity value for each of those input elements and for each of the importance channels of the
+        network, returning a numpy array of the shape (num_elements, num_channels).
+
+        :param graph_list: A list of GraphDicts to be used as inputs for the fidelity calculation.
+        :param channel_funcs: This needs to be a list with as many elements as there are importance channels
+            used in this model. Each element of the list should be a function that defines how the
+            fidelity for that channel is calculated. Each function gets as the input the original predicition
+            and the modified prediction and is supposed to return a single float value that represents
+            that channels fidelity contribution.
+
+        :returns: numpy array
+        """
+        x = tensors_from_graphs(graph_list)
+        y_org = self(x, training=False)
+        out_org, _, _ = [v.numpy() for v in y_org]
+
+        results = np.zeros(shape=(len(graph_list), self.importance_channels), dtype=float)
+        for channel_index in range(self.importance_channels):
+            base_mask = [float(channel_index != 0) for i in range(self.importance_channels)]
+            mask = [[base_mask for _ in graph['node_indices']] for graph in graph_list]
+            mask_tensor = ragged_tensor_from_nested_numpy(mask)
+            y_mod = self(x, training=False, node_importances_mask=mask_tensor)
+            out_mod, _, _ = [v.numpy() for v in y_mod]
+
+            for index, out in enumerate(out_mod):
+                fidelity = channel_funcs[channel_index](out_org[index], out_mod[index])
+                results[index, channel_index] = fidelity
+
+        return results
 
 
 class FidelityMegan(Megan):
@@ -620,6 +693,7 @@ class FidelityMegan(Megan):
                  fidelity_factor: float = 0.0,
                  fidelity_funcs: t.List[t.Callable] = [],
                  final_activation: str = 'linear',
+                 channel_weights: t.Optional[t.List[float]] = None,
                  **kwargs
                  ):
         super(FidelityMegan, self).__init__(
@@ -629,6 +703,7 @@ class FidelityMegan(Megan):
         )
         self.fidelity_factor = fidelity_factor
         self.fidelity_funcs = fidelity_funcs
+        self.channel_weights = channel_weights
 
         self.lay_final_activation = ActivationEmbedding(activation=final_activation)
         self.bias = tf.Variable(initial_value=tf.zeros(shape=(self.final_units[-1], )))
@@ -637,6 +712,7 @@ class FidelityMegan(Megan):
              inputs,
              training: bool = False,
              return_importances: bool = False,
+             return_contributions: bool = False,
              node_importances_mask: t.Optional[tf.RaggedTensor] = None,
              **kwargs):
         """
@@ -705,9 +781,9 @@ class FidelityMegan(Megan):
         node_importances_tilde = self.lay_act_importance(node_importances_tilde)
 
         node_importances = node_importances_tilde * pooled_edges
-        if self.sparsity_factor > 0:
+        if self.sparsity_factor != 0:
             self.lay_sparsity(node_importances)
-        if self.gini_factor > 0:
+        if self.gini_factor != 0:
             self.lay_gini(node_importances)
 
         # ~ Applying the node importance mask
@@ -729,6 +805,8 @@ class FidelityMegan(Megan):
         for k in range(self.importance_channels):
             node_importance_slice = tf.expand_dims(node_importances[:, :, k], axis=-1)
             masked_embeddings = x * node_importance_slice
+            if self.channel_weights is not None:
+                masked_embeddings *= self.channel_weights[k]
 
             # 26.03.2023
             # Optionally, if given we apply an additional non-linear transformation in the form of an
@@ -763,47 +841,6 @@ class FidelityMegan(Megan):
         else:
             return out
 
-    def train_step_fidelity(self, data, out_pred, ni_pred, ei_pred):
-
-        if len(data) == 3:
-            x, y, sample_weight = data
-        else:
-            sample_weight = None
-            x, y = data
-
-        loss = 0
-        with tf.GradientTape() as tape:
-            ones = tf.reduce_mean(tf.ones_like(ni_pred, dtype=tf.float32), axis=-1, keepdims=True)
-            zeros = tf.reduce_mean(tf.zeros_like(ni_pred, dtype=tf.float32), axis=-1, keepdims=True)
-
-            for channel_index, func in enumerate(self.fidelity_funcs):
-                mask = [zeros if i == channel_index else ones for i in range(self.importance_channels)]
-                mask = tf.concat(mask, axis=-1)
-                out_mod, _, _ = self(
-                    x,
-                    training=True,
-                    return_importances=True,
-                    node_importances_mask=mask,
-                )
-                diff = func(out_pred, out_mod)
-                loss += diff
-
-            loss *= self.fidelity_factor
-
-        trainable_vars = self.trainable_variables
-        #print(len(trainable_vars))
-        final_vars = [weight.name for lay in self.final_layers for weight in lay.weights]
-        #print(final_vars)
-        trainable_vars = [var for var in trainable_vars if var.name not in final_vars]
-        #print(len(trainable_vars))
-
-        gradients = tape.gradient(loss, trainable_vars)
-        self.optimizer.apply_gradients(zip(gradients, trainable_vars))
-
-        # Return a dict mapping metric names to current value.
-        # Note that it will include the loss (tracked in self.metrics).
-        return loss
-
     def train_step(self, data):
 
         if len(data) == 3:
@@ -813,9 +850,9 @@ class FidelityMegan(Megan):
             x, y = data
 
         exp_metrics = {'exp_loss': 0}
-        exp_loss = 0
         with tf.GradientTape() as tape:
 
+            exp_loss = 0
             out_true, ni_true, ei_true = y
             out_pred, ni_pred, ei_pred = self(x, training=True, return_importances=True)
             loss = self.compiled_loss(
@@ -826,11 +863,12 @@ class FidelityMegan(Megan):
             )
 
             if self.fidelity_factor > 0:
+
                 ones = tf.reduce_mean(tf.ones_like(ni_pred, dtype=tf.float32), axis=-1, keepdims=True)
                 zeros = tf.reduce_mean(tf.zeros_like(ni_pred, dtype=tf.float32), axis=-1, keepdims=True)
 
                 for channel_index, func in enumerate(self.fidelity_funcs):
-                    mask = [zeros if i == channel_index else ones for i in range(self.importance_channels)]
+                    mask = [ones if i == channel_index else zeros for i in range(self.importance_channels)]
                     mask = tf.concat(mask, axis=-1)
                     out_mod, _, _ = self(
                         x,
@@ -839,11 +877,13 @@ class FidelityMegan(Megan):
                         node_importances_mask=mask,
                     )
                     diff = func(out_pred, out_mod)
-                    exp_loss += diff
+                    exp_loss += tf.reduce_mean(diff)
+                    exp_loss += tf.reduce_mean(tf.exp(-tf.reduce_mean(ni_pred[:, :, channel_index], axis=-1)))
 
                 exp_loss *= self.fidelity_factor
-                exp_metrics['exp_loss'] = exp_loss
-                loss += exp_loss
+
+            exp_metrics['exp_loss'] = exp_loss
+            loss += exp_loss
 
         trainable_vars = self.trainable_variables
         gradients = tape.gradient(loss, trainable_vars)

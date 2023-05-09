@@ -17,6 +17,7 @@ import numpy as np
 import networkx as nx
 import matplotlib.pyplot as plt
 import tensorflow as tf
+import visual_graph_datasets.typing as tv
 from kgcnn.data.utils import ragged_tensor_from_nested_numpy
 from kgcnn.data.moleculenet import MoleculeNetDataset
 from rdkit import Chem
@@ -51,6 +52,19 @@ def numpy_to_native(value):
         return value.item()
     else:
         return value
+
+
+def tensors_from_graphs(graph_list: t.List[tv.GraphDict]
+                        ) -> t.Tuple[tf.RaggedTensor, tf.RaggedTensor, tf.RaggedTensor]:
+    """
+    Given a list of GraphDicts, this function will convert that into a tuple of ragged tensors which can
+    directly be used as the input to a MEGAN model.
+    """
+    return (
+        ragged_tensor_from_nested_numpy([graph['node_attributes'] for graph in graph_list]),
+        ragged_tensor_from_nested_numpy([graph['edge_attributes'] for graph in graph_list]),
+        ragged_tensor_from_nested_numpy([graph['edge_indices'] for graph in graph_list]),
+    )
 
 
 def process_index_data_map(index_data_map: t.Dict[int, dict],
@@ -181,6 +195,8 @@ def process_graph_dataset(dataset: t.List[dict],
 
     return x_train, y_train, x_test, y_test
 
+
+# == DEPRECATED ==
 
 def load_eye_tracking_dataset(folder_path: str) -> List[dict]:
     dataset_map = defaultdict(dict)

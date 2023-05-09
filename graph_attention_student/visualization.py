@@ -25,6 +25,69 @@ reds_cmap: mcolors.Colormap = mcolors.LinearSegmentedColormap.from_list(
 
 # == MISC. VISUALIZATIONS ==
 
+
+def plot_leave_one_out_analysis(results: dict,
+                                num_targets: int,
+                                num_channels: int,
+                                base_fig_size: int = 6,
+                                num_bins: int = 20,
+                                ) -> plt.Figure:
+    """
+    Creates a visualization of ``leave_one_out_analysis`` fidelity results. The function will return the
+    matplotlib Figure object which contains the new visualization. That visualization will be split over
+    multiple subplots, where the row indicates the index of the output target value and the column indicates
+    the importance channel. Each cell in the subplot grid will be a histogram of the deviations recoreded
+    for that particular pairing of channel and target.
+
+    :param results: A 3-layer nested dict obtained through the ``leave_one_out_analysis`` function.
+    :param num_targets: The int number of outputs the model produces
+    :param num_channels: The int number of explanation channels the model employs
+
+    :returns: fig
+    """
+    fig, rows = plt.subplots(
+        ncols=num_targets,
+        nrows=num_channels,
+        figsize=(base_fig_size * num_targets, base_fig_size * num_channels),
+        squeeze=False,
+    )
+
+    for channel_index in range(num_channels):
+
+        for target_index in range(num_targets):
+            ax = rows[channel_index][target_index]
+            values = [data[target_index][channel_index] for data in results.values()]
+            mean = np.mean(values)
+            std = np.std(values)
+
+            ax.set_title(f'target: {target_index} - channel: {channel_index}')
+            ax.hist(
+                values,
+                bins=num_bins,
+                color='lightgray',
+            )
+            y_min, y_max = ax.get_ylim()
+            ax.vlines(
+                x=mean,
+                ymin=y_min,
+                ymax=y_max,
+                colors='black',
+                linestyles='dashed',
+                label=f'avg: {mean:.3f}'
+            )
+            ax.hlines(
+                y=(y_max - y_min) / 2,
+                xmin=mean - std,
+                xmax=mean + std,
+                colors='black',
+                linestyles='solid',
+                label=f'std: {std:.3f}',
+            )
+            ax.legend()
+
+    return fig
+
+
 def plot_regression_fit(values_true: t.Union[np.ndarray, t.List[float]],
                         values_pred: t.Union[np.ndarray, t.List[float]],
                         ax: plt.Axes,

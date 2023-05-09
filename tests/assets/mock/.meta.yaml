@@ -1,0 +1,13 @@
+version: 0.1.0
+short_description: |
+  A mock dataset generated mostly for testing purposes.
+description: |
+  pass
+changelog: |
+  0.1.0 - 01.12.2022 - initial version
+visualization_type: grayscale
+file_size: 4245377
+num_edge_attributes: 1
+num_elements: 100
+num_node_attributes: 1
+num_targets: 2

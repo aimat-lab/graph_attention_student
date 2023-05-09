@@ -89,9 +89,28 @@ Examples
 - Added ``examples/README.rst``
 
 0.10.0 - 08.05.2023
-------------------
+-------------------
 
 - Added a development version of ``FidelityMegan`` model which can be trained directly to match a
   fidelity target.
 - Added a ``keras.load_model`` utility function
 - Added the ``layers.ExplanationGiniRegularization`` layer
+
+0.11.0 - 08.05.2023
+-------------------
+
+MEGAN update - The previously introduced variation ``FidelityMegan`` turns out not to work great on it's
+own, but the developed fidelity train step seems to work very well when integrated into the main megan
+model on top of the approximation co-training.
+
+- Added the ``train_step_fidelity`` method to ``Megan`` model along with the keyword arguments
+  ``fidelity_factor`` and ``fidelity_funcs`` to control that behavior.
+
+Fidelity Utils
+
+- Added the module ``fidelity`` which will contain functions relevant to the computation of fidelity
+    - ``fidelity.leave_one_out_analysis`` can be used to calculate all the leave one out deviations
+      for all the pairings of channels and targets.
+- Added ``visualization.plot_leave_one_out_analysis``
+- Added very basic test cases for the above functionality
+
