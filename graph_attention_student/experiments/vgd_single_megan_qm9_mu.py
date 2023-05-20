@@ -1,17 +1,15 @@
 import os
-import pathlib
 import typing as t
 
+import numpy as np
 import tensorflow as tf
-# from pycomex.util import Skippable
-# from pycomex.experiment import SubExperiment
 from pycomex.functional.experiment import Experiment
 from pycomex.utils import folder_path, file_namespace
 
 # == DATASET PARAMETERS ==
-VISUAL_GRAPH_DATASET_PATH: str = os.path.expanduser('/media/ssd/.visual_graph_datasets/datasets/aqsoldb')
-USE_DATASET_SPLIT: t.Optional[int] = 0
-TRAIN_RATIO: float = 0.8
+VISUAL_GRAPH_DATASET_PATH: str = os.path.expanduser('/media/ssd/.visual_graph_datasets/datasets/qm9')
+USE_DATASET_SPLIT: t.Optional[int] = None
+TRAIN_RATIO: float = 0.9
 NUM_EXAMPLES: int = 100
 NUM_TARGETS: int = 1
 
@@ -23,18 +21,16 @@ USE_EDGE_LENGTHS: bool = False
 USE_EDGE_ATTRIBUTES: bool = True
 
 # == MODEL PARAMETERS ==
-UNITS = [32, 32, 32]
+UNITS = [64, 64, 64]
 DROPOUT_RATE = 0.1
-FINAL_UNITS = [32, 16, 1]
-REGRESSION_REFERENCE = [[-2.0]]
+FINAL_UNITS = [64, 32, 16, 1]
+REGRESSION_REFERENCE = [[2.6]]
 REGRESSION_WEIGHTS = [[1.0, 1.0]]
 IMPORTANCE_CHANNELS: int = 2
 IMPORTANCE_FACTOR = 2.0
-IMPORTANCE_MULTIPLIER = 0.6
+IMPORTANCE_MULTIPLIER = 0.5
 FIDELITY_FACTOR = 0.2
 FIDELITY_FUNCS = [
-    # lambda org, mod: tf.nn.leaky_relu(mod - org, alpha=0.1),
-    # lambda org, mod: tf.nn.leaky_relu(org - mod, alpha=0.1),
     lambda org, mod: tf.nn.relu(mod - org),
     lambda org, mod: tf.nn.relu(org - mod),
 ]
@@ -43,12 +39,12 @@ CONCAT_HEADS = False
 
 # == TRAINING PARAMETERS ==
 BATCH_SIZE = 32
-EPOCHS = 50
+EPOCHS = 15
 REPETITIONS = 1
 
 # == EXPERIMENT PARAMETERS ==
 __DEBUG__ = True
-__TESTING__ = False
+__TESTING__ = True
 
 experiment = Experiment.extend(
     'vgd_single_megan.py',
@@ -56,5 +52,11 @@ experiment = Experiment.extend(
     namespace=file_namespace(__file__),
     glob=globals()
 )
+
+
+@experiment.hook('modify_graph')
+def modify_graph(e, index, graph):
+    graph['graph_labels'] = np.array([graph['graph_labels'][3]])
+
 
 experiment.run_if_main()

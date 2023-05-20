@@ -15,13 +15,11 @@ an argument to a keras ``custom_object_scope`` context:
 import tensorflow.keras as ks
 
 from graph_attention_student.models.megan import Megan
-from graph_attention_student.models.megan import FidelityMegan
 from graph_attention_student.training import NoLoss
 from graph_attention_student.training import ExplanationLoss
 
 CUSTOM_OBJECTS = {
     'Megan': Megan,
-    'FidelityMegan': FidelityMegan,
     'NoLoss': NoLoss,
     'ExplanationLoss': ExplanationLoss
 }

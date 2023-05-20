@@ -114,3 +114,16 @@ Fidelity Utils
 - Added ``visualization.plot_leave_one_out_analysis``
 - Added very basic test cases for the above functionality
 
+0.12.0 - 20.05.2023
+-------------------
+
+BACKWARDS INCOMPATIBLE - MEGAN update - I changed the basic architecture of the MEGAN model a bit. The
+MLP backend is now no longer a concatenation of all the channel-specific graph embeddings. Instead, the
+*same* MLP is now used to produce a vector of the final output shape for each of the channels. These
+are then added at the end plus a bias weight. This change is motivated by the prior inclusion of the
+fidelity training step which turned out to work really well. Conceptionally, it makes more sense to let the
+gradients of that fidelity train step affect the MLP as well, but that is only possible with the previously
+described changes to the MLP structure so as to not give the model the chance to "cheat" the fidelity.
+
+- Added an experiment which trains the megan model on the "mu" value of the QM9 dataset.
+

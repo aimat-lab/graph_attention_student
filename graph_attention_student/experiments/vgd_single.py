@@ -16,8 +16,10 @@ from sklearn.metrics import r2_score
 from sklearn.metrics import mean_squared_error
 from sklearn.metrics import mean_absolute_error
 from sklearn.metrics import roc_auc_score
-from pycomex.util import Skippable
-from pycomex.experiment import Experiment
+# from pycomex.util import Skippable
+# from pycomex.experiment import Experiment
+from pycomex.functional.experiment import Experiment
+from pycomex.utils import folder_path, file_namespace
 from visual_graph_datasets.data import load_visual_graph_dataset
 from visual_graph_datasets.visualization.importances import create_importances_pdf
 from kgcnn.data.utils import ragged_tensor_from_nested_numpy
@@ -27,6 +29,8 @@ from graph_attention_student.data import process_graph_dataset
 from graph_attention_student.util import array_normalize, binary_threshold
 from graph_attention_student.util import latex_table, latex_table_element_mean
 from graph_attention_student.util import render_latex
+from graph_attention_student.models.megan import Megan
+from graph_attention_student.training import NoLoss
 
 # == DATASET PARAMETERS ==
 # These parameters define the dataset that is to be used for the experiment as well as properties of
@@ -98,13 +102,20 @@ BATCH_SIZE_EVAL: int = 256
 IMPORTANCE_CHANNEL_LABELS = ['predicted']
 
 # == EXPERIMENT PARAMETERS ==
-BASE_PATH = os.getcwd()
-NAMESPACE = 'results/vgd_single'
-DEBUG = True
-with Skippable(), (e := Experiment(BASE_PATH, NAMESPACE, globals())):
+__DEBUG__ = True
+__TESTING__ = True
+
+
+@Experiment(base_path=folder_path(__file__),
+            namespace=file_namespace(__file__),
+            glob=globals())
+def experiment(e: Experiment):
+
+    if e.__TESTING__:
+        e.EPOCHS = 10
 
     vgd_name = os.path.basename(VISUAL_GRAPH_DATASET_PATH)
-    e.info(f'Starting to train GNNX model on vgd "{vgd_name}"')
+    e.log(f'Starting to train GNNX model on vgd "{vgd_name}"')
 
     # -- DATASET LOADING --
 
@@ -115,47 +126,60 @@ with Skippable(), (e := Experiment(BASE_PATH, NAMESPACE, globals())):
         metadata_contains_index=True
     )
 
-    # index_data_map = {int(index): data for index, data in index_data_map.items()}
-    dataset_indices = list(sorted(index_data_map.keys()))
-    dataset_indices_set = set(dataset_indices)
-    dataset_length = len(index_data_map)
-
     # As the first step in the processing pipeline we need to get a list of graph dicts, which can then
     # later be turned into the tensors needed for the model.
-    dataset: t.List[tc.GraphDict] = []
-    for index in dataset_indices:
+    dataset_indices = []
+    dataset: t.List[tc.GraphDict] = [None for _ in range(max(index_data_map.keys()) + 1)]
+    for index in list(sorted(index_data_map.keys())):
         data = index_data_map[index]
-        g = data['metadata']['graph']
+        graph: tc.GraphDict = data['metadata']['graph']
+        graph['graph_labels'] = data['metadata']['target']
+        if 'image_path' not in data:
+            continue
 
         if NODE_IMPORTANCES_KEY is not None:
-            g['node_importances'] = g[NODE_IMPORTANCES_KEY]
+            graph['node_importances'] = graph[NODE_IMPORTANCES_KEY]
         else:
-            g['node_importances'] = np.zeros(shape=(len(g['node_indices']), IMPORTANCE_CHANNELS))
+            graph['node_importances'] = np.zeros(shape=(len(graph['node_indices']), IMPORTANCE_CHANNELS))
 
         if EDGE_IMPORTANCES_KEY is not None:
-            g['edge_importances'] = g[EDGE_IMPORTANCES_KEY]
+            graph['edge_importances'] = graph[EDGE_IMPORTANCES_KEY]
         else:
-            g['edge_importances'] = np.zeros(shape=(len(g['edge_indices']), IMPORTANCE_CHANNELS))
+            graph['edge_importances'] = np.zeros(shape=(len(graph['edge_indices']), IMPORTANCE_CHANNELS))
 
         if USE_NODE_COORDINATES:
-            g['node_attributes'] = np.array([g['node_attributes'][i].tolist() + g['node_coordinates'][i].tolist()
-                                             for i in g['node_indices']])
+            graph['node_attributes'] = np.concatenate(
+                [graph['node_attributes'], graph['node_coordinates']],
+                axis=-1
+            )
 
         if USE_EDGE_LENGTHS:
-            g['edge_attributes'] = np.array([g['edge_attributes'][i].tolist() + [g['edge_lengths'][i]]
-                                             for i, _ in enumerate(g['edge_indices'])])
+            graph['edge_attributes'] = np.concatenate(
+                [graph['edge_attributes'], graph['edge_lengths']],
+                axis=-1
+            )
 
         if not USE_EDGE_ATTRIBUTES:
-            g['edge_attributes'] = np.ones(shape=(len(g['edge_indices']), 1))
+            graph['edge_attributes'] = np.ones(shape=(len(graph['edge_indices']), 1))
 
-        dataset.append(g)
+        # :hook modify_graph:
+        #       This hook can be used to modify the graph in the end
+        e.apply_hook('modify_graph', index=index, graph=graph)
 
-    e.info(f'loaded dataset with {len(dataset)} elements')
+        dataset[index] = graph
+        dataset_indices.append(index)
 
-    # -- MODEL TRAINING --
+    dataset_length = len(dataset_indices)
+    dataset_indices_set = set(dataset_indices)
+    e.log(f'loaded dataset with {dataset_length} elements')
+
+    # Default Hook Implementations
 
     @e.hook('process_dataset', default=True)
-    def process_dataset(_e, dataset, train_indices, test_indices):
+    def process_dataset(e, dataset, train_indices, test_indices):
+        e.log(f'processing dataset with {len(dataset)} elements')
+        e.log(f'num train indices: {len(train_indices)} - max index: {max(train_indices)}')
+        e.log(f'num test indices: {len(test_indices)} - max index: {max(test_indices)}')
         x_train, y_train, x_test, y_test = process_graph_dataset(
             dataset,
             train_indices=train_indices,
@@ -163,22 +187,54 @@ with Skippable(), (e := Experiment(BASE_PATH, NAMESPACE, globals())):
         )
         return x_train, y_train, x_test, y_test
 
+    @e.hook('create_model', default=True)
+    def create_model(e):
+        model = Megan(
+            units=[3, 3],
+            final_units=[3, 1],
+            importance_channels=e.IMPORTANCE_CHANNELS
+        )
+        model.compile(
+            optimizer=e.OPTIMIZER_CB(),
+            loss=[ks.losses.MeanSquaredError(), NoLoss(), NoLoss()],
+        )
+        return model
+
+    @e.hook('fit_model', default=True)
+    def fit_model(e, model, x_train, y_train, x_test, y_test):
+        hist = model.fit(
+            x_train, y_train,
+            epochs=e.EPOCHS,
+            batch_size=e.BATCH_SIZE,
+            verbose=0,
+        )
+        return hist.history
+
+    @e.hook('query_model', default=True)
+    def query_model(e, model, x, y, **kwargs):
+        return model(x)
+
+    @e.hook('calculate_fidelity', default=True)
+    def calculate_fidelity(e, indices_true, **kwargs):
+        return [0 for _ in indices_true]
+
+    # -- MODEL TRAINING --
 
     for rep in range(REPETITIONS):
-        e.info(f'REPETITION ({rep+1}/{REPETITIONS})')
+        e.log(f'REPETITION ({rep+1}/{REPETITIONS})')
         e['rep'] = rep
 
         with tf.device(DEVICE):
 
             if USE_DATASET_SPLIT is not None:
-                e.info(f'creating train test split from dataset...')
+                e.log(f'creating train test split from dataset...')
                 train_indices = [index for index, data in index_data_map.items()
                                  if USE_DATASET_SPLIT in data['metadata']['train_indices']]
                 test_indices = [index for index, data in index_data_map.items()
                                 if USE_DATASET_SPLIT in data['metadata']['test_indices']]
 
             else:
-                e.info(f'creating random train test split...')
+                e.log(f'creating random train test split...')
                 train_indices = random.sample(dataset_indices, k=int(TRAIN_RATIO * dataset_length))
                 train_indices_set = set(train_indices)
                 test_indices_set =dataset_indices_set.difference(train_indices_set)
@@ -186,16 +242,16 @@ with Skippable(), (e := Experiment(BASE_PATH, NAMESPACE, globals())):
 
             test_indices_set = set(test_indices) | set(EXAMPLE_INDICES)
             test_indices = list(test_indices_set)
-            e.info(f'using {len(train_indices)} training elements and {len(test_indices)} test elements')
+            e.log(f'using {len(train_indices)} training elements and {len(test_indices)} test elements')
             e[f'train_indices/{rep}'] = train_indices
             e[f'test_indices/{rep}'] = test_indices
 
             num_examples = min(NUM_EXAMPLES, len(test_indices)) - len(EXAMPLE_INDICES)
             example_indices = EXAMPLE_INDICES + list(random.sample(test_indices, k=num_examples))
-            e.info(f'using {len(example_indices)} as examples')
+            e.log(f'using {len(example_indices)} as examples')
             e[f'example_indices/{rep}'] = example_indices
 
-            e.info('converting dataset into ragged tensors for training...')
+            e.log('converting dataset into ragged tensors for training...')
             x_train, y_train, x_test, y_test = e.apply_hook(
                 'process_dataset',
                 dataset=dataset,
@@ -203,10 +259,10 @@ with Skippable(), (e := Experiment(BASE_PATH, NAMESPACE, globals())):
                 test_indices=test_indices
             )
 
-            e.info('creating the model...')
+            e.log('creating the model...')
             model: ks.models.Model = e.apply_hook('create_model')
 
-            e.info('fitting the model...')
+            e.log('fitting the model...')
             history: dict = e.apply_hook(
                 'fit_model',
                 model=model,
@@ -219,7 +275,7 @@ with Skippable(), (e := Experiment(BASE_PATH, NAMESPACE, globals())):
             e[f'epochs/{rep}'] = list(range(EPOCHS))
 
             # -- EVALUATING THE MODEL --
-            e.info('evaluating test set...')
+            e.log('evaluating test set...')
             out_pred, ni_pred, ei_pred = e.apply_hook(
                 'query_model',
                 model=model,
@@ -236,7 +292,7 @@ with Skippable(), (e := Experiment(BASE_PATH, NAMESPACE, globals())):
             ei_true = np.array(y_test[2].numpy())
 
             # ~ metrics for the total test set
-            e.info('calculating prediction metrics...')
+            e.log('calculating prediction metrics...')
             mse_value = mean_squared_error(out_pred, out_true)
             rmse_value = np.sqrt(mse_value)
             mae_value = mean_absolute_error(out_pred, out_true)
@@ -246,10 +302,11 @@ with Skippable(), (e := Experiment(BASE_PATH, NAMESPACE, globals())):
             e[f'mae/{rep}'] = mae_value
             e[f'r2/{rep}'] = r2_value
 
-            e.info('calculating fidelity...')
+            e.log('calculating fidelity...')
             fidelities = e.apply_hook(
                 'calculate_fidelity',
                 model=model,
+                dataset=dataset,
                 indices_true=test_indices,
                 x_true=x_test,
                 y_true=y_test,
@@ -262,7 +319,7 @@ with Skippable(), (e := Experiment(BASE_PATH, NAMESPACE, globals())):
                     e[f'fidelity/{rep}/{index}'] = fidelity
 
             # ~ calculating explanation metrics
-            e.info('calculating explanation metrics...')
+            e.log('calculating explanation metrics...')
 
             pred_node_importances = []
             pred_edge_importances = []
@@ -311,20 +368,20 @@ with Skippable(), (e := Experiment(BASE_PATH, NAMESPACE, globals())):
             e[f'node_auc/{rep}'] = node_auc
             e[f'edge_auc/{rep}'] = edge_auc
 
-            e.info(f' = mse: {mse_value:.2f}'
-                   f' - rmse: {rmse_value:.2f}'
-                   f' - mae: {mae_value:.2f}'
-                   f' - r2: {r2_value:.2f}'
-                   f' - mean fidelity: {mean_fidelity:.2f}'
-                   f' - mean node sparsity: {mean_node_sparsity:.2f}'
-                   f' - mean edge sparsity: {mean_edge_sparsity:.2f}'
-                   f' - node auc: {node_auc:.2f}'
-                   f' - edge auc: {edge_auc:.2f}')
+            e.log(f' = mse: {mse_value:.2f}'
+                  f' - rmse: {rmse_value:.2f}'
+                  f' - mae: {mae_value:.2f}'
+                  f' - r2: {r2_value:.2f}'
+                  f' - mean fidelity: {mean_fidelity:.2f}'
+                  f' - mean node sparsity: {mean_node_sparsity:.2f}'
+                  f' - mean edge sparsity: {mean_edge_sparsity:.2f}'
+                  f' - node auc: {node_auc:.2f}'
+                  f' - edge auc: {edge_auc:.2f}')
 
             # -- VISUALIZATION OF RESULTS --
 
             # ~ visualizing examples of the graph
-            e.info('drawing example visualizations...')
+            e.log('drawing example visualizations...')
             # First of all we need to query the model using only the elements of the example set
             ni_example_pred = []
             ei_example_pred = []
@@ -356,12 +413,11 @@ with Skippable(), (e := Experiment(BASE_PATH, NAMESPACE, globals())):
                 model=model
             )
 
-            e.status()
 
-
-with Skippable(), e.analysis:
+@experiment.analysis
+def analysis(e: Experiment):
     # Creating latex code to display the results in a table
-    e.info('rendering latex table...')
+    e.log('rendering latex table...')
     column_names = [
         r'Target Name',
         r'$\text{MSE} \downarrow $',
@@ -406,4 +462,7 @@ with Skippable(), e.analysis:
     e.commit_raw('table.tex', table)
     pdf_path = os.path.join(e.path, 'table.pdf')
     render_latex({'content': table}, output_path=pdf_path)
-    e.info('rendered latex table')
+    e.log('rendered latex table')
+
+
+experiment.run_if_main()

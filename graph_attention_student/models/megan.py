@@ -165,6 +165,7 @@ class Megan(ks.models.Model):
 
         # Fidelity Training
         self.fidelity_factor = fidelity_factor
+        self.var_fidelity_factor = tf.Variable(fidelity_factor, trainable=False)
         self.fidelity_funcs = fidelity_funcs
 
         # ~ MAIN CONVOLUTIONAL / ATTENTION LAYERS
@@ -214,7 +215,8 @@ class Megan(ks.models.Model):
         self.lay_final_dropout = DropoutEmbedding(rate=self.final_dropout_rate)
 
         self.final_acts = ['kgcnn>leaky_relu' for _ in self.final_units]
-        self.final_acts[-1] = self.final_activation
+        # self.final_acts[-1] = self.final_activation
+        self.final_acts[-1] = 'linear'
         self.final_biases = [True for _ in self.final_units]
         self.final_biases[-1] = True
         self.final_layers = []
@@ -222,9 +224,12 @@ class Megan(ks.models.Model):
             lay = DenseEmbedding(
                 units=u,
                 activation=act,
-                use_bias=use_bias
+                use_bias=bias
             )
             self.final_layers.append(lay)
+
+        self.lay_final_activation = ActivationEmbedding(self.final_activation)
+        self.bias = tf.Variable(tf.zeros(shape=(self.final_units[-1], )), dtype=tf.float32, name='final_bias')
 
         # ~ EXPLANATION ONLY TRAIN STEP
         self.bce_loss = ks.losses.BinaryCrossentropy()
@@ -251,6 +256,8 @@ class Megan(ks.models.Model):
                 self.regression_reference = [regression_reference]
 
             num_references = len(self.regression_reference)
+            self.bias = tf.Variable(tf.constant(self.regression_reference), dtype=tf.float32, name='final_bias')
+            print(self.bias)
 
             if self.regression_weights is not None:
                 num_values = len(self.regression_weights)
@@ -321,6 +328,7 @@ class Megan(ks.models.Model):
              training: bool = False,
              return_importances: bool = False,
              node_importances_mask: t.Optional[tf.RaggedTensor] = None,
+             stop_mlp_gradient: bool = False,
              **kwargs):
         """
         Forward pass of the model.
@@ -389,7 +397,8 @@ class Megan(ks.models.Model):
 
         node_importances = node_importances_tilde * pooled_edges
         if self.sparsity_factor > 0:
-            self.lay_sparsity(node_importances)
+            self.lay_sparsity(node_importances_tilde)
+            self.lay_sparsity(edge_importances)
         if self.gini_factor > 0:
             self.lay_gini(node_importances)
 
@@ -404,10 +413,15 @@ class Megan(ks.models.Model):
             node_importances_mask = tf.cast(node_importances_mask, tf.float32)
             node_importances = node_importances * node_importances_mask
 
+        if stop_mlp_gradient:
+            x = tf.stop_gradient(x)
+            node_importances = tf.stop_gradient(node_importances)
+
         # Here we apply the global pooling. It is important to note that we do K separate pooling operations
         # were each time we use the same node embeddings x but a different slice of the node importances as
         # the weights! We concatenate all the individual results in the end.
         outs = []
+        out_sum = 0
         n = self.final_units[-1]
         for k in range(self.importance_channels):
             node_importance_slice = tf.expand_dims(node_importances[:, :, k], axis=-1)
@@ -421,29 +435,30 @@ class Megan(ks.models.Model):
                 masked_embeddings = lay_transform(masked_embeddings)
 
             out = self.lay_pool_out(masked_embeddings)
-            # out = self.lay_pool_out(x[:, :, k*n:(k+1)*n] * node_importance_slice)
 
+            # Now "out" is a graph embedding vector of known dimension so we can simply apply the normal dense
+            # mlp to get the final output value.
+            num_final_layers = len(self.final_layers)
+            for c, lay in enumerate(self.final_layers):
+                out = lay(out)
+                if training and c < num_final_layers - 2:
+                    out = self.lay_final_dropout(out, training=training)
+
+            out_sum += out
             outs.append(out)
 
         # out: ([B], N*K²)
-        out = self.lay_concat_out(outs)
+        # out = self.lay_concat_out(outs)
 
         # At this point, after the global pooling of the node embeddings, we can append the global graph
         # attributes, should those exist
-        if self.use_graph_attributes:
-            out = self.lay_concat_out([out, graph_input])
+        # if self.use_graph_attributes:
+        #     out = self.lay_concat_out([out, graph_input])
 
-        # Now "out" is a graph embedding vector of known dimension so we can simply apply the normal dense
-        # mlp to get the final output value.
-        num_final_layers = len(self.final_layers)
-        for c, lay in enumerate(self.final_layers):
-            out = lay(out)
-            if training and c < num_final_layers - 2:
-                out = self.lay_final_dropout(out, training=training)
-
-        if self.doing_regression:
-            reference = tf.ones_like(out) * tf.constant(self.regression_reference, dtype=tf.float32)
-            out = out + reference
+        out = self.lay_final_activation(out_sum + self.bias)
+        # if self.doing_regression:
+        #     reference = tf.ones_like(out) * tf.constant(self.regression_reference, dtype=tf.float32)
+        #     out = out + reference
 
         # Usually, the node and edge importance tensors would be direct outputs of the model as well, but
         # we need the option to just return the output alone to be compatible with the standard model
@@ -528,14 +543,14 @@ class Megan(ks.models.Model):
                 )
                 diff = func(out_pred, out_mod)
                 loss += tf.reduce_mean(diff)
-                # loss += tf.reduce_mean(tf.exp(-tf.reduce_mean(ni_pred[:, :, channel_index], axis=-1)))
 
-            loss *= self.fidelity_factor
+            loss *= self.var_fidelity_factor
 
         # So what we do here is we only want to train the weights which are not part of the final MLP tail
         # end! We only want to train the weights of the convolutional and importance layers with this
         # loss. Because if we could use the MLP tail end as well then the network could completely "cheat".
         mlp_vars = [weight.name for lay in self.final_layers for weight in lay.weights]
+        mlp_vars = []
         trainable_vars = [var for var in self.trainable_variables if var.name not in mlp_vars]
         gradients = tape.gradient(loss, trainable_vars)
 
@@ -553,6 +568,7 @@ class Megan(ks.models.Model):
         exp_metrics = {'exp_loss': 0}
         with tf.GradientTape() as tape:
             exp_loss = 0
+            fid_loss = 0
 
             out_true, ni_true, ei_true = y
             out_pred, ni_pred, ei_pred = self(x, training=True, return_importances=True)
@@ -586,8 +602,6 @@ class Megan(ks.models.Model):
                                                              _out_pred * mask)
 
                 else:
-                    # out_pred = ks.backend.sigmoid(outs)
-                    #_out_pred = shifted_sigmoid(outs, multiplier=self.importance_multiplier)
                     _out_pred = shifted_sigmoid(
                         outs,
                         shift=self.importance_multiplier,
@@ -595,8 +609,7 @@ class Megan(ks.models.Model):
                     ) * out_true
                     exp_loss = self.compiled_classification_loss(out_true, _out_pred)
 
-                exp_loss *= self.importance_factor
-                loss += exp_loss
+                loss += self.importance_factor * exp_loss
 
         trainable_vars = self.trainable_variables
         gradients = tape.gradient(loss, trainable_vars)
@@ -649,10 +662,10 @@ class Megan(ks.models.Model):
 
     # -- Implements "FidelityGraphMixin"
 
-    def calculate_fidelity(self,
-                           graph_list: t.List[tv.GraphDict],
-                           channel_funcs: t.List[t.Callable],
-                           **kwargs) -> np.ndarray:
+    def leave_one_out(self,
+                      graph_list: t.List[tv.GraphDict],
+                      channel_funcs: t.List[t.Callable] = [],
+                      **kwargs) -> np.ndarray:
         """
         Given a list of GraphDict's as input elements to the network, this method will calculate the
         fidelity value for each of those input elements and for each of the importance channels of the
@@ -673,7 +686,7 @@ class Megan(ks.models.Model):
 
         results = np.zeros(shape=(len(graph_list), self.importance_channels), dtype=float)
         for channel_index in range(self.importance_channels):
-            base_mask = [float(channel_index != 0) for i in range(self.importance_channels)]
+            base_mask = [float(channel_index != i) for i in range(self.importance_channels)]
             mask = [[base_mask for _ in graph['node_indices']] for graph in graph_list]
             mask_tensor = ragged_tensor_from_nested_numpy(mask)
             y_mod = self(x, training=False, node_importances_mask=mask_tensor)
@@ -685,220 +698,3 @@ class Megan(ks.models.Model):
 
         return results
 
-
-class FidelityMegan(Megan):
-
-    def __init__(self,
-                 *args,
-                 fidelity_factor: float = 0.0,
-                 fidelity_funcs: t.List[t.Callable] = [],
-                 final_activation: str = 'linear',
-                 channel_weights: t.Optional[t.List[float]] = None,
-                 **kwargs
-                 ):
-        super(FidelityMegan, self).__init__(
-            *args,
-            final_activation='linear',
-            **kwargs
-        )
-        self.fidelity_factor = fidelity_factor
-        self.fidelity_funcs = fidelity_funcs
-        self.channel_weights = channel_weights
-
-        self.lay_final_activation = ActivationEmbedding(activation=final_activation)
-        self.bias = tf.Variable(initial_value=tf.zeros(shape=(self.final_units[-1], )))
-
-    def call(self,
-             inputs,
-             training: bool = False,
-             return_importances: bool = False,
-             return_contributions: bool = False,
-             node_importances_mask: t.Optional[tf.RaggedTensor] = None,
-             **kwargs):
-        """
-        Forward pass of the model.
-
-        **Shape Explanations:** All shapes in brackets [] are ragged dimensions!
-
-        - V: Num nodes in the graph
-        - E: Num edges in the graph
-        - N: Num feature values per node
-        - M: NUm feature values per edge
-        - H: Num feature values per graph
-        - B: Num graphs in a batch
-        - K: Num importance (explanation) channels configured in the constructor
-        """
-
-        # 17.11.2022
-        # Added support for global graph attributes. If the corresponding flag is set in the constructor of
-        # the model then it is expected that the input tuple consists of 4 elements instead of the usual
-        # 3 elements, where the fourth element is the vector of the graph attributes.
-        # We can't use these graph attributes right away, but later on we will simply append them to the
-        # vector which enters the MLP tail end.
-
-        # node_input: ([B], [V], N)
-        # edge_input: ([B], [E], M)
-        # edge_index_input: ([B], [E], 2)
-        # graph_input: ([B], H)
-        if self.use_graph_attributes:
-            node_input, edge_input, edge_index_input, graph_input = inputs
-        else:
-            node_input, edge_input, edge_index_input = inputs
-            graph_input = None
-
-        # First of all we apply all the graph convolutional / attention layers. Each of those layers outputs
-        # the attention logits alpha additional to the node embeddings. We collect all the attention logits
-        # in a list so that we can later sum them all up.
-        alphas = []
-        x = node_input
-        for lay in self.attention_layers:
-            # x: ([batch], [N], F)
-            # alpha: ([batch], [M], K, 1)
-            x, alpha = lay([x, edge_input, edge_index_input])
-            if training:
-                x = self.lay_dropout(x, training=training)
-
-            alphas.append(alpha)
-
-        # We sum up all the individual layers attention logit tensors and the edge importances are directly
-        # calculated by applying a sigmoid on that sum.
-        alphas = self.lay_concat_alphas(alphas)
-        edge_importances = tf.reduce_sum(alphas, axis=-1, keepdims=False)
-        edge_importances = self.lay_act_importance(edge_importances)
-
-        # Part of the final node importance tensor is actually the pooled edge importances, so that is what
-        # we are doing here. The caveat here is that we assume undirected edges as two directed edges in
-        # opposing direction. To now achieve a symmetric pooling of these edges we have to pool in both
-        # directions and then use the average of both.
-        pooled_edges_in = self.lay_pool_edges_in([node_input, edge_importances, edge_index_input])
-        pooled_edges_out = self.lay_pool_edges_out([node_input, edge_importances, edge_index_input])
-        pooled_edges = self.lay_average([pooled_edges_out, pooled_edges_in])
-
-        node_importances_tilde = x
-        for lay in self.node_importance_layers:
-            node_importances_tilde = lay(node_importances_tilde)
-
-        node_importances_tilde = self.lay_act_importance(node_importances_tilde)
-
-        node_importances = node_importances_tilde * pooled_edges
-        if self.sparsity_factor != 0:
-            self.lay_sparsity(node_importances)
-        if self.gini_factor != 0:
-            self.lay_gini(node_importances)
-
-        # ~ Applying the node importance mask
-        # "node_importances_mask" is supposed to be a ragged tensor of the exact same dimensions as the
-        # node importances, containing binary values 0 or 1, which are then used as a multiplicative mask
-        # to modify the actual node importances before the global pooling step.
-        # The main use case of this feature is to completely mask out certain channels to see how that
-        # the missing channels (linked to a certain explanation / interpretation) affect the outcome of
-        # the MLP tail end.
-        if node_importances_mask is not None:
-            node_importances_mask = tf.cast(node_importances_mask, tf.float32)
-            node_importances = node_importances * node_importances_mask
-
-        # Here we apply the global pooling. It is important to note that we do K separate pooling operations
-        # were each time we use the same node embeddings x but a different slice of the node importances as
-        # the weights! We concatenate all the individual results in the end.
-        outs = []
-        n = self.final_units[-1]
-        for k in range(self.importance_channels):
-            node_importance_slice = tf.expand_dims(node_importances[:, :, k], axis=-1)
-            masked_embeddings = x * node_importance_slice
-            if self.channel_weights is not None:
-                masked_embeddings *= self.channel_weights[k]
-
-            # 26.03.2023
-            # Optionally, if given we apply an additional non-linear transformation in the form of an
-            # additional layer on each of the masked node embeddings separately.
-            if self.importance_transformations is not None:
-                lay_transform = self.importance_transformations[k]
-                masked_embeddings = lay_transform(masked_embeddings)
-
-            out = self.lay_pool_out(masked_embeddings)
-            # out = self.lay_pool_out(x[:, :, k*n:(k+1)*n] * node_importance_slice)
-
-            num_final_layers = len(self.final_layers)
-            for c, lay in enumerate(self.final_layers):
-                out = lay(out)
-                if training and c < num_final_layers - 2:
-                    out = self.lay_final_dropout(out, training=training)
-
-            outs.append(out)
-
-        # out: ([B], N*K²)
-        # outs = tf.concat(outs, axis=-1)
-        # out = self.lay_final_dense(outs)
-        outs = tf.concat([tf.expand_dims(out, axis=-1) for out in outs], axis=-1)
-        out = tf.reduce_sum(outs, axis=-1) + self.bias
-        out = self.lay_final_activation(out)
-
-        # Usually, the node and edge importance tensors would be direct outputs of the model as well, but
-        # we need the option to just return the output alone to be compatible with the standard model
-        # evaluation pipeline already implemented in the library.
-        if self.return_importances or return_importances:
-            return out, node_importances, edge_importances
-        else:
-            return out
-
-    def train_step(self, data):
-
-        if len(data) == 3:
-            x, y, sample_weight = data
-        else:
-            sample_weight = None
-            x, y = data
-
-        exp_metrics = {'exp_loss': 0}
-        with tf.GradientTape() as tape:
-
-            exp_loss = 0
-            out_true, ni_true, ei_true = y
-            out_pred, ni_pred, ei_pred = self(x, training=True, return_importances=True)
-            loss = self.compiled_loss(
-                [out_true, ni_true, ei_true],
-                [out_pred, ni_pred, ei_pred],
-                sample_weight=sample_weight,
-                regularization_losses=self.losses,
-            )
-
-            if self.fidelity_factor > 0:
-
-                ones = tf.reduce_mean(tf.ones_like(ni_pred, dtype=tf.float32), axis=-1, keepdims=True)
-                zeros = tf.reduce_mean(tf.zeros_like(ni_pred, dtype=tf.float32), axis=-1, keepdims=True)
-
-                for channel_index, func in enumerate(self.fidelity_funcs):
-                    mask = [ones if i == channel_index else zeros for i in range(self.importance_channels)]
-                    mask = tf.concat(mask, axis=-1)
-                    out_mod, _, _ = self(
-                        x,
-                        training=True,
-                        return_importances=True,
-                        node_importances_mask=mask,
-                    )
-                    diff = func(out_pred, out_mod)
-                    exp_loss += tf.reduce_mean(diff)
-                    exp_loss += tf.reduce_mean(tf.exp(-tf.reduce_mean(ni_pred[:, :, channel_index], axis=-1)))
-
-                exp_loss *= self.fidelity_factor
-
-            exp_metrics['exp_loss'] = exp_loss
-            loss += exp_loss
-
-        trainable_vars = self.trainable_variables
-        gradients = tape.gradient(loss, trainable_vars)
-
-        self.optimizer.apply_gradients(zip(gradients, trainable_vars))
-
-        self.compiled_metrics.update_state(
-            y,
-            out_pred if not self.return_importances else [out_pred, ni_pred, ei_pred],
-            sample_weight=sample_weight
-        )
-
-        # Return a dict mapping metric names to current value.
-        # Note that it will include the loss (tracked in self.metrics).
-        return {
-            **{m.name: m.result() for m in self.metrics},
-            **exp_metrics
-        }
