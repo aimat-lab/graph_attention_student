@@ -16,9 +16,10 @@ def test_megan_basically_works():
     dataset_length = len(index_data_map)
 
     num_channels = 2
+    num_targets = 2
     model = Megan(
         units=[3, 3, 3],
-        final_units=[2],
+        final_units=[num_targets],
         final_activation='softmax',
         importance_channels=num_channels
     )
@@ -35,12 +36,8 @@ def test_megan_basically_works():
         assert len(ni) == len(graph['node_indices'])
         assert len(ei) == len(graph['edge_indices'])
 
-    fidelities = model.calculate_fidelity(
-        graphs,
-        channel_funcs=[
-            lambda org, mod: float(org[0] - mod[0]),
-            lambda org, mod: float(org[1] - mod[1])
-        ]
+    deviations = model.leave_one_out_deviations(
+        graphs
     )
-    assert isinstance(fidelities, np.ndarray)
-    assert fidelities.shape == (len(graphs), num_channels)
+    assert isinstance(deviations, np.ndarray)
+    assert deviations.shape == (len(graphs), num_channels, num_targets)

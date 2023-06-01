@@ -18,7 +18,7 @@ from pycomex.utils import folder_path, file_namespace
 from kgcnn.data.utils import ragged_tensor_from_nested_numpy
 
 from graph_attention_student.models import Megan
-from graph_attention_student.training import NoLoss, mse
+from graph_attention_student.training import NoLoss, mse, mae
 from graph_attention_student.training import LogProgressCallback
 from graph_attention_student.fidelity import leave_one_out_analysis
 from graph_attention_student.visualization import plot_leave_one_out_analysis

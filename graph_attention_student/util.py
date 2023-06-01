@@ -44,6 +44,15 @@ SANITIZE_TOKENS = ['', ',', '.', '\'s', '"', '-', '?', '!', '/', '(', ')', '_', 
 #SANITIZE_TOKENS += ['the', 'be', 'to', 'of', 'and', 'a', 'an', 'in', 'that', 'it', 'you', 'me', 'i', 'at']
 
 
+def get_experiment_path(name: str) -> str:
+    """
+    Returns the absolute path to the experiment with the given ``name``
+
+    :returns: the string absolute path
+    """
+    return os.path.join(EXPERIMENTS_PATH, name)
+
+
 def get_version():
     with open(VERSION_PATH) as file:
         return file.read().replace(' ', '').replace('\n', '')
@@ -200,6 +209,25 @@ def importance_canberra_similarity(importances_true: list,
         dist = np.mean(distances)
 
     return 1 - dist
+
+
+def normalize_importances_fidelity(importances: np.ndarray,
+                                   fidelities: t.List[float],
+                                   delta: float = 0.01
+                                   ) -> np.ndarray:
+    """
+    This function can be used to normalize an ``importances`` array (either node or edge importances) of
+    the shape (N, K) according to the ``fidelities`` of the corresponding importance channels (K, ).
+    This function will scale the importances to fit the relative ratio of the fidelities.
+
+    :returns: np array of shape (N, K)
+    """
+    # We add a small delta value here to avoid a division by zero error.
+    max_value = max(fidelities) + delta
+    for channel_index, value in enumerate(fidelities):
+        importances[:, channel_index] *= (value + delta) / max_value
+
+    return importances
 
 
 def array_normalize(array: np.ndarray

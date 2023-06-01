@@ -10,13 +10,30 @@ from graph_attention_student.fidelity import leave_one_out_analysis
 from graph_attention_student.visualization import plot_distribution
 from graph_attention_student.visualization import plot_regression_fit
 from graph_attention_student.visualization import plot_leave_one_out_analysis
+from graph_attention_student.visualization import plot_regression_value_distribution
 
 from .util import ASSETS_PATH, LOG
 from .util import ARTIFACTS_PATH
 from .util import save_fig
 
 
+def test_plot_regression_value_distribution():
+
+    values = np.random.random(size=(100, ))
+    fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(10, 10))
+    plot_regression_value_distribution(
+        values=values,
+        ax=ax,
+    )
+    fig_path = os.path.join(ARTIFACTS_PATH, 'plot_regression_value_distribution.pdf')
+    fig.savefig(fig_path)
+
 def test_plot_leave_one_out_analysis():
+    """
+    ``plot_leave_one_out_analysis`` is supposed to plot the results of the leave one out analysis into a
+    matrix of num_channels x num_targets and visualize the leave one out effect of every channel on every
+    target in the format of histogram.
+    """
     num_channels = 2
     num_targets = 3
     num_graphs = 20

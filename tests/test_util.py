@@ -1,6 +1,43 @@
+import os
 import pytest
+import numpy as np
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+
+from visual_graph_datasets.data import load_visual_graph_element
+from visual_graph_datasets.visualization.base import draw_image
+from visual_graph_datasets.visualization.importances import plot_edge_importances_border
+from visual_graph_datasets.visualization.importances import plot_node_importances_border
 
 from graph_attention_student.util import update_nested_dict
+from graph_attention_student.util import normalize_importances_fidelity
+
+from .util import ASSETS_PATH, ARTIFACTS_PATH
+
+mpl.use('TkAgg')
+
+
+def test_normalize_importances_fidelity():
+    dataset_path = os.path.join(ASSETS_PATH, 'mock')
+    data = load_visual_graph_element(dataset_path, '0')
+    graph = data['metadata']['graph']
+    node_positions = np.array(graph['image_node_positions'])
+
+    fig, (ax_0, ax_1) = plt.subplots(ncols=2, nrows=1, figsize=(20, 10))
+    draw_image(ax_0, data['image_path'])
+    draw_image(ax_1, data['image_path'])
+
+    ni = np.ones(shape=(len(graph['node_indices']), 2))
+    ni = normalize_importances_fidelity(ni, [0.8, 0.1])
+
+    assert np.mean(ni) != 1
+    assert np.mean(ni) != 1
+
+    plot_node_importances_border(ax_0, graph, node_positions, ni[:, 0])
+    plot_node_importances_border(ax_1, graph, node_positions, ni[:, 1])
+
+    fig_path = os.path.join(ARTIFACTS_PATH, 'normalize_importances_fidelity.pdf')
+    fig.savefig(fig_path)
 
 
 def test_update_nested_dict():

@@ -127,3 +127,13 @@ described changes to the MLP structure so as to not give the model the chance to
 
 - Added an experiment which trains the megan model on the "mu" value of the QM9 dataset.
 
+0.12.1 - 22.05.2023
+-------------------
+
+- Small fix for the computation of the leave-one-out deviations for the MEGAN model
+
+0.12.2 - 22.05.2023
+-------------------
+
+- Added the new method ``Megan.leave_one_out_deviations`` which is more general
+

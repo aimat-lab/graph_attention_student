@@ -26,6 +26,49 @@ reds_cmap: mcolors.Colormap = mcolors.LinearSegmentedColormap.from_list(
 # == MISC. VISUALIZATIONS ==
 
 
+def plot_regression_value_distribution(values: np.ndarray,
+                                       ax: plt.Axes,
+                                       bins: int = 15,
+                                       color: str = 'lightgray',
+                                       line_color: str = 'black',
+                                       ) -> dict:
+    counts, bins, patches = ax.hist(values, bins=bins, color=color)
+    max_count = np.max(counts)
+    counts_normalized = counts / max_count
+
+    for count, edge in zip(counts_normalized, bins):
+        ax.text(edge, max_count * 0.02, f'{count:.2f}')
+
+    value_min = np.min(values)
+    value_max = np.max(values)
+    value_mean = np.mean(values)
+    value_std = np.std(values)
+
+    ax.axvline(
+        value_mean,
+        color=line_color,
+        ls='-',
+        label=f'avg: {value_mean:.2f}',
+    )
+    ax.axhline(
+        max_count / 2,
+        xmin=value_mean - value_std,
+        xmax=value_mean + value_std,
+        color=line_color,
+        ls='--',
+        label=f'std: {value_std:.2f}'
+    )
+    ax.legend()
+
+    return {
+        'min': value_min,
+        'max': value_max,
+        'mean': value_mean,
+        'std': value_std,
+        'histogram': counts_normalized,
+    }
+
+
 def plot_leave_one_out_analysis(results: dict,
                                 num_targets: int,
                                 num_channels: int,
@@ -159,7 +202,7 @@ def plot_regression_fit(values_true: t.Union[np.ndarray, t.List[float]],
 
     return c
 
-# == EXPLANATION VISUALIZATION ===
+# == DEPRECATED ===
 
 def plot_node_importances(g: dict,
                           node_importances: np.ndarray,

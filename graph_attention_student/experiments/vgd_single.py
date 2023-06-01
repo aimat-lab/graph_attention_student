@@ -31,6 +31,8 @@ from graph_attention_student.util import latex_table, latex_table_element_mean
 from graph_attention_student.util import render_latex
 from graph_attention_student.models.megan import Megan
 from graph_attention_student.training import NoLoss
+from graph_attention_student.visualization import plot_regression_fit
+from graph_attention_student.visualization import plot_regression_value_distribution
 
 # == DATASET PARAMETERS ==
 # These parameters define the dataset that is to be used for the experiment as well as properties of
@@ -38,6 +40,14 @@ from graph_attention_student.training import NoLoss
 
 # The name of the visual graph dataset to use for this experiment.
 VISUAL_GRAPH_DATASET_PATH: str = os.path.expanduser('~/.visual_graph_datasets/datasets/rb_dual_motifs')
+# :param DATASET_TYPE:
+#       A string which identifies the type of the dataset to be processed here, which at the moment can
+#       be either "regression" or "classification".
+DATASET_TYPE: str = 'regression'
+# :param NUM_TARGETS:
+#       This needs to be the number of targets which are part of this dataset aka the number of outputs
+#       that will be produced by the model.
+NUM_TARGETS: int = 1
 
 # If this is None, then a new random split will be created for every repetition of the experiment.
 # Otherwise this may be the int index of an existing split that is associated with the dataset and then
@@ -92,6 +102,7 @@ DEVICE: str = 'gpu:0'
 # == EVALUATION PARAMETERS ==
 # These parameters control the evaluation process, which includes the drawing of visualizations and plots
 
+FIG_SIZE: int = 8
 # After how many elements a log step is printed to the console
 LOG_STEP_EVAL: int = 100
 # This is the batch size that is used during the evaluation of the test set.
@@ -172,6 +183,24 @@ def experiment(e: Experiment):
     dataset_length = len(dataset_indices)
     dataset_indices_set = set(dataset_indices)
     e.log(f'loaded dataset with {dataset_length} elements')
+
+    # Plotting dataset details
+    e.log('plotting dataset details...')
+    if e.DATASET_TYPE == 'regression':
+        fig, rows = plt.subplots(
+            ncols=e.NUM_TARGETS,
+            nrows=1,
+            figsize=(e.NUM_TARGETS * e.FIG_SIZE, e.FIG_SIZE),
+            squeeze=False,
+        )
+        for target_index in range(e.NUM_TARGETS):
+            ax = rows[0][target_index]
+            plot_regression_value_distribution(
+                values=np.array([graph['graph_labels'][target_index] for graph in dataset]),
+                ax=ax,
+            )
+
+        e.commit_fig('dataset.pdf', fig)
 
     # Default Hook Implementations
 
@@ -301,6 +330,24 @@ def experiment(e: Experiment):
             e[f'rmse/{rep}'] = rmse_value
             e[f'mae/{rep}'] = mae_value
             e[f'r2/{rep}'] = r2_value
+
+            e.log('plotting prediction results...')
+            if DATASET_TYPE == 'regression':
+                fig, rows = plt.subplots(
+                    ncols=e.NUM_TARGETS,
+                    nrows=1,
+                    figsize=(e.NUM_TARGETS * e.FIG_SIZE, e.FIG_SIZE),
+                    squeeze=False,
+                )
+                for target_index in range(e.NUM_TARGETS):
+                    ax = rows[0][target_index]
+                    plot_regression_fit(
+                        values_true=out_true[:, target_index],
+                        values_pred=out_pred[:, target_index],
+                        ax=ax,
+                    )
+
+                e.commit_fig('regression.pdf', fig)
 
             e.log('calculating fidelity...')
             fidelities = e.apply_hook(
