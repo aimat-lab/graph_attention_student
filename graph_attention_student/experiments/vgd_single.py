@@ -137,14 +137,29 @@ def experiment(e: Experiment):
         metadata_contains_index=True
     )
 
+    @e.hook('get_graph_labels', default=True)
+    def get_graph_labels(e, metadata, graph):
+        return metadata['target']
+
     # As the first step in the processing pipeline we need to get a list of graph dicts, which can then
     # later be turned into the tensors needed for the model.
     dataset_indices = []
     dataset: t.List[tc.GraphDict] = [None for _ in range(max(index_data_map.keys()) + 1)]
     for index in list(sorted(index_data_map.keys())):
         data = index_data_map[index]
+        metadata = data['metadata']
         graph: tc.GraphDict = data['metadata']['graph']
-        graph['graph_labels'] = data['metadata']['target']
+        # 15.06.23 - If we encounter a target value that we do not want to be part of the dataset, the 
+        # hook implementation raises a ValueError which signals to skip that particular element...
+        try:
+            graph['graph_labels'] = e.apply_hook(
+                'get_graph_labels', 
+                metadata=metadata, 
+                graph=graph
+            )
+        except ValueError:
+            continue
+        
         if 'image_path' not in data:
             continue
 
@@ -214,6 +229,7 @@ def experiment(e: Experiment):
             train_indices=train_indices,
             test_indices=test_indices,
         )
+
         return x_train, y_train, x_test, y_test
 
     @e.hook('create_model', default=True)

@@ -327,6 +327,7 @@ class Megan(ks.models.Model):
              inputs,
              training: bool = False,
              return_importances: bool = False,
+             return_embeddings: bool = False,
              node_importances_mask: t.Optional[tf.RaggedTensor] = None,
              stop_mlp_gradient: bool = False,
              **kwargs):
@@ -417,6 +418,8 @@ class Megan(ks.models.Model):
             x = tf.stop_gradient(x)
             node_importances = tf.stop_gradient(node_importances)
 
+        embeddings = []
+
         # Here we apply the global pooling. It is important to note that we do K separate pooling operations
         # were each time we use the same node embeddings x but a different slice of the node importances as
         # the weights! We concatenate all the individual results in the end.
@@ -435,6 +438,7 @@ class Megan(ks.models.Model):
                 masked_embeddings = lay_transform(masked_embeddings)
 
             out = self.lay_pool_out(masked_embeddings)
+            embeddings.append(tf.expand_dims(out, axis=-1))
 
             # Now "out" is a graph embedding vector of known dimension so we can simply apply the normal dense
             # mlp to get the final output value.
@@ -446,6 +450,11 @@ class Megan(ks.models.Model):
 
             out_sum += out
             outs.append(out)
+            
+        # 17.06.23 - This is a ragged tensor which contains the full graph embeddings for all the elements, these 
+        # graph embeddings are essentially constant size vectors which represent the graph in some manner.
+        # embeddings: ([B], K*N)
+        embeddings = tf.concat(embeddings, axis=-1)
 
         # out: ([B], N*K²)
         # out = self.lay_concat_out(outs)
@@ -460,11 +469,10 @@ class Megan(ks.models.Model):
         #     reference = tf.ones_like(out) * tf.constant(self.regression_reference, dtype=tf.float32)
         #     out = out + reference
 
-        # Usually, the node and edge importance tensors would be direct outputs of the model as well, but
-        # we need the option to just return the output alone to be compatible with the standard model
-        # evaluation pipeline already implemented in the library.
+        if return_embeddings:
+            return embeddings
         if self.return_importances or return_importances:
-            return out, node_importances, edge_importances
+            return out, node_importances, edge_importances 
         else:
             return out
 
@@ -641,9 +649,19 @@ class Megan(ks.models.Model):
     # -- Implements "PredictGraphMixin"
     # These following method implementations are required to
 
+    def embedd_graphs(self,
+                      graph_list: t.List[tv.GraphDict],
+                      **kwargs
+                      ) -> np.ndarray:
+        
+        x = tensors_from_graphs(graph_list)
+        embeddings = self(x, return_embeddings=True)
+        return embeddings.numpy()
+
     def predict_graphs(self,
                        graph_list: t.List[tv.GraphDict],
-                       **kwargs) -> t.Any:
+                       **kwargs
+                       ) -> t.Any:
         """
         Given a list of GraphDicts, returns the predictions of the network. The output will be a list
         consisting of a tuple for each of the input graphs. Each of these tuples consists of 3 values:

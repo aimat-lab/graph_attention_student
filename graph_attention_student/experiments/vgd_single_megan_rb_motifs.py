@@ -10,24 +10,24 @@ from pycomex.functional.experiment import Experiment
 from pycomex.utils import folder_path, file_namespace
 
 # == DATASET PARAMETERS ==
-VISUAL_GRAPH_DATASET_PATH: str = os.path.expanduser('/media/ssd/.visual_graph_datasets/datasets/aqsoldb')
-USE_DATASET_SPLIT: t.Optional[int] = 0
+VISUAL_GRAPH_DATASET_PATH: str = os.path.expanduser('/media/ssd/.visual_graph_datasets/datasets/rb_dual_motifs')
+USE_DATASET_SPLIT: t.Optional[int] = None
 TRAIN_RATIO: float = 0.8
 NUM_EXAMPLES: int = 100
 NUM_TARGETS: int = 1
 
-NODE_IMPORTANCES_KEY: t.Optional[str] = None
-EDGE_IMPORTANCES_KEY: t.Optional[str] = None
+NODE_IMPORTANCES_KEY: t.Optional[str] = 'node_importances_2'
+EDGE_IMPORTANCES_KEY: t.Optional[str] = 'edge_importances_2'
 
 USE_NODE_COORDINATES: bool = False
 USE_EDGE_LENGTHS: bool = False
-USE_EDGE_ATTRIBUTES: bool = True
+USE_EDGE_ATTRIBUTES: bool = False
 
 # == MODEL PARAMETERS ==
-UNITS = [48, 48, 48]
+UNITS = [32, 32, 32]
 DROPOUT_RATE = 0.1
-FINAL_UNITS = [48, 32, 16, 1]
-REGRESSION_REFERENCE = [[-3.2]]
+FINAL_UNITS = [32, 16, 1]
+REGRESSION_REFERENCE = [[-0.0]]
 REGRESSION_WEIGHTS = [[1.0, 1.0]]
 IMPORTANCE_CHANNELS: int = 2
 IMPORTANCE_FACTOR = 2.0
@@ -37,7 +37,7 @@ FIDELITY_FUNCS = [
     lambda org, mod: tf.nn.relu(mod - org),
     lambda org, mod: tf.nn.relu(org - mod),
 ]
-SPARSITY_FACTOR = 0.3
+SPARSITY_FACTOR = 0.1
 CONCAT_HEADS = False
 
 # == TRAINING PARAMETERS ==

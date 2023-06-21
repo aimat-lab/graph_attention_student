@@ -137,3 +137,9 @@ described changes to the MLP structure so as to not give the model the chance to
 
 - Added the new method ``Megan.leave_one_out_deviations`` which is more general
 
+0.12.3 - 21.06.2023
+-------------------
+
+- Added the option to return the pooled graph embeddings for a MEGAN model instead of the final prediction and also 
+  added the method ``embedd_graphs`` which does this for a list of graph dicts.
+- Added the TADF dataset training sub-experiment modules
