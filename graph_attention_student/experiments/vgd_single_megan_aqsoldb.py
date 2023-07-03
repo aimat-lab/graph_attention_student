@@ -45,6 +45,7 @@ BATCH_SIZE = 32
 EPOCHS = 75
 REPETITIONS = 1
 OPTIMIZER_CB = lambda: ks.optimizers.experimental.AdamW(learning_rate=0.001)
+DEVICE: str = 'cpu:0'
 
 # == EXPERIMENT PARAMETERS ==
 __DEBUG__ = True

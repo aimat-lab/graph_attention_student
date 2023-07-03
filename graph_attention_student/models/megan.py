@@ -453,11 +453,8 @@ class Megan(ks.models.Model):
             
         # 17.06.23 - This is a ragged tensor which contains the full graph embeddings for all the elements, these 
         # graph embeddings are essentially constant size vectors which represent the graph in some manner.
-        # embeddings: ([B], K*N)
+        # embeddings: ([B], N, K)
         embeddings = tf.concat(embeddings, axis=-1)
-
-        # out: ([B], N*K²)
-        # out = self.lay_concat_out(outs)
 
         # At this point, after the global pooling of the node embeddings, we can append the global graph
         # attributes, should those exist
