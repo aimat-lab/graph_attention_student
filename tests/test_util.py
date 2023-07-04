@@ -1,5 +1,7 @@
 import os
 import pytest
+
+import tensorflow as tf
 import numpy as np
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -69,3 +71,20 @@ def test_update_nested_dict():
     assert len(merged['nesting1']) == 2
     assert len(merged['nesting2']) == 1
     assert merged['nesting2']['value_original'] == 20
+    
+    
+def test_tensor_matrix_multiplication():
+    """
+    Understanding how to do matrix multiplication for graph embedding tensors.
+    """
+    tens = tf.random.normal((32, 16))
+    tens_expanded = tf.expand_dims(tens, axis=-2)
+    
+    product = tf.reduce_sum(tens * tens_expanded, axis=-1)
+    product = product.numpy()
+    print(product.shape)
+    
+    fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(10, 10))
+    ax.set_title('self product matrix')
+    ax.imshow(product)
+    fig.savefig(os.path.join(ARTIFACTS_PATH, 'test_tensor_matrix_multiplication.pdf'))

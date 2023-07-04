@@ -83,12 +83,15 @@ class Megan(ks.models.Model):
                  final_dropout_rate: float = 0.0,
                  final_activation: str = 'linear',
                  final_pooling: str = 'sum',
+                 final_bias: t.Optional[list] = None,
                  regression_limits: t.Optional[t.Tuple[float, float]] = None,
                  regression_weights: t.Optional[t.Tuple[float, float]] = None,
                  regression_bins: t.Optional[t.List[t.Tuple[float, float]]] = None,
                  regression_reference: t.Optional[float] = None,
                  return_importances: bool = True,
                  use_graph_attributes: bool = False,
+                 # contrastive sampling
+                 contrastive_sampling_factor: float = 0.0,
                  **kwargs):
         """
         Args:
@@ -155,6 +158,7 @@ class Megan(ks.models.Model):
         self.final_dropout_rate = final_dropout_rate
         self.final_activation = final_activation
         self.final_pooling = final_pooling
+        self.final_bias = final_bias
         self.regression_limits = regression_limits
         self.regression_weights = regression_weights
         self.regression_reference = regression_reference
@@ -162,20 +166,27 @@ class Megan(ks.models.Model):
         self.return_importances = return_importances
         self.separate_explanation_step = separate_explanation_step
         self.use_graph_attributes = use_graph_attributes
-
         # Fidelity Training
         self.fidelity_factor = fidelity_factor
         self.var_fidelity_factor = tf.Variable(fidelity_factor, trainable=False)
         self.fidelity_funcs = fidelity_funcs
+        # contrastive sampling
+        self.contrastive_sampling_factor = contrastive_sampling_factor
 
-        # ~ MAIN CONVOLUTIONAL / ATTENTION LAYERS
+        # ~ MAIN MESSAGE PASSING / ATTENTION LAYERS
+        
+        # 04.07.23 - I changed it here so that the last message passing layer has a linear layer in the hopes 
+        # that this will make the intermediate graph embedding a little bit more visually interpretable.
+        self.attention_activations = [activation for _ in self.units]
+        self.attention_activations[-1] = 'linear'
+        
         self.attention_layers: t.List[GraphBaseLayer] = []
-        for u in self.units:
+        for u, act in zip(self.units, self.attention_activations):
             lay = MultiHeadGATV2Layer(
                 units=u,
                 num_heads=self.importance_channels,
                 use_edge_features=self.use_edge_features,
-                activation=self.activation,
+                activation=act,
                 use_bias=self.use_bias,
                 has_self_loops=True,
                 concat_heads=self.concat_heads
@@ -215,21 +226,27 @@ class Megan(ks.models.Model):
         self.lay_final_dropout = DropoutEmbedding(rate=self.final_dropout_rate)
 
         self.final_acts = ['kgcnn>leaky_relu' for _ in self.final_units]
-        # self.final_acts[-1] = self.final_activation
         self.final_acts[-1] = 'linear'
-        self.final_biases = [True for _ in self.final_units]
-        self.final_biases[-1] = True
         self.final_layers = []
-        for u, act, bias in zip(self.final_units, self.final_acts, self.final_biases):
+        for u, act in zip(self.final_units, self.final_acts):
             lay = DenseEmbedding(
                 units=u,
                 activation=act,
-                use_bias=bias
+                use_bias=True
             )
             self.final_layers.append(lay)
 
         self.lay_final_activation = ActivationEmbedding(self.final_activation)
-        self.bias = tf.Variable(tf.zeros(shape=(self.final_units[-1], )), dtype=tf.float32, name='final_bias')
+        
+        # 04.07.23 - We fix a bug here. Before we just created the new tf.variables without a condition but 
+        # this has lead to problems when we load a model from the disk where the loaded bias would not be loaded 
+        # properly. Now we pass in a !=None bias value ONLY when loading a model from the disk which.
+        if final_bias is None:
+            # As it is custom with bias variables we initialize the bias as zeros.
+            self.bias = tf.Variable(tf.zeros(shape=(self.final_units[-1], )), dtype=tf.float32, name='final_bias')
+        else:
+            self.bias = tf.Variable(tf.constant(final_bias), dtype=tf.float32, name='final_bias')
+
 
         # ~ EXPLANATION ONLY TRAIN STEP
         self.bce_loss = ks.losses.BinaryCrossentropy()
@@ -256,8 +273,9 @@ class Megan(ks.models.Model):
                 self.regression_reference = [regression_reference]
 
             num_references = len(self.regression_reference)
-            self.bias = tf.Variable(tf.constant(self.regression_reference), dtype=tf.float32, name='final_bias')
-            print(self.bias)
+            
+            if final_bias is None:
+                self.bias = tf.Variable(tf.constant(self.regression_reference), dtype=tf.float32, name='final_bias')
 
             if self.regression_weights is not None:
                 num_values = len(self.regression_weights)
@@ -301,6 +319,7 @@ class Megan(ks.models.Model):
             "final_dropout_rate": self.final_dropout_rate,
             "final_activation": self.final_activation,
             "final_pooling": self.final_pooling,
+            "final_bias": self.final_bias,
             "regression_limits": self.regression_limits,
             "regression_weights": self.regression_weights,
             "regression_reference": self.regression_reference,
@@ -320,6 +339,19 @@ class Megan(ks.models.Model):
 
     def doing_regression_weights(self) -> bool:
         return self.regression_weights is not None
+
+    @property
+    def graph_embedding_shape(self) -> t.Tuple[int, int]:
+        """
+        Returns a tuple which defines contains the information about the shape of the graph embeddings (K, D)
+        where K is the number of explanation channels employed in the model and D is the number of elements in 
+        each of the embedding vectors for each of the explanation channels.
+        
+        Note that every explanation channel produces it's own graph embeddings!
+        
+        :returns: int
+        """
+        return self.importance_channels, self.units[-1]
 
     # ~ Forward Pass Implementation
 
@@ -438,7 +470,7 @@ class Megan(ks.models.Model):
                 masked_embeddings = lay_transform(masked_embeddings)
 
             out = self.lay_pool_out(masked_embeddings)
-            embeddings.append(tf.expand_dims(out, axis=-1))
+            embeddings.append(tf.expand_dims(out, axis=-2))
 
             # Now "out" is a graph embedding vector of known dimension so we can simply apply the normal dense
             # mlp to get the final output value.
@@ -453,8 +485,10 @@ class Megan(ks.models.Model):
             
         # 17.06.23 - This is a ragged tensor which contains the full graph embeddings for all the elements, these 
         # graph embeddings are essentially constant size vectors which represent the graph in some manner.
-        # embeddings: ([B], N, K)
-        embeddings = tf.concat(embeddings, axis=-1)
+        # Note that every explanation channel k in (0..K) produces it's own graph embedding, which is reflected 
+        # in the following shape information. 
+        # embeddings: ([B], K, D)
+        embeddings = tf.concat(embeddings, axis=-2)
 
         # At this point, after the global pooling of the node embeddings, we can append the global graph
         # attributes, should those exist
@@ -462,12 +496,9 @@ class Megan(ks.models.Model):
         #     out = self.lay_concat_out([out, graph_input])
 
         out = self.lay_final_activation(out_sum + self.bias)
-        # if self.doing_regression:
-        #     reference = tf.ones_like(out) * tf.constant(self.regression_reference, dtype=tf.float32)
-        #     out = out + reference
 
         if return_embeddings:
-            return embeddings
+            return out, node_importances, edge_importances, embeddings
         if self.return_importances or return_importances:
             return out, node_importances, edge_importances 
         else:
@@ -564,6 +595,13 @@ class Megan(ks.models.Model):
         return loss
 
     def train_step(self, data):
+        """
+        This method will be called to perform each train step during the model training process, which is 
+        executed once for every training batch. This method will do model forward passes within an 
+        automatic differentiation environment, generate the loss gradients and perform model weight update.
+        
+        :returns: the metrics
+        """
         if len(data) == 3:
             x, y, sample_weight = data
         else:
@@ -576,7 +614,9 @@ class Megan(ks.models.Model):
             fid_loss = 0
 
             out_true, ni_true, ei_true = y
-            out_pred, ni_pred, ei_pred = self(x, training=True, return_importances=True)
+            # 04.07.23 - I am now returning the graph embeddings here as well because I want to try to implement 
+            # the unsupervised contrastive loss.
+            out_pred, ni_pred, ei_pred, graph_embeddings = self(x, training=True, return_importances=True, return_embeddings=True)
             loss = self.compiled_loss(
                 [out_true, ni_true, ei_true],
                 [out_pred, ni_pred, ei_pred],
@@ -615,12 +655,25 @@ class Megan(ks.models.Model):
                     exp_loss = self.compiled_classification_loss(out_true, _out_pred)
 
                 loss += self.importance_factor * exp_loss
+               
+            # ~ CONTRASTIVE LOSS REGULARIZATION
+            # As an additional regularization, to improve the properties of the graph embedding space, I want to try 
+            # contrastive sampling/loss. This is a (mostly) unsupervised method that can be used to improve the latent 
+            # data representations.
+            # The core idea is that - through data augementation - we push each embedding dissimilar elements (negative) 
+            # sampling and pull them closer towards similar ones.
+            if self.contrastive_sampling_factor != 0:
+                
+                # For the negative sampling we simply need to create the multiplication of every graph embedding with 
+                # every other graph embedding.
+                graph_embeddings_extended = tf.expand_dims(graph_embeddings, axis=-1)
 
         trainable_vars = self.trainable_variables
         gradients = tape.gradient(loss, trainable_vars)
 
         self.optimizer.apply_gradients(zip(gradients, trainable_vars))
 
+        # ~ FIDELITY TRAIN STEP
         # 09.05.23 - Optionally, we execute another additional train step here which can be used to
         # directly train the fidelity contributions of each of the channels to behave according to some
         # given functions. Specifically the thing that is being trained here is the difference between
@@ -648,11 +701,28 @@ class Megan(ks.models.Model):
 
     def embedd_graphs(self,
                       graph_list: t.List[tv.GraphDict],
+                      concat_channels: bool = False,
                       **kwargs
                       ) -> np.ndarray:
+        """
+        Given a ``graph_list`` list of graph dicts, this method will return a numpy array which contains the 
+        graph embeddings. The first dimension of the numpy array will contain the graph embeddings in the same 
+        order as the order of the graphs in the list.
         
+        :param graph_list: The list of graph dicts.
+        :param concat_channels: boolean flag. If True, all the embeddings of the individual explanation channels 
+            will be concatenated into a single embedding.
+        
+        :returns: Array of shape ([B], K, N) if concat_channels is False and ([B], K*N) if it is True.
+        """
         x = tensors_from_graphs(graph_list)
-        embeddings = self(x, return_embeddings=True)
+        
+        # Only when setting the "return_embeddings" flag do we change the output signature of the call method 
+        # so that it now returns 4 elements where the last one is the additional graph embeeding vector with 
+        # the following shape.
+        # embeddings: ([B], K, D)
+        _, _, _, embeddings = self(x, return_embeddings=True)
+        
         return embeddings.numpy()
 
     def predict_graphs(self,

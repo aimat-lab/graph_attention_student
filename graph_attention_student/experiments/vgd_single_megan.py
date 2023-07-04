@@ -1,8 +1,10 @@
 """
+The BASE experiment for the training and evaluation of MEGAN model on a visual graph dataset (VGD).
+New MEGAN model parameters are introduced in this sub experiment and default values are provided.
 
 CHANGELOG
 
-0.1.0
+0.1.0 - initial version
 """
 import os
 import pathlib
@@ -11,13 +13,17 @@ import typing as t
 import tensorflow as tf
 import tensorflow.keras as ks
 import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
 # from pycomex.util import Skippable
 # from pycomex.experiment import SubExperiment
 from pycomex.functional.experiment import Experiment
 from pycomex.utils import folder_path, file_namespace
 from kgcnn.data.utils import ragged_tensor_from_nested_numpy
+from umap import UMAP
 
 from graph_attention_student.models import Megan
+from graph_attention_student.models.mappers import IdentityMapper
 from graph_attention_student.training import NoLoss, mse, mae
 from graph_attention_student.training import LogProgressCallback
 from graph_attention_student.fidelity import leave_one_out_analysis
@@ -247,11 +253,71 @@ def calculate_fidelity(e, model, dataset, indices_true, x_true, y_true, out_pred
 
 @experiment.hook('save_model')
 def save_model(e, model):
+    """
+    This hook will be called at the very end of the experiment and it's purpose is to implement the saving 
+    of the model into a persistent file format, such that it can be re-used later on.
+    
+    For the MEGAN model, this saving process is relatively simple by calling the keras model "save" method.
+    """
     e.log('saving the MEGAN model...')
     model_path = os.path.join(e.path, 'model')
     e['model_path'] = model_path
 
     model.save(model_path)
+    
+    
+@experiment.hook('model_post_process')
+def model_post_process(e, model, index_data_map):
+    """
+    This hook will be executed after the model training and the default evaluation but before the 
+    default visualization. The purpose of this hook is to implement any additionaly evaluation and 
+    visualization functionality.
+    
+    This implementation implements the visualization of the graph embeddings. All the embeddings for the 
+    different explanation channels will be plotted into the same 2D plot and color coded. If the the 
+    graph embedding is not inherently 2D, UMAP mapper will be used to transform it into lower dimensional 
+    2D space for plotting. 
+    """
+    e.log('visualizing the graph embedding space for the MEGAN model...')
+    
+    graphs = [data['metadata']['graph'] for data in index_data_map.values()]
+    graph_embeddings = model.embedd_graphs(graphs)
+    e.log(f'generated graph embeddings with the shape: {graph_embeddings.shape}')
+    
+    mapper = IdentityMapper()
+    if model.graph_embedding_shape[-1] != 2:
+        mapper = UMAP(
+            n_neighbors=50,
+            min_dist=0, 
+            metric='euclidean',
+            repulsion_strength=2.0,
+        )
+        
+        # To fit the mapping we need a two-dimensional array - specifically we want to consider all the 
+        # of the embeddings of the individual channels as individual elements which is why we do the 
+        # reshaping here.
+        n, k, d = graph_embeddings.shape
+        mapper.fit(graph_embeddings.reshape((n * k, d)))
+    
+    e.log('visualizing the embeddings...')
+    fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(12, 12))
+    ax.set_title(f'MEGAN Graph Embeddings'
+                 f'{model.graph_embedding_shape[0]}D to 2D ({mapper.__class__.__name__})')
+    
+    for channel_index, color in zip(range(model.importance_channels), mcolors.TABLEAU_COLORS):
+        channel_embeddings = mapper.transform(graph_embeddings[:, channel_index, :])
+        ax.scatter(
+            channel_embeddings[:, 0], channel_embeddings[:, 1],
+            c=color,
+            s=1,
+            label=f'ch. {channel_index}'
+        )
+        
+    ax.legend()
+    fig_path = os.path.join(e.path, 'graph_embeddings.pdf')
+    fig.savefig(fig_path)
+    plt.close(fig)
+    
 
 
 experiment.run_if_main()

@@ -1,5 +1,5 @@
 """
-
+This is the BASE experiment that implements the 
 """
 import os
 import sys
@@ -38,7 +38,9 @@ from graph_attention_student.visualization import plot_regression_value_distribu
 # These parameters define the dataset that is to be used for the experiment as well as properties of
 # that dataset such as the train test split for example.
 
-# The name of the visual graph dataset to use for this experiment.
+# :param VISUAL_GRAPH_DATASET_PATH:
+#       This is the string path to the visual graph dataset folder which will be loaded to train the model.
+#       Make sure to adapt this parameter to an existing folder path on your system.
 VISUAL_GRAPH_DATASET_PATH: str = os.path.expanduser('~/.visual_graph_datasets/datasets/rb_dual_motifs')
 # :param DATASET_TYPE:
 #       A string which identifies the type of the dataset to be processed here, which at the moment can
@@ -48,13 +50,13 @@ DATASET_TYPE: str = 'regression'
 #       This needs to be the number of targets which are part of this dataset aka the number of outputs
 #       that will be produced by the model.
 NUM_TARGETS: int = 1
-
-# If this is None, then a new random split will be created for every repetition of the experiment.
-# Otherwise this may be the int index of an existing split that is associated with the dataset and then
-# that split will be used instead all the time.
+# :param USE_DATASET_SPLIT: 
+#       This variable controls if and which existing dataset split to use from the dataset. A visual graph dataset 
+#       may contain multiple canonical data splits which are numbered with integer indices. Setting this variable 
+#       to such an integer value will select the corresponding split. This value can be set to None, in which case 
+#       a new random split will be created for each run of the experiment.
 USE_DATASET_SPLIT: t.Optional[int] = None
 
-# The percentage of the dataset to use for random train set
 TRAIN_RATIO: float = 0.8
 
 # THis is the number of elements from the test set which is going to be used as examples for the
@@ -94,10 +96,10 @@ MODEL_NAME: str = 'MOCK'
 # The number of independent training process repetitions to get a statistical measure of the performance
 REPETITIONS: int = 1
 # This optimizer will be used during training
-OPTIMIZER_CB = lambda: ks.optimizers.Nadam(learning_rate=0.01)
+OPTIMIZER_CB = lambda: ks.optimizers.experimental.AdamW(learning_rate=1e-3)
 BATCH_SIZE: int = 256
 EPOCHS: int = 200
-DEVICE: str = 'gpu:0'
+DEVICE: str = 'cpu:0'
 
 # == EVALUATION PARAMETERS ==
 # These parameters control the evaluation process, which includes the drawing of visualizations and plots
@@ -122,11 +124,12 @@ __TESTING__ = True
             glob=globals())
 def experiment(e: Experiment):
 
+    # There is
     if e.__TESTING__:
-        e.EPOCHS = 10
+        e.EPOCHS = 2
 
     vgd_name = os.path.basename(VISUAL_GRAPH_DATASET_PATH)
-    e.log(f'Starting to train GNNX model on vgd "{vgd_name}"')
+    e.log(f'Starting to train model on vgd "{vgd_name}"')
 
     # -- DATASET LOADING --
 
@@ -149,6 +152,7 @@ def experiment(e: Experiment):
         data = index_data_map[index]
         metadata = data['metadata']
         graph: tc.GraphDict = data['metadata']['graph']
+        
         # 15.06.23 - If we encounter a target value that we do not want to be part of the dataset, the 
         # hook implementation raises a ValueError which signals to skip that particular element...
         try:
@@ -271,7 +275,8 @@ def experiment(e: Experiment):
 
         with tf.device(DEVICE):
 
-            if USE_DATASET_SPLIT is not None:
+            e.log(f'using split from the dataest: {e.USE_DATASET_SPLIT}')
+            if e.USE_DATASET_SPLIT is not None:
                 e.log(f'creating train test split from dataset...')
                 train_indices = [index for index, data in index_data_map.items()
                                  if USE_DATASET_SPLIT in data['metadata']['train_indices']]
@@ -440,6 +445,17 @@ def experiment(e: Experiment):
                   f' - mean edge sparsity: {mean_edge_sparsity:.2f}'
                   f' - node auc: {node_auc:.2f}'
                   f' - edge auc: {edge_auc:.2f}')
+
+            # ~ post-processing
+            
+            # :hook model_post_process:
+            #       This hook can be used to apply additional post processing steps for the model. This could for example 
+            #       be additional evaluation steps or even custom model-specific visualizations.
+            e.apply_hook(
+                'model_post_process', 
+                model=model, 
+                index_data_map=index_data_map
+            )
 
             # -- VISUALIZATION OF RESULTS --
 
