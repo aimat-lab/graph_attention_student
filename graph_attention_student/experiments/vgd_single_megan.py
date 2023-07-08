@@ -28,6 +28,7 @@ from graph_attention_student.training import NoLoss, mse, mae
 from graph_attention_student.training import LogProgressCallback
 from graph_attention_student.fidelity import leave_one_out_analysis
 from graph_attention_student.visualization import plot_leave_one_out_analysis
+from graph_attention_student.keras import load_model
 
 
 # == DATASET PARAMETERS ==
@@ -100,6 +101,11 @@ FINAL_UNITS: t.List[int] = [32, 16, 1]
 FINAL_DROPOUT: float = 0.0
 FINAL_ACTIVATION: str = 'linear'
 
+# ~ CONTRASTIVE LEARNING
+CONTRASTIVE_SAMPLING_FACTOR: float = 0.0
+CONTRASTIVE_SAMPLING_TAU: float = 1.0
+POSITIVE_SAMPLING_RATE: int = 1
+
 # == TRAINING PARAMETERS ==
 EPOCHS = 50
 BATCH_SIZE = 32
@@ -142,7 +148,10 @@ def create_model(e):
         final_dropout_rate=e.FINAL_DROPOUT,
         use_graph_attributes=False,
         use_edge_features=True,
-        concat_heads=e.CONCAT_HEADS
+        concat_heads=e.CONCAT_HEADS,
+        contrastive_sampling_factor=e.CONTRASTIVE_SAMPLING_FACTOR,
+        contrastive_sampling_tau=e.CONTRASTIVE_SAMPLING_TAU,
+        positive_sampling_rate=e.POSITIVE_SAMPLING_RATE,
     )
     model.compile(
         loss=[
@@ -155,7 +164,7 @@ def create_model(e):
         ],
         metrics=[mse],
         optimizer=e.OPTIMIZER_CB(),
-        run_eagerly=False
+        run_eagerly=False,
     )
     return model
 
@@ -266,6 +275,20 @@ def save_model(e, model):
     model.save(model_path)
     
     
+def load_model(e):
+    """
+    This hook will be called in the experiment analysis to load the model from it's persistent representation 
+    in case it will be needed.
+    """
+    # From the "save_model" we have saved the path into the experiment registry
+    model_path = e['model_path']
+    model = load_model(model_path)
+    
+    e.log(f'MEGAN final bias: {model.bias}')
+    
+    return model
+    
+    
 @experiment.hook('model_post_process')
 def model_post_process(e, model, index_data_map):
     """
@@ -289,7 +312,7 @@ def model_post_process(e, model, index_data_map):
         mapper = UMAP(
             n_neighbors=50,
             min_dist=0, 
-            metric='euclidean',
+            metric='cosine',
             repulsion_strength=2.0,
         )
         
@@ -301,8 +324,8 @@ def model_post_process(e, model, index_data_map):
     
     e.log('visualizing the embeddings...')
     fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(12, 12))
-    ax.set_title(f'MEGAN Graph Embeddings'
-                 f'{model.graph_embedding_shape[0]}D to 2D ({mapper.__class__.__name__})')
+    ax.set_title(f'MEGAN Graph Embeddings\n'
+                 f'{model.graph_embedding_shape[-1]}D to 2D ({mapper.__class__.__name__})')
     
     for channel_index, color in zip(range(model.importance_channels), mcolors.TABLEAU_COLORS):
         channel_embeddings = mapper.transform(graph_embeddings[:, channel_index, :])

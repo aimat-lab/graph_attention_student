@@ -8,9 +8,8 @@ from pycomex.functional.experiment import Experiment
 from pycomex.utils import folder_path, file_namespace
 
 # == DATASET PARAMETERS ==
-# VISUAL_GRAPH_DATASET_PATH: str = os.path.expanduser('/media/ssd/.visual_graph_datasets/datasets/aqsoldb')
-VISUAL_GRAPH_DATASET_PATH = '/home/jonas/.visual_graph_datasets/datasets/aqsoldb'
-USE_DATASET_SPLIT: t.Optional[int] = None
+VISUAL_GRAPH_DATASET_PATH: str = os.path.expanduser('/media/ssd/.visual_graph_datasets/datasets/aqsoldb')
+USE_DATASET_SPLIT: t.Optional[int] = 0
 TRAIN_RATIO: float = 0.8
 NUM_EXAMPLES: int = 100
 NUM_TARGETS: int = 1
@@ -24,26 +23,32 @@ USE_EDGE_ATTRIBUTES: bool = True
 
 # == MODEL PARAMETERS ==
 UNITS = [48, 48, 48]
-DROPOUT_RATE = 0.1
+DROPOUT_RATE = 0.0
 FINAL_UNITS = [48, 32, 16, 1]
-REGRESSION_REFERENCE = [[-3.2]]
+REGRESSION_REFERENCE = [[-2.8]]
 REGRESSION_WEIGHTS = [[1.0, 1.0]]
 IMPORTANCE_CHANNELS: int = 2
-IMPORTANCE_FACTOR = 1.0
+IMPORTANCE_FACTOR = 2.0
 IMPORTANCE_MULTIPLIER = 0.6
-FIDELITY_FACTOR = 0.2
+FIDELITY_FACTOR = 0.1
 FIDELITY_FUNCS = [
     lambda org, mod: tf.nn.relu(mod - org),
     lambda org, mod: tf.nn.relu(org - mod),
 ]
 SPARSITY_FACTOR = 0.3
 CONCAT_HEADS = False
+# ~ CONTRASTIVE LEARNING
+CONTRASTIVE_SAMPLING_FACTOR = 1.0
+CONTRASTIVE_SAMPLING_TAU = 0.9
+POSITIVE_SAMPLING_RATE = 5
 
 # == TRAINING PARAMETERS ==
-BATCH_SIZE = 32
-EPOCHS = 25
+BATCH_SIZE = 16
+EPOCHS = 50
 REPETITIONS = 1
-OPTIMIZER_CB = lambda: ks.optimizers.experimental.AdamW(learning_rate=0.01)
+OPTIMIZER_CB = lambda: ks.optimizers.experimental.AdamW(
+    learning_rate=0.001,
+)
 DEVICE: str = 'cpu:0'
 
 # == EXPERIMENT PARAMETERS ==

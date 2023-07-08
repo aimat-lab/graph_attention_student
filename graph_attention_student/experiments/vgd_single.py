@@ -495,6 +495,11 @@ def experiment(e: Experiment):
 
 @experiment.analysis
 def analysis(e: Experiment):
+    # ~ Loading model
+    # As the first step of the analysis we need to load the model in the case that we need 
+    # to use that to make some addtional predictions here or something like that.
+    model = e.apply_hook('load_model')
+    
     # Creating latex code to display the results in a table
     e.log('rendering latex table...')
     column_names = [

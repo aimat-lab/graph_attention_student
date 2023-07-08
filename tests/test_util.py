@@ -81,10 +81,19 @@ def test_tensor_matrix_multiplication():
     tens_expanded = tf.expand_dims(tens, axis=-2)
     
     product = tf.reduce_sum(tens * tens_expanded, axis=-1)
-    product = product.numpy()
-    print(product.shape)
+    product_array = product.numpy()
+    print(product_array.shape)
     
-    fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(10, 10))
-    ax.set_title('self product matrix')
-    ax.imshow(product)
+    fig, (ax_1, ax_2) = plt.subplots(ncols=2, nrows=1, figsize=(20, 10))
+    ax_1.set_title('self product matrix')
+    ax_1.imshow(product_array)
+    
+    # I also need to create a diagonal "eye matrix" with thesame shape to be able to block out all the 
+    # auto terms in that result
+    eye = 1 - tf.eye(num_rows=product.shape[0], num_columns=product.shape[0])
+    eye_array = eye.numpy()
+    ax_2.set_title('self product matrix - eye window')
+    ax_2.imshow(eye_array)
+    
     fig.savefig(os.path.join(ARTIFACTS_PATH, 'test_tensor_matrix_multiplication.pdf'))
+    

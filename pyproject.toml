@@ -43,6 +43,7 @@ nltk = ">=3.7"
 rdkit = ">=2022.9.1"
 orjson = ">=3.8.0"
 poetry-bumpversion = ">=0.3.0"
+umap-learn = ">=0.5.3"
 visual_graph_datasets = ">=0.11.0"
 vgd_counterfactuals = ">=0.1.0"
 
