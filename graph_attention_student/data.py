@@ -65,6 +65,14 @@ def tensors_from_graphs(graph_list: t.List[tv.GraphDict]
         ragged_tensor_from_nested_numpy([graph['edge_attributes'] for graph in graph_list]),
         ragged_tensor_from_nested_numpy([graph['edge_indices'] for graph in graph_list]),
     )
+    
+def mock_importances_from_graphs(graphs: t.List[tv.GraphDict],
+                                 num_channels: int,
+                                 ) -> t.Tuple[tf.RaggedTensor, tf.RaggedTensor]:
+    return (
+        ragged_tensor_from_nested_numpy([np.zeros(shape=(len(graph['node_attributes']), num_channels)) for graph in graphs]),
+        ragged_tensor_from_nested_numpy([np.zeros(shape=(len(graph['edge_attributes']), num_channels)) for graph in graphs]),
+    )
 
 
 def process_index_data_map(index_data_map: t.Dict[int, dict],
