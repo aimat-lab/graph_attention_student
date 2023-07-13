@@ -24,6 +24,12 @@ from graph_attention_student.training import shifted_sigmoid
 
 
 class MockMegan:
+    """
+    This model is a mock implementation of the actual MEGAN model used for testing purposes. This model will be 
+    used in unittests that need to involve MEGAN models to some extent, but where it is too costly to actually 
+    build and to some extent train a full model every time. This mock implementation aims to replicate the shapes 
+    of the true megan model but otherwise returns randomly generated data.
+    """
 
     def __init__(self,
                  importance_channels: int,
@@ -47,6 +53,208 @@ class MockMegan:
 
 
 class Megan(ks.models.Model):
+    """
+    MEGAN: Multi Explanation Graph Neural Network.
+    
+    This model currently supports graph regression and graph classification problems. 
+    This model was designed with a focus on *explainable artificial intelligence* (XAI). Specifically, this 
+    model is a *self-explaining* neural network.
+    
+    **TENSOR SHAPE DOCUMENTATION**
+    
+    The documentation and comments in this class often specify the shapes of the various tensors that are 
+    involved with the model. The following section will introduce the variables which have been introduced 
+    for this purpose.
+    
+    Note: Shapes that are specified with square brackets indicate a *ragged* dimension. This means that 
+    this dimension is not consistent across a tensor. So for example the node dimension of graphs is 
+    usually ragged since not every graph has the same number of nodes.
+    
+    - V: Number of nodes in a graph
+    - E: Number of edges in a graph (=edge list which contains the node index tuples)
+    - N: Numbef of node features 
+    - M; Numbef of edge features 
+    - B: Number of graphs in one batch
+    - K: Number of importance channels (= number of importance masks), configured for the network
+    - L: Number of layers in the network overall 
+        - l: counter variable for the current layer
+    """
+    
+    def __init__(self,
+                 # message passing related
+                 units: t.List[int],
+                 activation: str = "kgcnn>leaky_relu",
+                 use_bias: bool = True,
+                 dropout_rate: float = 0.0,
+                 use_edge_features: bool = True,
+                 # node/edge importance related
+                 importance_units: t.List[int] = [],
+                 importance_channels: int = 2,
+                 importance_activation: str = "sigmoid",  # do not change
+                 importance_factor: float = 0.0,
+                 importance_multiplier: float = 10.0,
+                 sparsity_factor: float = 0.0,
+                 concat_heads: bool = False,
+                 # mlp tail end related 
+                 final_units: t.List[int] = [1],
+                 final_dropout_rate: float = 0.0,
+                 final_activation: str = 'linear',
+                 final_pooling: str = 'sum',
+                 final_bias: t.Optional[list] = None,
+                 regression_limits: t.Optional[t.Tuple[float, float]] = None,
+                 regression_weights: t.Optional[t.Tuple[float, float]] = None,
+                 regression_bins: t.Optional[t.List[t.Tuple[float, float]]] = None,
+                 regression_reference: t.Optional[float] = None,
+                 **kwargs,
+                 ):
+        
+        super(Megan, self).__init__(self, **kwargs)
+        # message passsing related
+        self.units = units
+        self.activation = activation 
+        self.use_bias = use_bias
+        self.dropout_rate = dropout_rate
+        self.use_edge_features = use_edge_features
+        # node/edge importance related
+        self.importance_units = importance_units
+        self.importance_channels = importance_channels
+        self.importance_activation = importance_activation
+        self.importance_factor = importance_factor
+        self.importance_multiplier = importance_multiplier
+        self.sparsity_factor = sparsity_factor
+        self.conat_heads = concat_heads
+        # MLP tail end related
+        self.final_units = final_units
+        self.final_dropout_rate = final_dropout_rate
+        self.final_activation = final_activation
+        self.final_pooling = final_pooling
+        self.final_bias = final_bias
+        self.regression_weights = regression_weights
+        self.regression_reference = regression_reference
+        
+        # ~ MESSAGE PASSING / GRAPH ATTENTION LAYERS
+        # Here we set up the layers for the message passing part of the network based on the parameters 
+        # about how many hidden units to be included in each of the layers, the activation function etc.
+        
+        self.attention_activations = [activation for _ in self.units]
+        self.attention_layers: t.List[GraphBaseLayer] = []
+        for u, act in zip(self.units, self.attention_activations):
+            lay = MultiHeadGATV2Layer(
+                units=u,
+                activation=act,
+                num_heads=self.importance_channels,
+                use_bias=self.use_bias,
+                concat_heads=concat_heads,
+                has_self_loops=True,
+                use_edge_features=True,
+            )
+            self.attention_layers.append(lay)
+            
+        # Optionally, we can apply dropout between each of the message passing layers
+        self.lay_dropout = DropoutEmbedding(rate=self.dropout_rate)
+        
+        # ~ EDGE IMPORTANCES
+        # Here we set up all the layers/operations important for the calculation of the edge importances 
+        # based on the attention logits of the attention layers.
+        
+        self.lay_act_importance = ActivationEmbedding(acitvation=self.importance_activation)
+        self.lay_concat_alphas = LazyConcatenate(axis=-1)
+        
+        # Here we prepare the local pooling operation which will transform the edge importances into the node 
+        # shape by simply broadcasting the edge values to the two adjacent nodes and averaging them there.
+        self.lay_pool_edges_in = PoolingLocalEdges(pooling_method='mean', pooling_index=0)
+        self.lay_pool_edges_out = PoolingLocalEdges(pooling_method='mean', pooling_index=1)
+        self.lay_average = LazyAverage()
+        
+        # ~ NODE IMPORTANCES
+        # Here we set up the layers/operation which are needed to derive the final node importances tensor
+        # using the final node embeddinged and the edge importances
+        
+        # Here we need to make sure that the final number of hidden units is the same as the number of channels 
+        # defined for the network!
+        self.node_importance_units = self.importance_units + [self.importance_channels]
+        self.node_importance_acts = ['kgcnn>leaky_relu' for _ in self.units] + ['linear']
+        self.node_importance_layers = []
+        for u, act in zip(self.node_importance_units, self.node_importance_acts):
+            lay = DenseEmbedding(
+                units=u,
+                activation=act,
+                use_bias=True,
+            )
+            self.node_importance_layers.append(lay)
+            
+        # This is a layer that can be used to apply the additional sparsity regularization on the explanations 
+        self.lay_sparsity = ExplanationSparsityRegularization(self.sparsity_factor)
+            
+        # ~ OUTPUT / MLP 
+        # Here we set up the output part of the network as a whole which consists of a global pooling operation 
+        # first that transforms the node embeddings into a single graph embedding and then applies a MLP / dense 
+        # network to that graph embedding to calculate a suitable output for the network as a whole.
+        
+        self.final_acts = ['kgcnn>leaky_relu' for _ in self.final_units]
+        self.final_acts[-1] = 'linear'
+        self.final_layers = []
+        for u, act in zip(self.final_units, self.final_acts):
+            lay = DenseEmbedding(
+                units=u,
+                activation=act,
+                use_bias=True,
+            )
+            self.final_layers.append(lay)
+            
+        self.lay_final_activation = ActivationEmbedding(self.final_activation)
+        
+    def call(self,
+             inputs: tuple,
+             training: bool = True,
+             return_importances: bool = True,
+             return_embeddings: bool = False,
+             **kwargs) -> tuple:
+        """
+        Implements the forwards pass of the model.
+        
+        Roughly speaking the forward pass consists of three main parts. 
+        (1) The first part is a graph message passing 
+        part consisting of attention layers. It produces the final node embeddings and a bunch of edge attention logits. 
+        (2) The second part of the 
+        
+        The return signature of this method depends on the flags set in the arguments. in the default state, 
+        """
+        
+        # node_input: ([B], [V], N)
+        # edge_input: ([B], [E], M)
+        # edge_index_input: ([B], [E], 2)
+        node_input, edge_input, edge_index_input = inputs
+        
+        # ~ MESSAGE PASSING / ATTENTION LAYERS
+        # The first part of the network consists of a message passing part or more specifically a number of 
+        # graph attention layers. These attention layers receive the graph and the node embeddings as input 
+        # and return a transformed vector of node embeddings which is in turn used as the input of the next 
+        # attention layer.
+        # The important part in this step is that these special attention layers also return the attention 
+        # logits as a byproduct. Those are multiple values per *edge* which we nedd to keep track of for 
+        # every layer so that they can be processed afterwards.
+                
+        node_embedding = node_input
+        alphas: t.List[tf.RaggedTensor] = []
+        for lay in self.attention_layers:
+            # node_embedding: ([B], [V], N_l)
+            # alpha: ([B], [E], K)
+            # The alpha values are the attention *logits* for each edge of each of the graphs along all the 
+            # attention heads, which is equal to the number of K explanation channels here as defined in the 
+            # constructor!
+            node_embedding, alpha = lay([node_embedding, edge_input, edge_index_input])
+            alphas.append(alpha)
+            
+            if training:
+                node_embedding = self.lay_dropout(node_embedding)
+        
+        # ~ EDGE IMPORTANCES
+        # In this section we proceed to create the edge importance explanations from the attetnion logits we 
+        # have just collected. This can be done by 
+        
+        
+class Megan2(ks.models.Model):
     """
     MEGAN: Multi Explanation Graph Attention Network
     This model currently supports graph regression and graph classification problems. It was mainly designed
