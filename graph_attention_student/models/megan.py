@@ -59,7 +59,8 @@ class Megan(ks.models.Model):
     
     This model currently supports graph single-regression and graph classification problems. 
     This model was designed with a focus on *explainable artificial intelligence* (XAI). Specifically, this 
-    model is a *self-explaining* neural network.
+    model is a *self-explaining* neural network, which means that besides the actual primary task prediction 
+    this model will produce node and edge attributional explanation masks at the same time.
     
     **TENSOR SHAPE DOCUMENTATION**
     
@@ -81,6 +82,8 @@ class Megan(ks.models.Model):
     - L: Number of message passing layers in the network overall 
         - l: counter variable for the "current" layer
     - C: Number of output values expected from the network as a whole
+        - c: counter variable for the "current" output value
+    - D: Number of elements in the graph embedding vector -> embedding dimension
     """
     
     def __init__(self,
@@ -109,7 +112,7 @@ class Megan(ks.models.Model):
                  **kwargs,
                  ):
         
-        super(Megan, self).__init__(self, **kwargs)
+        super(Megan, self).__init__(**kwargs)
         # message passsing related
         self.units = units
         self.activation = activation 
@@ -123,7 +126,7 @@ class Megan(ks.models.Model):
         self.importance_factor = importance_factor
         self.importance_multiplier = importance_multiplier
         self.sparsity_factor = sparsity_factor
-        self.conat_heads = concat_heads
+        self.concat_heads = concat_heads
         # MLP tail end related
         self.final_units = final_units
         self.final_dropout_rate = final_dropout_rate
@@ -145,7 +148,7 @@ class Megan(ks.models.Model):
                 activation=act,
                 num_heads=self.importance_channels,
                 use_bias=self.use_bias,
-                concat_heads=concat_heads,
+                concat_heads=self.concat_heads,
                 has_self_loops=True,
                 use_edge_features=True,
             )
@@ -222,6 +225,31 @@ class Megan(ks.models.Model):
         self.mae_loss = ks.losses.MeanAbsoluteError()
         self.compiled_regression_loss = compile_utils.LossesContainer(mae)    
         
+    def get_config(self) -> dict:
+        config = super(Megan, self).get_config()
+        config.update({
+            "units": self.units,
+            "activation": self.activation,
+            "use_bias": self.use_bias,
+            "dropout_rate": self.dropout_rate,
+            "use_edge_features": self.use_edge_features,
+            "importance_units": self.importance_units,
+            "importance_channels": self.importance_channels,
+            "importance_activation": self.importance_activation,
+            "importance_factor": self.importance_factor,
+            "importance_multiplier": self.importance_multiplier,
+            "sparsity_factor": self.sparsity_factor,
+            "concat_heads": self.concat_heads,
+            "final_units": self.final_units,
+            "final_dropout_rate": self.final_dropout_rate,
+            "final_activation": self.final_activation,
+            "final_pooling": self.final_pooling,
+            "regression_weights": self.regression_weights,
+            "regression_reference": self.regression_reference,
+        })
+
+        return config
+        
     @property
     def doing_regression(self) -> bool:
         """
@@ -243,6 +271,10 @@ class Megan(ks.models.Model):
         :returns: int
         """
         return self.importance_channels, self.units[-1]
+    
+    @property
+    def output_shape(self) -> t.Tuple:
+        return (self.final_units[-1], )
         
     def call(self,
              inputs: tuple,
@@ -371,14 +403,17 @@ class Megan(ks.models.Model):
             graph_embedding = self.lay_pool_out(node_embedding * node_importances_slice)
             graph_embeddings.append(graph_embedding)
             
-        # grapmbeddings: ([B], [V], N_L * K)
+        # graph_embeddings_separate: ([B], [V], D, K)
         graph_embeddings_separate = tf.concat([tf.expand_dims(emb, axis=-1) for emb in graph_embeddings], axis=-1)
-
+        # graph_embeddings: ([B], [V], N_L * K)
         graph_embeddings = tf.concat(graph_embeddings, axis=-1)
         
+        # Appyling all the layers of the final prediction MLP
         output = graph_embeddings
         for lay in self.final_layers:
             output = lay(output)
+            
+        output = self.lay_final_activation(output)
             
         if return_embeddings:
             return output, node_importances, edge_importances, graph_embeddings_separate
@@ -460,7 +495,7 @@ class Megan(ks.models.Model):
                     outs_approx.append(out)
 
                 # outs: ([batch], K)
-                outs_approx = self.lay_concat_out(outs_approx)
+                outs_approx = tf.concat(outs_approx, axis=-1)
 
                 # How this approximation works in detail has to be different for regression and classification
                 # problems since for regression problems we make the linearized assumption of positive and negative 
@@ -600,8 +635,607 @@ class Megan(ks.models.Model):
             
         return embeddings
                 
+    def leave_one_out_deviations(self,
+                                 graph_list: t.List[tv.GraphDict],
+                                 ) -> np.ndarray:
+        """
+        Given a list of graphs, this method will compute the explanation leave-one-out deviations.
+        This is done by making an initial prediction for the given graphs and then for each explanation
+        channel which the model employs an additional prediction where that corresponding explanation
+        channel is masked such that all of it's information is withheld from the final prediction result.
+        The method will return a numpy array of the shape (N, K, C) where N is the number of graphs given
+        to the method, K is the number of importance channels of the model and C is the number of output
+        values generated by the model. Each element in this array will be the deviation (original - modified)
+        that is caused for the c-th output value when the k-th importance channel is withheld for the
+        n-th graph.
+
+        :param graph_list: A list of GraphDicts for which to compute this.
+
+        :returns: Array of shape (N, K, C)
+        """
+        x = tensors_from_graphs(graph_list)
+        y_org = self(x, training=False)
+        out_org, _, _ = [v.numpy() for v in y_org]
+
+        num_channels = self.importance_channels
+        num_targets = self.final_units[-1]
+
+        results = np.zeros(shape=(len(graph_list), num_channels, num_targets), dtype=float)
+        for channel_index in range(self.importance_channels):
+            base_mask = [float(channel_index != i) for i in range(self.importance_channels)]
+            mask = [[base_mask for _ in graph['node_indices']] for graph in graph_list]
+            mask_tensor = ragged_tensor_from_nested_numpy(mask)
+            y_mod = self(x, training=False, node_importances_mask=mask_tensor)
+            out_mod, _, _ = [v.numpy() for v in y_mod]
+
+            for target_index in range(num_targets):
+                for index, out in enumerate(out_mod):
+                    deviation = out_org[index][target_index] - out_mod[index][target_index]
+                    results[index, channel_index, target_index] = deviation
+
+        return results
+    
+
+class Megan2(Megan):
+    """
+    This is the second version of the Megan model, which implements some key improvements in regards to 
+    the explanation capabilities. The primary objective in the development of this second version was to 
+    global concept explanations.
+    
+    The basic version of Megan is mainly concerned with local attributional explanations. This means that 
+    explanations are provided locally for every individual prediction of the network. The goal of global 
+    explanations on the other hand is to provide additional information about the dataset and the 
+    underlying task in general.
+    
+    Such global explanations are identified as clusters in the graph explanation embedding space. By 
+    addding several key modifications to the basic MEGAN architecture, the graph embedding space of MEGAN2 
+    produces clearer clustering behavior where structurally and semantically similar explanations from diverse 
+    input graphs are clustered in the same regions of the embedding space. By looking at the commonalities 
+    and aggregate properties of these clusters, it is possible to set up global explanations for the 
+    graph properties.
+    """
+    def __init__(self,
+                 # message passing related
+                 units: t.List[int],
+                 activation: str = "kgcnn>leaky_relu",
+                 use_bias: bool = True,
+                 dropout_rate: float = 0.0,
+                 use_edge_features: bool = True,
+                 # node/edge importance related
+                 importance_units: t.List[int] = [],
+                 importance_channels: int = 2,
+                 importance_activation: str = "sigmoid",  # do not change
+                 importance_factor: float = 0.0,
+                 importance_multiplier: float = 10.0,
+                 sparsity_factor: float = 0.0,
+                 concat_heads: bool = False,
+                 # mlp tail end related 
+                 final_units: t.List[int] = [1],
+                 final_dropout_rate: float = 0.0,
+                 final_activation: str = 'linear',
+                 final_pooling: str = 'sum',
+                 final_bias: t.Optional[list] = None,
+                 regression_weights: t.Optional[t.Tuple[float, float]] = None,
+                 regression_reference: t.Optional[float] = None,
+                 # fidelity training related
+                 fidelity_factor: float = 0.0,
+                 fidelity_funcs: t.List[t.Callable] = [],
+                 # constrastive representation learning related
+                 contrastive_sampling_factor: float = 0.0,
+                 contrastive_sampling_tau: float = 0.9,
+                 positive_sampling_rate: int = 1,
+                 **kwargs,
+                 ):
                 
-class Megan2(ks.models.Model):
+        super(Megan2, self).__init__(
+            units=units,
+            activation=activation,
+            use_bias=use_bias,
+            dropout_rate=dropout_rate,
+            use_edge_features=use_edge_features,
+            importance_units=importance_units,
+            importance_channels=importance_channels,
+            importance_activation=importance_activation,
+            importance_factor=importance_factor,
+            importance_multiplier=importance_multiplier,
+            sparsity_factor=sparsity_factor,
+            concat_heads=concat_heads,
+            final_units=final_units,
+            final_dropout_rate=final_dropout_rate,
+            final_activation=final_activation,
+            final_pooling=final_pooling,
+            regression_weights=regression_weights,
+            regression_reference=regression_reference,
+            **kwargs
+        )
+        # mlp backend
+        self.final_bias = final_bias
+        # fidelity training
+        self.fidelity_factor = fidelity_factor
+        self.fidelity_funcs = fidelity_funcs
+        # contrastive representation learning
+        self.contrastive_sampling_factor = contrastive_sampling_factor
+        self.contrastive_sampling_tau = contrastive_sampling_tau
+        self.positive_sampling_rate = positive_sampling_rate
+        
+        # Due to the changes to the architecture we need an additional learnable bias weight all the way at 
+        # the end of the network after the prediction MLP. If a value for that is not specifically provided 
+        # we initialize this variable as zero as it is commonly done with bias variables.
+        if self.final_bias is None:
+            # As it is custom with bias variables we initialize the bias as zeros.
+            self.var_bias = tf.Variable(tf.zeros(shape=(self.final_units[-1], )), dtype=tf.float32, name='final_bias')
+        else:
+            self.var_bias = tf.Variable(tf.constant(self.final_bias), dtype=tf.float32, name='final_bias')
+        
+    def get_config(self):
+        config = super(Megan2, self).get_config()
+        config.update(**{
+            'fidelity_factor': self.fidelity_factor,
+            'fidelity_funcs': self.fidelity_funcs,
+            'contrastive_sampling_factor': self.contrastive_sampling_factor,
+            'contrastive_sampling_tau': self.contrastive_sampling_tau,
+            'positive_sampling_rate': self.positive_sampling_rate,
+            'final_bias': self.var_bias.numpy()
+        })
+        
+        return config
+        
+    def call(self,
+             inputs: tuple,
+             training: bool = True,
+             return_importances: bool = True,
+             return_embeddings: bool = False,
+             node_importances_mask: t.Optional[tf.RaggedTensor] = None,
+             **kwargs) -> tuple:
+        """
+        Implements the forwards pass of the model.
+        
+        Roughly speaking the forward pass consists of three main parts. 
+        (1) The first part is a graph message passing part consisting of attention layers. 
+        It produces the final node embeddings and a bunch of edge attention logits. 
+        (2) The second part of the model assembles the edge attention logits and the node embeddings 
+        into the edge and node explanation masks, which are also called "importances" tensors.
+        (3) The third part of the model performs a global pooling operation which turns the node 
+        embeddings into graph embeddings and then uses those as the basis for a dense prediction network
+        
+        The return signature of this method depends on the flags set in the arguments. in the default state, this method 
+        will return a tuple of 3 tensors: The actual prediction output tensor, the node importances mask tensor and the 
+        edge importances mask tensor.
+        """
+        
+        # node_input: ([B], [V], N)
+        # edge_input: ([B], [E], M)
+        # edge_index_input: ([B], [E], 2)
+        node_input, edge_input, edge_index_input = inputs
+        
+        # ~ MESSAGE PASSING / ATTENTION LAYERS
+        # The first part of the network consists of a message passing part or more specifically a number of 
+        # graph attention layers. These attention layers receive the graph and the node embeddings as input 
+        # and return a transformed vector of node embeddings which is in turn used as the input of the next 
+        # attention layer.
+        # The important part in this step is that these special attention layers also return the attention 
+        # logits as a byproduct. Those are multiple values per *edge* which we nedd to keep track of for 
+        # every layer so that they can be processed afterwards.
+                
+        node_embedding = node_input
+        alphas: t.List[tf.RaggedTensor] = []
+        for lay in self.attention_layers:
+            # node_embedding: ([B], [V], N_l)
+            # alpha: ([B], [E], K, 1)
+            # The alpha values are the attention *logits* for each edge of each of the graphs along all the 
+            # attention heads, which is equal to the number of K explanation channels here as defined in the 
+            # constructor!
+            node_embedding, alpha = lay([node_embedding, edge_input, edge_index_input])
+            alphas.append(alpha)
+            
+            if training:
+                node_embedding = self.lay_dropout(node_embedding)
+        
+        # ~ EDGE IMPORTANCES
+        # In this section we proceed to create the edge importance explanations from the attention logits we 
+        # have just collected. We achieve the correct shape by aggregating over all the tensors collected 
+        # from the different layers.
+        
+        # alphas: ([B], [E], K, L)
+        alphas = tf.concat(alphas, axis=-1)
+        edge_importances = tf.reduce_sum(alphas, axis=-1)
+        # edge_importances: ([B], [E], K)
+        edge_importances = self.lay_act_importance(edge_importances)
+        
+        # Now we need to perform a local pooling that will broadcast these edge values into a node shape
+        # such that we can use it as part of the node explanations
+        pooled_edges_in = self.lay_pool_edges_in([node_input, edge_importances, edge_index_input])
+        pooled_edges_out = self.lay_pool_edges_out([node_input, edge_importances, edge_index_input])
+        # pooled_edges: ([B], [V], K)
+        pooled_edges = self.lay_average([pooled_edges_in, pooled_edges_out])
+        
+        # ~ NODE IMPORTANCES
+        # In this section we assmeble the node importances. We will need this fully assembled tensor of 
+        # node importances to use those as the weights for the final global weighted pooling operation that 
+        # turns the node embeddings into the graph embeddings.
+        # The node importances consist of two parts which are being multiplied with each other. 
+        # (1) the first part we have already created - that is the pooled edge importances
+        # (2) the second part is created by using the node embeddings of the message passing part 
+        # as the basis of a special dense network which will create a node tensor of correct shape
+        
+        node_importances_tilde = node_embedding
+        for lay in self.node_importance_layers:
+            node_importances_tilde = lay(node_importances_tilde)
+            
+        # node_importances_tilde: ([B], [V], K)
+        # node_importances: ([B], [V], K)
+        node_importances = pooled_edges * node_importances_tilde
+    
+        # ~ EXPLANATION AUGEMENTATIONS
+        # In this section we will be applying various augmentations to the explanations we have just 
+        # created. This includes for example regularization
+        
+        # Sparsity regularization is essentially just L1 regularization, which will provide a constant 
+        # small gradient driving all of the explanation weights to become zero. This will effectively 
+        # only make the unimportant weights zero, as the important ones have stronger gradients acting 
+        # on them as well which will promote != 0 values.
+        if self.sparsity_factor > 0:
+            # Now here one could question why we are applying to separately on the edge importances and 
+            # tne partial node importances instead of just on the final assembled node importances since 
+            # that is just a connection of those two anyways.
+            # The answer to this is that experiments showed that this work better, don't know why.
+            self.lay_sparsity(node_importances_tilde)
+            self.lay_sparsity(edge_importances)
+        
+        # Optionally we will apply an additional external mask to the already existing values that can be 
+        # used to suppress certain parts of these explanations.
+        # This is a core part of the multi-channel fidelity computation. The channel-specific fidelity is 
+        # essentially just the deviation of the networks output prediction in case one specific channel 
+        # is supporessed from entering the final prediction MLP.
+        if node_importances_mask is not None:
+            node_importances *= node_importances_mask
+            
+        # ~ PREDICTION - VERSION 2
+        # In the final section of the network, the node embeddings will be pooled into a single graph 
+        # embedding vector for each graph. After the pooling is applied
+        
+        # In this first section we perform the pooling operation. For each channel we do the weighted 
+        # pooling and then for each of those channel-separated graph embeddings, the final prediction MLP
+        # is applied and each channel's prediction is finally added at the end.
+        graph_embeddings: t.List[tf.RaggedTensor] = []
+        outputs: t.List[tf.Tensor] = []
+        for k in range(self.importance_channels):
+            # We select the appropriate slice of the node importances for each of the channels 
+            # and use that as multiplication weights for the node embeddings
+            # node_importances_slice: ([B], [V], 1)
+            # graph_embedding: ([B], [V], N_L)
+            node_importances_slice = tf.expand_dims(node_importances[:, :, k], axis=-1)
+            graph_embedding = self.lay_pool_out(node_embedding * node_importances_slice)
+            graph_embeddings.append(graph_embedding)
+            
+            # applying the prediction mlp
+            output = graph_embedding
+            for lay in self.final_layers:
+                output = lay(output)
+                
+            outputs.append(output)
+            
+        # graph_embeddings_separate: ([B], K, D)
+        graph_embeddings_separate = tf.concat([tf.expand_dims(emb, axis=-2) for emb in graph_embeddings], axis=-2)
+
+        outputs_sum = sum(outputs)
+        output = self.lay_final_activation(outputs_sum + self.var_bias)
+            
+        if return_embeddings:
+            return output, node_importances, edge_importances, graph_embeddings_separate
+        if return_importances:
+            return output, node_importances, edge_importances
+        else:
+            return output
+        
+    def train_step_fidelity(self, x, ni_pred):
+        """
+        This is an additional train step that can be applied to the model, which implements a forward 
+        pass of sorts, the computation of the gradients and the model weight update.
+        
+        This train step implements "fidelity training" where the fidelity property of the model itself 
+        is being optimized.
+        """
+        # helper data structures from which the node importance masks will later be assembled
+        ones = tf.reduce_mean(tf.ones_like(ni_pred, dtype=tf.float32), axis=-1, keepdims=True)
+        zeros = tf.reduce_mean(tf.zeros_like(ni_pred, dtype=tf.float32), axis=-1, keepdims=True)
+        
+        with tf.GradientTape() as tape:
+            fid_loss = 0.0
+            
+            out_pred, ni_pred, ei_pred = self(x, training=True)
+            
+            for k, func in enumerate(self.fidelity_funcs):
+                # Here we create a leave-one-out channel mask which will mask exactly the current channel k 
+                # of the loop such that no information about that channel enters the final prediction network
+                mask = [ones if i == k else zeros for i in range(self.importance_channels)]
+                # mask: ([B], [V], K)
+                mask = tf.concat(mask, axis=-1)
+                # By applying this mask during another forward pass we can calculate the modified output prediction 
+                # vector.
+                out_mod, _, _ = self(x, training=True, node_importances_mask=mask)
+                
+                # Now for each channel it's is the users responsibility to pass in an appropriate function externally 
+                # which will calculate the appropriate loss value for the difference of the original and the modified 
+                # output vectors in the spirit of the multi-channel fidelity computation.
+                # This is accomplished with arbitrary functions here instead of a hard-coded one, because the specific 
+                # function to be applied to the prediction difference here depends on the mode of the network as well 
+                # as the specific goal for the target fidelity distributions to be achieved in each case.
+                diff = func(out_pred, out_mod)
+                fid_loss += tf.reduce_mean(diff)
+                
+            fid_loss *= self.fidelity_factor
+            
+        trainable_vars = self.trainable_variables
+        gradients = tape.gradient(fid_loss, trainable_vars)
+        self.optimizer.apply_gradients(zip(gradients, trainable_vars))
+
+        return fid_loss
+    
+    def train_step(self, data):
+        """
+        This method will be called to perform each train step during the model training process, which is 
+        executed once for every training batch. This method will do model forward passes within an 
+        automatic differentiation environment, generate the loss gradients and perform model weight update.
+        
+        This is a customized train step function, which currently implements the following two training 
+        objectives:
+        
+        1. The normal supervised predition loss. This primarily concerns the primary task predictions 
+           but it is optionally also possible to train the node and edge explanation masks with some given 
+           ground truth explanation masks!
+        2. The second loss is the optional exlanation approximation loss. 
+           This is only applied when importance_factor > 0. This additional loss tries to approximate the 
+           primary task prediction by just using each channel's explanation masks in a specific way to promote 
+           the several channels to produce explanations consistent with the pre-determined interpretations.
+           
+        Additions for v2 of the model:
+        
+        3. Constrastive Representation Learning. This is a method from the domain of unsupervised learning
+           which aims to improve the properties of latent embedding spaces. In case of this model, this additional 
+           loss term will promote clustering behavior within the latent space of graph explanation embeddings 
+           which can then ultimately be interpreted as the global explanations.
+        
+        4. Fidelity Training. This is an additional training step which is applied separately after the main 
+           training step of the model. This train step will promote the fidelity distributions of each channel 
+           to behave according to some externally supplied target distribution properties with the goal of 
+           reducing the number of samples with negative fidelity (where the effect on the network is not aligned 
+           to the intended interpretation of that channel.)
+        
+        :returns: the metrics dictionary
+        """
+        # This is standard code to make it compatible to the default tensorflow training process
+        if len(data) == 3:
+            x, y, sample_weight = data
+        else:
+            sample_weight = None
+            x, y = data
+
+        # 
+        exp_metrics = {'exp_loss': 0}
+        with tf.GradientTape() as tape:
+            exp_loss = 0
+
+            node_input, edge_input, edge_indices = x[:3]
+            out_true, ni_true, ei_true = y
+
+            # out_pred: ([B], C)
+            # ni_pred: ([B], [V], K)
+            # ei_pred: ([B], [E], K)
+            # graph_embeddings: ([B], N, K)
+            out_pred, ni_pred, ei_pred, graph_embeddings = self(x, training=True, return_importances=True, return_embeddings=True)
+            
+            # ~ PREDICTION LOSS
+            # The following section implements the normal prediction loss that is determined by the tensorflow 
+            # prediction function. Essentially in the fit() call of the model one has to define three separate 
+            # loss functions for training the output, node_importance and edge_importances with their 
+            # corresponding ground truth labels respectively.
+            loss = self.compiled_loss(
+                [out_true, ni_true, ei_true],
+                [out_pred, ni_pred, ei_pred],
+                sample_weight=sample_weight,
+                regularization_losses=self.losses,
+            )
+
+            # ~ APPROX. EXPLANATION LOSS
+            # The basic motivation for the explanation loss is that by default there is no method that assures that 
+            # the designated importance channels actually produce explanations that are conceptionally consistent 
+            # with the interpretations that we assign them.
+            # (How does one channel know we want it to only represent negative evidence while the other is positive?)
+            # Thus this explanation loss attempts to solve the primary task prediction performance using only the 
+            # explanation channels as an approximation. 
+            if self.importance_factor != 0:
+                
+                # First of all we need to assemble the approximated model output, which is simply calculated
+                # by applying a global pooling operation on the corresponding slice of the node importances.
+                # So for each slice (each importance channel) we get a single value, which we then
+                # concatenate into an output vector with K dimensions.
+                outs_approx: t.List[tf.Tensor] = []
+                for k in range(self.importance_channels):
+                    node_importances_slice = tf.expand_dims(ni_pred[:, :, k], axis=-1)
+                    out = self.lay_pool_out(node_importances_slice)
+
+                    outs_approx.append(out)
+
+                # outs: ([batch], K)
+                outs_approx = tf.concat(outs_approx, axis=-1)
+
+                # How this approximation works in detail has to be different for regression and classification
+                # problems since for regression problems we make the linearized assumption of positive and negative 
+                # evidence for a single regression value, while for classification we need exactly one 
+                # explanation per class
+                if self.doing_regression:
+                    # This method will return an augmented version of the true target lables such that this can be 
+                    # directly trained with the given approximated output.
+                    # The mask separates the training samples into the positive and negative ones for both the channels!
+                    outs_regress, mask = self.regression_augmentation(out_true)
+                    
+                    # So we essentially try to solve a regression problem using the pooled explanation masks
+                    # But split into the "positive" and "negative" parts of the current training batch with respect 
+                    # to a given "reference" target value.
+                    exp_loss = self.compiled_regression_loss(
+                        outs_regress * mask,
+                        outs_approx * mask,
+                    )
+
+                else:
+                    outs_class = shifted_sigmoid(
+                        outs_approx,
+                        shift=self.importance_multiplier,
+                        multiplier=1
+                    ) * tf.cast(out_true, tf.float32)
+                    exp_loss = self.compiled_classification_loss(out_true, outs_class)
+
+                loss += self.importance_factor * exp_loss
+                
+            # ~ CONTRASTIVE REPRESENTATION LEARNING
+            # As an additional regularization, to improve the properties of the graph embedding space, I want to try 
+            # contrastive sampling/loss. This is a (mostly) unsupervised method that can be used to improve the latent 
+            # data representations.
+            # The core idea is that - through data augementation techniques - we apply a "repulsive force" between vectors 
+            # in the graph embedding space that are dissimiliar to each other and apply an "attractive force" between ones 
+            # that are similar which should slowly lead to a clustering behavior within the graph embedding space, where 
+            # each cluster ultimately represents a global explanation.
+            
+            # This is the main resource I used to implement this method.
+            # https://lilianweng.github.io/posts/2021-05-31-contrastive/#common-setting 
+            # As previously mentioned, this method relies on the knowledge of dissimilar (negative) and similar (positive) 
+            # pairings. We obtain those through a set of assumptions:
+            # - For negative pairings we can assume that every pairwise combination within every training batch is a negative 
+            #   sample. Since each batch is a very small random sample of the whole dataset, the chance that each pairing is 
+            #   sufficiently dissimilar to be considered a negative sample is MUCH higher than the chance of them being similar 
+            #   which is why we can make this approximation
+            # - For positive samples we simply use the elements of the batch and apply a small random perturbation on the 
+            #   corresponding explanation masks. These perturbed samples can then be considered as being slightly different 
+            #   from the original un-perturbed elements yet still reasonably similar to be positive samples.
+            if self.contrastive_sampling_factor != 0:
+                
+                batch_size = tf.shape(graph_embeddings)[0]
+                virtual_batch_size = batch_size * self.importance_channels
+                # This reshaping operation makes it such that we treat the separate graph embeddings of each of the 
+                # channels as their own embeddings. Essentially merging the first (batch) and the second (channel) 
+                # dimension to multiply the effective samples in our batch.
+                # graph_embeddings: ([B * K], D)
+                graph_embeddings = tf.reshape(graph_embeddings, shape=(-1, self.graph_embedding_shape[-1]))
+                
+                # ~ L2 normalization
+                # Here we apply an L2 normalization on the embeddings. This is VERY important because this allows us to 
+                # later compute the cosine similarity between embedding vectors very easily as the dot product between 
+                # them, which only works for L2 normalized vectors!
+                graph_embeddings = tf.math.l2_normalize(graph_embeddings, axis=-1)
+                
+                # ~ negative sampling
+                # For the negative sampling we simply need to create the multiplication of every graph embedding with 
+                # every other graph embedding. The following code leverages "broadcasting" to achieve just that.
+                graph_embeddings_expanded = tf.expand_dims(graph_embeddings, axis=-2)
+                # graph_embeddings_product: ([B], [B])
+                graph_embeddings_sim = tf.reduce_sum(graph_embeddings * graph_embeddings_expanded, axis=-1)  
+
+                # out_repeated = tf.repeat(out_true, axis=0, repeats=self.importance_channels)
+                # out_normalized = out_repeated / tf.reduce_max(out_repeated)
+                # out_expanded = tf.expand_dims(out_normalized, axis=-2)
+                # loss_debias = tf.square(1 - tf.reduce_sum(tf.abs(out_normalized - out_expanded), axis=-1))
+
+                # Now the problem is that we do not want to consider the terms where the elements are being multiplied 
+                # with themselves. So we mask them out by creating a diagonal mask of zeros here.
+                eye = tf.cast(1.0 - tf.eye(num_rows=virtual_batch_size, num_columns=virtual_batch_size), tf.float32)
+                #graph_embeddings_product = graph_embeddings_product * eye
+                graph_embeddings_sim = graph_embeddings_sim * eye
+                
+                # The rest is the formula given in the paper which I assume is some variation of a cross entropy
+                exponentials = tf.reduce_sum(tf.exp(graph_embeddings_sim / self.contrastive_sampling_tau), axis=-1)
+                loss_contribs = tf.math.log(exponentials)
+                loss_neg = tf.reduce_mean(loss_contribs)
+                
+                # In the first few iterations before the l2 normalization kicks in, this loss is basically guaranteed to 
+                # be infinity. This is why we have to block the loss from influencing the weight updates in those cases.
+                loss += self.contrastive_sampling_factor * loss_neg
+                
+                # ~ positive sampling
+                # The idea is that we also need positive samples as anchor points. These positive samples are supposed to 
+                # be examples of graph embeddings that are CLOSE to the original ones in the batch. We can obtain these 
+                # by data augmentation techniques. For example we can make the assumption that despite small perturbations 
+                # of the input graphs, the graph embedding should still be functionally the same.
+                for p in range(self.positive_sampling_rate):
+                    # first of all we create the perturbations for the input graphs and then we make another forward pass 
+                    # with those inputs.
+                    
+                    # We can use this somewhat complicated code here to produce a random binary mask with the same shape as 
+                    # the predicted node importances tensor. We effectively use this binary mask to drop out only a very few
+                    # importances annotations.
+                    node_importances_mask = tf.map_fn(
+                        lambda tens: tf.cast(
+                            tf.random.categorical(
+                                tf.math.log(
+                                    tf.repeat(
+                                        [[0.1, 0.9]], 
+                                        repeats=tf.shape(tens)[0],
+                                        axis=0)
+                                    ), 
+                                    num_samples=self.importance_channels
+                                ), 
+                            tf.float32
+                        ),
+                        ni_pred,
+                        dtype=tf.RaggedTensorSpec(shape=(None, self.importance_channels), dtype=tf.float32, ragged_rank=0)
+                    )
+                    _, _, _, graph_embeddings_pos =  self(
+                        x,
+                        training=True, 
+                        return_importances=True, 
+                        return_embeddings=True,
+                        node_importances_mask=node_importances_mask,
+                    )
+                    
+                    # The resulting graph embeddings here we have to process in the same manner as we have processed the 
+                    # the original graph embeddings as well, which means flattening the channel dimension and l2 normalize
+                    graph_embeddings_pos = tf.reshape(graph_embeddings_pos, shape=(-1, self.graph_embedding_shape[-1]))
+                    graph_embeddings_pos = tf.math.l2_normalize(graph_embeddings_pos, axis=-1)
+                    
+                    loss_contribs_pos = tf.reduce_sum(graph_embeddings * graph_embeddings_pos, axis=-1)
+                    loss_pos = tf.reduce_mean(loss_contribs_pos / self.contrastive_sampling_tau)
+                    # As per the formula in the paper, we actually want to *maximize* this term which is why we add the negative 
+                    # of it to the overall loss value.
+                    loss -= (self.contrastive_sampling_factor / self.positive_sampling_rate) * loss_pos
+                    
+        # The rest of this is the standard keras train step code
+        trainable_vars = self.trainable_variables
+        gradients = tape.gradient(loss, trainable_vars)
+
+        self.optimizer.apply_gradients(zip(gradients, trainable_vars))
+        self.compiled_metrics.update_state(
+            y,
+            out_pred,
+            sample_weight=sample_weight
+        )
+        
+        # ~ FIDELITY TRAINING
+        # This section implements the fidelity training. The purpose of the fidelity training is to refine the 
+        # multi-channel fidelity behavior of the model. It has been observed that while the default MEGAN model *generally* 
+        # produces explanations that are faithful to their assigned interpretations according to the Fidelity* metric, 
+        # there are quite some samples where this is not the case.
+        # The aim of the fidelity training is to directly use the fidelity formula as an optimization objective during 
+        # training to reduce the number of samples which are unfaithul to their channel's interpretation.
+        
+        # One might wonder why the fidelity training is implemented as a separate training step instead of a direct 
+        # loss term such as all the other training modifications. The honest answer is that this has been tested out 
+        # and I found it to work much better when it is a separate step.
+        if self.fidelity_factor != 0:
+            # This method will execute an entirely separate training step 
+            fid_loss = self.train_step_fidelity(x, ni_pred)
+            exp_loss += fid_loss 
+
+        # Return a dict mapping metric names to current value.
+        # Note that it will include the loss (tracked in self.metrics).
+        return {
+            **{m.name: m.result() for m in self.metrics},
+            'exp_loss': exp_loss,
+        }
+        
+        
+# == DEPRECATED ==
+                
+class Megan_(ks.models.Model):
     """
     MEGAN: Multi Explanation Graph Attention Network
     This model currently supports graph regression and graph classification problems. It was mainly designed
