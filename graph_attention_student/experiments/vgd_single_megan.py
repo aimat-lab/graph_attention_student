@@ -23,6 +23,7 @@ from kgcnn.data.utils import ragged_tensor_from_nested_numpy
 from umap import UMAP
 
 from graph_attention_student.models import Megan
+from graph_attention_student.models import Megan2
 from graph_attention_student.models.mappers import IdentityMapper
 from graph_attention_student.training import NoLoss, mse, mae
 from graph_attention_student.training import LogProgressCallback
@@ -132,7 +133,7 @@ experiment = Experiment.extend(
 @experiment.hook('create_model')
 def create_model(e):
     e.log('using model: MEGAN')
-    model = Megan(
+    model = Megan2(
         units=e.UNITS,
         dropout_rate=e.DROPOUT_RATE,
         importance_factor=e.IMPORTANCE_FACTOR,
@@ -146,7 +147,6 @@ def create_model(e):
         final_units=e.FINAL_UNITS,
         final_activation=e.FINAL_ACTIVATION,
         final_dropout_rate=e.FINAL_DROPOUT,
-        use_graph_attributes=False,
         use_edge_features=True,
         concat_heads=e.CONCAT_HEADS,
         contrastive_sampling_factor=e.CONTRASTIVE_SAMPLING_FACTOR,
@@ -179,16 +179,8 @@ def fit_model(e, model, x_train, y_train, x_test, y_test):
         epochs=e.EPOCHS,
         validation_data=(x_test, y_test),
         validation_freq=1,
-        callbacks=[
-            LogProgressCallback(
-                logger=e.logger,
-                epoch_step=5,
-                identifier='val_output_1_mean_squared_error'
-            )
-        ],
-        verbose=0
     )
-    print(model.bias)
+    e.log(f'model bias: {model.var_bias.numpy()}')
     return history.history
 
 

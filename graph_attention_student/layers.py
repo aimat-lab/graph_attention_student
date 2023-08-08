@@ -476,7 +476,10 @@ class MultiHeadGATV2Layer(AttentionHeadGATV2):
         else:
             self.lay_combine_heads = LazyAverage()
 
-    def __call__(self, inputs, **kwargs):
+    def __call__(self, 
+                 inputs, 
+                 edge_mask: t.Optional[tf.RaggedTensor] = None, 
+                 **kwargs):
         node, edge, edge_index = inputs
 
         # "a_ij" is a single-channel edge attention logits tensor. "a_ijs" is consequently the list which
@@ -500,6 +503,11 @@ class MultiHeadGATV2Layer(AttentionHeadGATV2):
             # a_ij: ([batch], [M], 1)
             a_ij = lay_alpha_activation(e_ij, **kwargs)
             a_ij = lay_alpha(a_ij, **kwargs)
+            
+            # Edge mask is supposed to be a binary mask (only 1 and 0) whose primary usage is to completely mask out certain edges
+            # during the message passing operation by setting the corresponding attention weight to zero.
+            if edge_mask is not None:
+                a_ij *= edge_mask
 
             # h_i: ([batch], [N], F)
             h_i = self.lay_pool_attention([node, wn_out, a_ij, edge_index], **kwargs)

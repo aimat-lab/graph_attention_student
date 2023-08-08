@@ -74,6 +74,7 @@ def plot_leave_one_out_analysis(results: dict,
                                 num_channels: int,
                                 base_fig_size: int = 6,
                                 num_bins: int = 20,
+                                x_lim: t.Optional[tuple] = None,
                                 ) -> plt.Figure:
     """
     Creates a visualization of ``leave_one_out_analysis`` fidelity results. The function will return the
@@ -108,6 +109,7 @@ def plot_leave_one_out_analysis(results: dict,
                 values,
                 bins=num_bins,
                 color='lightgray',
+                range=x_lim,
             )
             y_min, y_max = ax.get_ylim()
             ax.vlines(

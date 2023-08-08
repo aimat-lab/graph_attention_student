@@ -22,6 +22,8 @@ from graph_attention_student.layers import MultiHeadGATV2Layer
 from graph_attention_student.training import mae
 from graph_attention_student.training import bce
 from graph_attention_student.training import shifted_sigmoid
+from graph_attention_student.models.utils import tf_pairwise_cosine_sim
+from graph_attention_student.models.utils import tf_ragged_random_binary_mask
 
 
 class MockMegan:
@@ -216,7 +218,7 @@ class Megan(ks.models.Model):
         # approximative explanation training.
         
         # This is a layer that can be used to apply the additional sparsity regularization on the explanations 
-        self.lay_sparsity = ExplanationSparsityRegularization(self.sparsity_factor)
+        self.lay_sparsity = ExplanationSparsityRegularization(factor=self.sparsity_factor)
         
         # These are the loss functions we will be using for the approximative explanation training.    
         self.bce_loss = ks.losses.BinaryCrossentropy()
@@ -358,6 +360,8 @@ class Megan(ks.models.Model):
         for lay in self.node_importance_layers:
             node_importances_tilde = lay(node_importances_tilde)
             
+        node_importances_tilde = self.lay_act_importance(node_importances_tilde)
+            
         # node_importances_tilde: ([B], [V], K)
         # node_importances: ([B], [V], K)
         node_importances = pooled_edges * node_importances_tilde
@@ -384,6 +388,7 @@ class Megan(ks.models.Model):
         # essentially just the deviation of the networks output prediction in case one specific channel 
         # is supporessed from entering the final prediction MLP.
         if node_importances_mask is not None:
+            node_importances_mask = tf.cast(node_importances_mask, tf.float32)
             node_importances *= node_importances_mask
             
         # ~ PREDICTION
@@ -403,9 +408,9 @@ class Megan(ks.models.Model):
             graph_embedding = self.lay_pool_out(node_embedding * node_importances_slice)
             graph_embeddings.append(graph_embedding)
             
-        # graph_embeddings_separate: ([B], [V], D, K)
-        graph_embeddings_separate = tf.concat([tf.expand_dims(emb, axis=-1) for emb in graph_embeddings], axis=-1)
-        # graph_embeddings: ([B], [V], N_L * K)
+        # graph_embeddings_separate: ([B], K, D)
+        graph_embeddings_separate = tf.concat([tf.expand_dims(emb, axis=-2) for emb in graph_embeddings], axis=-2)
+        # graph_embeddings: ([B], N_L * K)
         graph_embeddings = tf.concat(graph_embeddings, axis=-1)
         
         # Appyling all the layers of the final prediction MLP
@@ -633,7 +638,7 @@ class Megan(ks.models.Model):
             _, _, _, graph_embeddings = self(x, training=False, return_embeddings=True)
             embeddings += [v for v in graph_embeddings.numpy()]
             
-        return embeddings
+        return np.array(embeddings)
                 
     def leave_one_out_deviations(self,
                                  graph_list: t.List[tv.GraphDict],
@@ -724,6 +729,7 @@ class Megan2(Megan):
                  contrastive_sampling_factor: float = 0.0,
                  contrastive_sampling_tau: float = 0.9,
                  positive_sampling_rate: int = 1,
+                 positive_sampling_noise: float = 0.1,
                  **kwargs,
                  ):
                 
@@ -757,6 +763,21 @@ class Megan2(Megan):
         self.contrastive_sampling_factor = contrastive_sampling_factor
         self.contrastive_sampling_tau = contrastive_sampling_tau
         self.positive_sampling_rate = positive_sampling_rate
+        self.positive_sampling_noise = positive_sampling_noise
+        
+        self.var_contrastive_sampling_factor = tf.Variable(
+            tf.constant(self.contrastive_sampling_factor), 
+            dtype=tf.float32, 
+            trainable=False
+        )
+        
+        self.channel_dense_layers = []
+        for k in range(self.importance_channels):
+            lay = DenseEmbedding(
+                units=self.units[-1],
+                activation='linear',  
+            )
+            self.channel_dense_layers.append(lay)
         
         # Due to the changes to the architecture we need an additional learnable bias weight all the way at 
         # the end of the network after the prediction MLP. If a value for that is not specifically provided 
@@ -766,6 +787,9 @@ class Megan2(Megan):
             self.var_bias = tf.Variable(tf.zeros(shape=(self.final_units[-1], )), dtype=tf.float32, name='final_bias')
         else:
             self.var_bias = tf.Variable(tf.constant(self.final_bias), dtype=tf.float32, name='final_bias')
+            
+        if self.regression_reference is not None:
+            self.var_bias = tf.Variable(tf.constant(self.regression_reference))
         
     def get_config(self):
         config = super(Megan2, self).get_config()
@@ -786,6 +810,7 @@ class Megan2(Megan):
              return_importances: bool = True,
              return_embeddings: bool = False,
              node_importances_mask: t.Optional[tf.RaggedTensor] = None,
+             edge_importances_mask: t.Optional[tf.RaggedTensor] = None,
              **kwargs) -> tuple:
         """
         Implements the forwards pass of the model.
@@ -825,7 +850,7 @@ class Megan2(Megan):
             # The alpha values are the attention *logits* for each edge of each of the graphs along all the 
             # attention heads, which is equal to the number of K explanation channels here as defined in the 
             # constructor!
-            node_embedding, alpha = lay([node_embedding, edge_input, edge_index_input])
+            node_embedding, alpha = lay([node_embedding, edge_input, edge_index_input], edge_mask=edge_importances_mask)
             alphas.append(alpha)
             
             if training:
@@ -862,6 +887,8 @@ class Megan2(Megan):
         for lay in self.node_importance_layers:
             node_importances_tilde = lay(node_importances_tilde)
             
+        node_importances_tilde = self.lay_act_importance(node_importances_tilde)
+            
         # node_importances_tilde: ([B], [V], K)
         # node_importances: ([B], [V], K)
         node_importances = pooled_edges * node_importances_tilde
@@ -888,17 +915,46 @@ class Megan2(Megan):
         # essentially just the deviation of the networks output prediction in case one specific channel 
         # is supporessed from entering the final prediction MLP.
         if node_importances_mask is not None:
+            node_importances_mask = tf.cast(node_importances_mask, tf.float32)
             node_importances *= node_importances_mask
             
         # ~ PREDICTION - VERSION 2
         # In the final section of the network, the node embeddings will be pooled into a single graph 
         # embedding vector for each graph. After the pooling is applied
         
+        # # In this first section we perform the pooling operation. For each channel we do the weighted 
+        # # pooling and then for each of those channel-separated graph embeddings, the final prediction MLP
+        # # is applied and each channel's prediction is finally added at the end.
+        # graph_embeddings: t.List[tf.RaggedTensor] = []
+        # outputs: t.List[tf.Tensor] = []
+        # for k in range(self.importance_channels):
+        #     # We select the appropriate slice of the node importances for each of the channels 
+        #     # and use that as multiplication weights for the node embeddings
+        #     # node_importances_slice: ([B], [V], 1)
+        #     # graph_embedding: ([B], [V], N_L)
+        #     node_importances_slice = tf.expand_dims(node_importances[:, :, k], axis=-1)
+        #     graph_embedding = self.lay_pool_out(node_embedding * node_importances_slice)
+        #     graph_embeddings.append(graph_embedding)
+            
+        #     # applying the prediction mlp
+        #     output = graph_embedding
+        #     for lay in self.final_layers:
+        #         output = lay(output)
+                
+        #     outputs.append(output)
+            
+        # # graph_embeddings_separate: ([B], K, D)
+        # graph_embeddings_separate = tf.concat([tf.expand_dims(emb, axis=-2) for emb in graph_embeddings], axis=-2)
+
+        # outputs_sum = sum(outputs)
+        # output = self.lay_final_activation(outputs_sum + self.var_bias)
+        
+        
+        
         # In this first section we perform the pooling operation. For each channel we do the weighted 
-        # pooling and then for each of those channel-separated graph embeddings, the final prediction MLP
-        # is applied and each channel's prediction is finally added at the end.
+        # pooling and then the overall graph embedding vector is assembled as a concatenation of the 
+        # individual embeddings.
         graph_embeddings: t.List[tf.RaggedTensor] = []
-        outputs: t.List[tf.Tensor] = []
         for k in range(self.importance_channels):
             # We select the appropriate slice of the node importances for each of the channels 
             # and use that as multiplication weights for the node embeddings
@@ -906,20 +962,21 @@ class Megan2(Megan):
             # graph_embedding: ([B], [V], N_L)
             node_importances_slice = tf.expand_dims(node_importances[:, :, k], axis=-1)
             graph_embedding = self.lay_pool_out(node_embedding * node_importances_slice)
-            graph_embeddings.append(graph_embedding)
+            graph_embedding = self.channel_dense_layers[k](graph_embedding)
             
-            # applying the prediction mlp
-            output = graph_embedding
-            for lay in self.final_layers:
-                output = lay(output)
-                
-            outputs.append(output)
+            graph_embeddings.append(graph_embedding)
             
         # graph_embeddings_separate: ([B], K, D)
         graph_embeddings_separate = tf.concat([tf.expand_dims(emb, axis=-2) for emb in graph_embeddings], axis=-2)
-
-        outputs_sum = sum(outputs)
-        output = self.lay_final_activation(outputs_sum + self.var_bias)
+        # graph_embeddings: ([B], N_L * K)
+        graph_embeddings = tf.concat(graph_embeddings, axis=-1)
+        
+        # Appyling all the layers of the final prediction MLP
+        output = graph_embeddings
+        for lay in self.final_layers:
+            output = lay(output)
+            
+        output = self.lay_final_activation(output)
             
         if return_embeddings:
             return output, node_importances, edge_importances, graph_embeddings_separate
@@ -928,7 +985,7 @@ class Megan2(Megan):
         else:
             return output
         
-    def train_step_fidelity(self, x, ni_pred):
+    def train_step_fidelity(self, x):
         """
         This is an additional train step that can be applied to the model, which implements a forward 
         pass of sorts, the computation of the gradients and the model weight update.
@@ -936,15 +993,18 @@ class Megan2(Megan):
         This train step implements "fidelity training" where the fidelity property of the model itself 
         is being optimized.
         """
-        # helper data structures from which the node importance masks will later be assembled
-        ones = tf.reduce_mean(tf.ones_like(ni_pred, dtype=tf.float32), axis=-1, keepdims=True)
-        zeros = tf.reduce_mean(tf.zeros_like(ni_pred, dtype=tf.float32), axis=-1, keepdims=True)
         
         with tf.GradientTape() as tape:
             fid_loss = 0.0
             
+            # out_pred: ([B], C)
             out_pred, ni_pred, ei_pred = self(x, training=True)
+           
+            # helper data structures from which the node importance masks will later be assembled
+            ones = tf.reduce_mean(tf.ones_like(ni_pred, dtype=tf.float32), axis=-1, keepdims=True)
+            zeros = tf.reduce_mean(tf.zeros_like(ni_pred, dtype=tf.float32), axis=-1, keepdims=True)
             
+            deviations = []
             for k, func in enumerate(self.fidelity_funcs):
                 # Here we create a leave-one-out channel mask which will mask exactly the current channel k 
                 # of the loop such that no information about that channel enters the final prediction network
@@ -953,6 +1013,7 @@ class Megan2(Megan):
                 mask = tf.concat(mask, axis=-1)
                 # By applying this mask during another forward pass we can calculate the modified output prediction 
                 # vector.
+                # out_mod: ([B], C)
                 out_mod, _, _ = self(x, training=True, node_importances_mask=mask)
                 
                 # Now for each channel it's is the users responsibility to pass in an appropriate function externally 
@@ -964,13 +1025,20 @@ class Megan2(Megan):
                 diff = func(out_pred, out_mod)
                 fid_loss += tf.reduce_mean(diff)
                 
+                # deviation: ([B], 1, C)
+                deviation = tf.expand_dims(out_pred - out_mod, axis=-2)
+                deviations.append(deviation)
+                
             fid_loss *= self.fidelity_factor
+            
+            # deviations: ([B], K, C)
+            deviations = tf.concat(deviations, axis=-2)
             
         trainable_vars = self.trainable_variables
         gradients = tape.gradient(fid_loss, trainable_vars)
         self.optimizer.apply_gradients(zip(gradients, trainable_vars))
 
-        return fid_loss
+        return fid_loss, deviations
     
     def train_step(self, data):
         """
@@ -1011,10 +1079,29 @@ class Megan2(Megan):
             sample_weight = None
             x, y = data
 
-        # 
+        node_attributes, edge_attributes, edge_indices = x
+        
+        # ~ FIDELITY TRAINING
+        # This section implements the fidelity training. The purpose of the fidelity training is to refine the 
+        # multi-channel fidelity behavior of the model. It has been observed that while the default MEGAN model *generally* 
+        # produces explanations that are faithful to their assigned interpretations according to the Fidelity* metric, 
+        # there are quite some samples where this is not the case.
+        # The aim of the fidelity training is to directly use the fidelity formula as an optimization objective during 
+        # training to reduce the number of samples which are unfaithul to their channel's interpretation.
+        
+        # One might wonder why the fidelity training is implemented as a separate training step instead of a direct 
+        # loss term such as all the other training modifications. The honest answer is that this has been tested out 
+        # and I found it to work much better when it is a separate step.
+        fid_loss = 0
+        if self.fidelity_factor != 0:
+            # This method will execute an entirely separate training step 
+            fid_loss, deviations = self.train_step_fidelity(x)
+
+        # Forward pass auto differentiation
         exp_metrics = {'exp_loss': 0}
         with tf.GradientTape() as tape:
             exp_loss = 0
+            loss_contrast = 0
 
             node_input, edge_input, edge_indices = x[:3]
             out_true, ni_true, ei_true = y
@@ -1097,6 +1184,66 @@ class Megan2(Megan):
             # that are similar which should slowly lead to a clustering behavior within the graph embedding space, where 
             # each cluster ultimately represents a global explanation.
             
+            
+            if False and self.contrastive_sampling_factor != 0:
+                
+                batch_size = tf.shape(graph_embeddings)[0]
+                loss_contrast = 0
+                
+                for k in range(self.importance_channels):
+                    
+                    # graph_embeddings_channel: ([B], D)
+                    graph_embeddings_channel = graph_embeddings[:, k, :]
+                    
+                    
+                    # creating the perturbation.
+                    node_importances_mask = tf_ragged_random_binary_mask(
+                        template=ni_pred,
+                        chances=[0.4, 0.6],
+                        n=self.importance_channels,
+                    )
+                    
+                    # perturbed prediction
+                    _, _, _, graph_embeddings_mod = self(
+                        x,
+                        training=True,
+                        return_embeddings=True,
+                        node_importances_mask=node_importances_mask,
+                    )
+
+                    graph_embeddings_mod_channel = graph_embeddings_mod[:, k, :]
+                    graph_embeddings_mod_channel = tf.math.l2_normalize(graph_embeddings_mod_channel, axis=-1)
+                    
+                    loss_contribs_pos = tf.reduce_sum(graph_embeddings_channel * graph_embeddings_mod_channel, axis=-1)
+                    # loss_contrast -= self.contrastive_sampling_factor * tf.reduce_mean(loss_contribs_pos / self.contrastive_sampling_tau)
+                    
+                    # graph_embeddings_sim: ([B], [B])
+                    graph_embeddings_channel_sim = tf_pairwise_cosine_sim(graph_embeddings_channel, graph_embeddings_channel)
+                    eye = tf.cast(1.0 - tf.eye(num_rows=batch_size, num_columns=batch_size), tf.float32)
+                    graph_embeddings_channel_sim = graph_embeddings_channel_sim * eye
+                    exponentials = tf.reduce_sum(tf.exp(graph_embeddings_channel_sim / self.contrastive_sampling_tau), axis=-1)
+                    loss_contribs_neg = tf.math.log(exponentials)
+                    loss_contrast += tf.reduce_mean(loss_contribs_neg)
+                    
+                    # perturbation cross similarity
+                    # graph_embeddings_sim: ([B], [B])
+                    graph_embeddings_channel_sim = tf_pairwise_cosine_sim(graph_embeddings_channel, graph_embeddings_mod_channel)
+                    eye = tf.cast(1.0 - tf.eye(num_rows=batch_size, num_columns=batch_size), tf.float32)
+                    graph_embeddings_channel_sim = graph_embeddings_channel_sim * eye
+                    exponentials = tf.reduce_sum(tf.exp(graph_embeddings_channel_sim / self.contrastive_sampling_tau), axis=-1)
+                    loss_contribs_neg = tf.math.log(exponentials)
+                    loss_contrast += tf.reduce_mean(loss_contribs_neg)
+                    
+                    
+                # graph_embeddings = tf.reshape(graph_embeddings, shape=(-1, self.graph_embedding_shape[-1]))
+                # graph_embeddings = tf.math.l2_normalize(graph_embeddings, axis=-1)
+                # graph_embeddings_sim = tf_pairwise_cosine_sim(graph_embeddings)
+                # exponentials = tf.reduce_sum(tf.exp(graph_embeddings_sim / self.contrastive_sampling_tau), axis=-1)
+                # loss_contribs_neg = tf.math.log(exponentials)
+                # loss_contrast += self.contrastive_sampling_factor * tf.reduce_mean(loss_contribs_neg)
+                    
+                loss += self.var_contrastive_sampling_factor * loss_contrast
+            
             # This is the main resource I used to implement this method.
             # https://lilianweng.github.io/posts/2021-05-31-contrastive/#common-setting 
             # As previously mentioned, this method relies on the knowledge of dissimilar (negative) and similar (positive) 
@@ -1131,31 +1278,36 @@ class Megan2(Megan):
                 # graph_embeddings_product: ([B], [B])
                 graph_embeddings_sim = tf.reduce_sum(graph_embeddings * graph_embeddings_expanded, axis=-1)  
 
-                # out_repeated = tf.repeat(out_true, axis=0, repeats=self.importance_channels)
-                # out_normalized = out_repeated / tf.reduce_max(out_repeated)
-                # out_expanded = tf.expand_dims(out_normalized, axis=-2)
-                # loss_debias = tf.square(1 - tf.reduce_sum(tf.abs(out_normalized - out_expanded), axis=-1))
+                deviations = tf.reshape(deviations, shape=(-1, self.output_shape[-1]))
+                deviations_expanded = tf.expand_dims(deviations, axis=-2)
+                deviations_differences = tf.reduce_mean(tf.abs(deviations - deviations_expanded), axis=-1)
+                # deviations_differences_normalized = deviations_differences / tf.reduce_max(deviations_differences)
+                fidelity_debias = tf.cast(deviations_differences > 0.5, tf.float32)
+                #fidelity_debias = tf.where(deviations_differences > 0.5, 1.0, -1.0)
 
                 # Now the problem is that we do not want to consider the terms where the elements are being multiplied 
                 # with themselves. So we mask them out by creating a diagonal mask of zeros here.
                 eye = tf.cast(1.0 - tf.eye(num_rows=virtual_batch_size, num_columns=virtual_batch_size), tf.float32)
                 #graph_embeddings_product = graph_embeddings_product * eye
-                graph_embeddings_sim = graph_embeddings_sim * eye
+                graph_embeddings_sim = graph_embeddings_sim * eye * fidelity_debias
                 
                 # The rest is the formula given in the paper which I assume is some variation of a cross entropy
                 exponentials = tf.reduce_sum(tf.exp(graph_embeddings_sim / self.contrastive_sampling_tau), axis=-1)
                 loss_contribs = tf.math.log(exponentials)
-                loss_neg = tf.reduce_mean(loss_contribs)
+                # loss_neg = tf.reduce_mean(loss_contribs)
+                # ! CRITICAL CHANGE
+                loss_neg = tf.reduce_mean(tf.reduce_sum(graph_embeddings_sim / self.contrastive_sampling_tau, axis=-1))
                 
                 # In the first few iterations before the l2 normalization kicks in, this loss is basically guaranteed to 
                 # be infinity. This is why we have to block the loss from influencing the weight updates in those cases.
-                loss += self.contrastive_sampling_factor * loss_neg
+                loss_contrast += loss_neg
                 
                 # ~ positive sampling
                 # The idea is that we also need positive samples as anchor points. These positive samples are supposed to 
                 # be examples of graph embeddings that are CLOSE to the original ones in the batch. We can obtain these 
                 # by data augmentation techniques. For example we can make the assumption that despite small perturbations 
                 # of the input graphs, the graph embedding should still be functionally the same.
+                loss_pos = 0
                 for p in range(self.positive_sampling_rate):
                     # first of all we create the perturbations for the input graphs and then we make another forward pass 
                     # with those inputs.
@@ -1163,40 +1315,59 @@ class Megan2(Megan):
                     # We can use this somewhat complicated code here to produce a random binary mask with the same shape as 
                     # the predicted node importances tensor. We effectively use this binary mask to drop out only a very few
                     # importances annotations.
-                    node_importances_mask = tf.map_fn(
-                        lambda tens: tf.cast(
-                            tf.random.categorical(
-                                tf.math.log(
-                                    tf.repeat(
-                                        [[0.1, 0.9]], 
-                                        repeats=tf.shape(tens)[0],
-                                        axis=0)
-                                    ), 
-                                    num_samples=self.importance_channels
-                                ), 
-                            tf.float32
-                        ),
-                        ni_pred,
-                        dtype=tf.RaggedTensorSpec(shape=(None, self.importance_channels), dtype=tf.float32, ragged_rank=0)
+
+                    # ni_pred_normalized = ni_pred / tf.reduce_max(ni_pred)
+                    # ni_pred_binary = tf.cast(ni_pred_normalized > 0.5,tf.float32)
+                    random_node_mask = tf_ragged_random_binary_mask(
+                        template=ni_pred,
+                        chances=[self.positive_sampling_noise, 1 - self.positive_sampling_noise],
+                        n=1,
                     )
-                    _, _, _, graph_embeddings_pos =  self(
-                        x,
-                        training=True, 
+                    random_edge_mask = tf_ragged_random_binary_mask(
+                        template=ei_pred,
+                        chances=[0.3, 0.7],
+                        n=1,
+                    )
+                    random_edge_mask = tf.cast(random_edge_mask, tf.float32)
+                    
+                    node_importances_mask = tf_ragged_random_binary_mask(
+                        template=ni_pred,
+                        chances=[self.positive_sampling_noise, 1 - self.positive_sampling_noise],
+                        n=self.importance_channels,
+                    )
+                    
+                    _, _, _, graph_embeddings_mod =  self(
+                        (node_attributes * random_node_mask, edge_attributes, edge_indices),
+                        training=True,
+                        edge_importances_mask=random_edge_mask,
+                        # node_importances_mask=node_importances_mask,
                         return_importances=True, 
                         return_embeddings=True,
-                        node_importances_mask=node_importances_mask,
                     )
                     
                     # The resulting graph embeddings here we have to process in the same manner as we have processed the 
                     # the original graph embeddings as well, which means flattening the channel dimension and l2 normalize
-                    graph_embeddings_pos = tf.reshape(graph_embeddings_pos, shape=(-1, self.graph_embedding_shape[-1]))
-                    graph_embeddings_pos = tf.math.l2_normalize(graph_embeddings_pos, axis=-1)
+                    graph_embeddings_mod = tf.reshape(graph_embeddings_mod, shape=(-1, self.graph_embedding_shape[-1]))
+                    graph_embeddings_mod = tf.math.l2_normalize(graph_embeddings_mod, axis=-1)
                     
-                    loss_contribs_pos = tf.reduce_sum(graph_embeddings * graph_embeddings_pos, axis=-1)
-                    loss_pos = tf.reduce_mean(loss_contribs_pos / self.contrastive_sampling_tau)
-                    # As per the formula in the paper, we actually want to *maximize* this term which is why we add the negative 
-                    # of it to the overall loss value.
-                    loss -= (self.contrastive_sampling_factor / self.positive_sampling_rate) * loss_pos
+                    graph_embeddings_mod_sim = tf_pairwise_cosine_sim(graph_embeddings, graph_embeddings_mod)
+                    graph_embeddings_mod_sim = graph_embeddings_mod_sim * eye * fidelity_debias
+                    # The rest is the formula given in the paper which I assume is some variation of a cross entropy
+                    exponentials = tf.reduce_sum(tf.exp(graph_embeddings_mod_sim / self.contrastive_sampling_tau), axis=-1)
+                    loss_contribs = tf.math.log(exponentials)
+                    # loss_contrast += 1 * tf.reduce_mean(loss_contribs)
+                    
+                    loss_contribs_pos = tf.reduce_sum(graph_embeddings * graph_embeddings_mod, axis=-1)
+                    loss_pos += tf.reduce_mean(loss_contribs_pos / self.contrastive_sampling_tau)
+                    
+                # As per the formula in the paper, we actually want to *maximize* this term which is why we add the negative 
+                # of it to the overall loss value.
+                if self.positive_sampling_rate != 0:
+                    # loss_contrast -= (1 / self.positive_sampling_rate) * loss_pos
+                    loss_contrast -= loss_pos
+                    
+                loss_contrast *= self.var_contrastive_sampling_factor
+                loss += loss_contrast
                     
         # The rest of this is the standard keras train step code
         trainable_vars = self.trainable_variables
@@ -1208,28 +1379,15 @@ class Megan2(Megan):
             out_pred,
             sample_weight=sample_weight
         )
-        
-        # ~ FIDELITY TRAINING
-        # This section implements the fidelity training. The purpose of the fidelity training is to refine the 
-        # multi-channel fidelity behavior of the model. It has been observed that while the default MEGAN model *generally* 
-        # produces explanations that are faithful to their assigned interpretations according to the Fidelity* metric, 
-        # there are quite some samples where this is not the case.
-        # The aim of the fidelity training is to directly use the fidelity formula as an optimization objective during 
-        # training to reduce the number of samples which are unfaithul to their channel's interpretation.
-        
-        # One might wonder why the fidelity training is implemented as a separate training step instead of a direct 
-        # loss term such as all the other training modifications. The honest answer is that this has been tested out 
-        # and I found it to work much better when it is a separate step.
-        if self.fidelity_factor != 0:
-            # This method will execute an entirely separate training step 
-            fid_loss = self.train_step_fidelity(x, ni_pred)
-            exp_loss += fid_loss 
 
         # Return a dict mapping metric names to current value.
         # Note that it will include the loss (tracked in self.metrics).
         return {
             **{m.name: m.result() for m in self.metrics},
+            'loss': loss,
             'exp_loss': exp_loss,
+            'fid_loss': fid_loss,
+            'contr_loss': loss_contrast,
         }
         
         
