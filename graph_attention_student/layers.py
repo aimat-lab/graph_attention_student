@@ -448,6 +448,7 @@ class MultiHeadGATV2Layer(AttentionHeadGATV2):
                  activation: str = 'kgcnn>leaky_relu',
                  use_bias: bool = True,
                  concat_heads: bool = True,
+                 concat_self: bool = False,
                  **kwargs):
         super(MultiHeadGATV2Layer, self).__init__(
             units=units,
@@ -457,10 +458,126 @@ class MultiHeadGATV2Layer(AttentionHeadGATV2):
         )
         self.num_heads = num_heads
         self.concat_heads = concat_heads
+        self.concat_self = concat_self
 
         self.head_layers = []
         for _ in range(num_heads):
-            lay_linear = DenseEmbedding(units, activation=activation, use_bias=use_bias)
+            lay_activation = DenseEmbedding(units, activation='relu', use_bias=use_bias)
+            lay_linear = DenseEmbedding(units, activation='linear', use_bias=use_bias)
+            lay_alpha_activation = DenseEmbedding(units, activation=activation, use_bias=use_bias)
+            lay_alpha = DenseEmbedding(1, activation='linear', use_bias=False)
+
+            # self.head_layers.append((lay_linear, lay_alpha_activation, lay_alpha))
+            self.head_layers.append({
+                'lay_activation': lay_activation,
+                'lay_linear': lay_linear,
+                'lay_alpha_activation': lay_alpha_activation,
+                'lay_alpha': lay_alpha,
+            })
+
+        self.lay_concat_alphas = LazyConcatenate(axis=-2)
+        self.lay_concat_embeddings = LazyConcatenate(axis=-2)
+        self.lay_pool_attention = PoolingLocalEdgesAttention()
+
+        if self.concat_heads:
+            self.lay_combine_heads = LazyConcatenate(axis=-1)
+        else:
+            self.lay_combine_heads = LazyAverage()
+
+    def __call__(self, 
+                 inputs, 
+                 edge_mask: t.Optional[tf.RaggedTensor] = None, 
+                 **kwargs):
+        node, edge, edge_index = inputs
+
+        # "a_ij" is a single-channel edge attention logits tensor. "a_ijs" is consequently the list which
+        # stores these tensors for each attention head.
+        # "h_i" is a single-channel node embedding tensor. "h_is" is consequently the list which stores
+        # these tensors for each attention head.
+        a_ijs = []
+        h_is = []
+        for k, layers in enumerate(self.head_layers):
+
+            # These are essentially the message embeddings that we broadcast during the message 
+            # passing step to then compute the new node embeddings. These are derived through a very shallow MLP 
+            # from the current node embeddings
+            # w_n: ([B], [V], N)
+            w_n = node
+            # w_n = layers['lay_activation'](w_n, **kwargs)
+            w_n = layers['lay_linear'](w_n, **kwargs)
+            
+            n_in = self.lay_gather_in([node, edge_index], **kwargs)
+            n_out = self.lay_gather_out([node, edge_index], **kwargs)
+            wn_out = self.lay_gather_out([w_n, edge_index], **kwargs)
+            if self.use_edge_features:
+                e_ij = self.lay_concat([n_in, n_out, edge], **kwargs)
+            else:
+                e_ij = self.lay_concat([n_in, n_out], **kwargs)
+
+            # a_ij: ([B], [E], 1)
+            a_ij = layers['lay_alpha_activation'](e_ij, **kwargs)
+            a_ij = layers['lay_alpha'](a_ij, **kwargs)
+            
+            # Edge mask is supposed to be a binary mask (only 1 and 0) whose primary usage is to completely mask out certain edges
+            # during the message passing operation by setting the corresponding attention weight to zero.
+            if edge_mask is not None:
+                a_ij *= edge_mask
+
+            # h_i: ([B], [V], N)
+            h_i = self.lay_pool_attention([w_n, wn_out, a_ij, edge_index], **kwargs)
+            
+            if self.concat_self:
+                h_i = tf.concat([h_i, w_n], axis=-1)
+            
+            if self.use_final_activation:
+                h_i = self.lay_final_activ(h_i, **kwargs)
+
+            # a_ij after expand: ([B], [E], 1, 1)
+            a_ij = tf.expand_dims(a_ij, axis=-2)
+            a_ijs.append(a_ij)
+
+            # h_i = tf.expand_dims(h_i, axis=-2)
+            h_is.append(h_i)
+
+        a_ijs = self.lay_concat_alphas(a_ijs)
+
+        h_is = self.lay_combine_heads(h_is)
+
+        # An important modification we need here is that this layer also returns the attention coefficients
+        # because in MEGAN we need those to calculate the edge attention values with!
+        # h_is: ([batch], [N], K * Vu) or ([batch], [N], Vu)
+        # a_ijs: ([batch], [M], K, 1)
+        return h_is, a_ijs
+
+    def get_config(self):
+        """Update layer config."""
+        config = super(MultiHeadGATV2Layer, self).get_config()
+        config.update({
+            'num_heads': self.num_heads,
+            'concat_heads': self.concat_heads
+        })
+
+        return config
+
+
+
+class MultiHeadAttentionLayer(GraphBaseLayer):
+
+    def __init__(self,
+                 units: int,
+                 num_heads: int,
+                 activation: str = 'kgcnn>leaky_relu',
+                 use_bias: bool = True,
+                 concat_heads: bool = True
+                 ):
+        
+        super(MultiHeadAttentionLayer, self).__init__()
+        self.num_heads = num_heads
+        self.concat_heads = concat_heads
+
+        self.head_layers = []
+        for _ in range(num_heads):
+            lay_linear = DenseEmbedding(units, activation='linear', use_bias=use_bias)
             lay_alpha_activation = DenseEmbedding(units, activation=activation, use_bias=use_bias)
             lay_alpha = DenseEmbedding(1, activation='linear', use_bias=False)
 
@@ -469,7 +586,6 @@ class MultiHeadGATV2Layer(AttentionHeadGATV2):
         self.lay_concat_alphas = LazyConcatenate(axis=-2)
         self.lay_concat_embeddings = LazyConcatenate(axis=-2)
         self.lay_pool_attention = PoolingLocalEdgesAttention()
-        # self.lay_pool = PoolingLocalEdges()
 
         if self.concat_heads:
             self.lay_combine_heads = LazyConcatenate(axis=-1)
@@ -511,6 +627,8 @@ class MultiHeadGATV2Layer(AttentionHeadGATV2):
 
             # h_i: ([batch], [N], F)
             h_i = self.lay_pool_attention([node, wn_out, a_ij, edge_index], **kwargs)
+            
+            #h_i += w_n
 
             if self.use_final_activation:
                 h_i = self.lay_final_activ(h_i, **kwargs)

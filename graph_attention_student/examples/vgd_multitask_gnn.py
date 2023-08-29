@@ -35,9 +35,12 @@ import tensorflow as tf
 import tensorflow.keras as ks
 from matplotlib.backends.backend_pdf import PdfPages
 from sklearn.metrics import r2_score
-from sklearn.metrics import mean_squared_error
+from sklearn.metrics import mean_squared_error as mse_score
+from sklearn.metrics import mean_absolute_error as mae_score
 from pycomex.experiment import Experiment
 from pycomex.util import Skippable
+from pycomex.functional.experiment import Experiment
+from pycomex.utils import file_namespace, folder_path
 from visual_graph_datasets.data import load_visual_graph_dataset
 from kgcnn.layers.conv.gcn_conv import GCN
 from kgcnn.layers.pooling import PoolingGlobalEdges
@@ -52,7 +55,6 @@ from graph_attention_student.visualization import plot_regression_fit
 from graph_attention_student.util import latex_table, latex_table_element_mean
 from graph_attention_student.util import render_latex
 
-VERSION = '0.1.0'
 
 # == DATASET PARAMETERS ==
 # These parameters are used to specify the dataset to be used for the training as well as additional
@@ -147,7 +149,7 @@ DROPOUT_RATE = 0.2
 
 # The training can be repeated multiple times to get a statistical measure for the performance of the model.
 # This determines how many repetitions are made
-REPETITIONS: int = 5
+REPETITIONS: int = 1
 # This string defines which device is used for the training process. On a normal setup for a normal PC the
 # main two options would be 'cpu:0' and 'gpu:0' which uses the CPU and GPU respectively. Training on a
 # GPU is usually more efficient, but one might encounter errors in some cases such as tensor operations
@@ -161,7 +163,7 @@ LEARNING_RATE: float = 0.01
 # in one weight update.
 BATCH_SIZE: int = 256
 # How many times the entire training dataset will be iterated over during the training process
-EPOCHS: int = 1000
+EPOCHS: int = 100
 # This controls how often the loss and the metrics for the training process will be printed to the
 # console.
 EPOCH_STEP: int = 50
@@ -172,15 +174,22 @@ EPOCH_STEP: int = 50
 LOG_STEP_EVAL: int = 1000
 
 # == EXPERIMENT PARAMETERS ==
-BASE_PATH = os.getcwd()
-NAMESPACE = 'results/vgd_multitask_gnn'
-DEBUG = True
-with Skippable(), (e := Experiment(BASE_PATH, NAMESPACE, globals())):
-    FINAL_UNITS += [NUM_TARGETS]
 
-    e.info('starting experiment...')
+__DEBUG__ = True
 
-    e.info('loading dataset...')
+@Experiment(base_path=folder_path(__file__),
+            namespace=file_namespace(__file__),
+            glob=globals())
+def experiment(e: Experiment):
+    e.log('starting experiment...')
+    e['device'] = tf.device(e.DEVICE)
+    e['device'].__enter__()
+    
+    e.FINAL_UNITS += [e.NUM_TARGETS]
+
+    e.log('starting experiment...')
+
+    e.log('loading dataset...')
     name_data_map, index_data_map = load_visual_graph_dataset(
         path=VISUAL_GRAPH_DATASET_PATH,
         logger=e.logger,
@@ -207,7 +216,7 @@ with Skippable(), (e := Experiment(BASE_PATH, NAMESPACE, globals())):
 
         dataset.append(g)
 
-    e.info(f'loaded dataset with {len(dataset)} elements')
+    e.log(f'loaded dataset with {len(dataset)} elements')
 
     # -- TRAINING THE MODEL --
 
@@ -230,17 +239,17 @@ with Skippable(), (e := Experiment(BASE_PATH, NAMESPACE, globals())):
 
 
     @e.hook('model_training', default=True)
-    def model_training(_e, x_train, y_train, x_test, y_test):
+    def model_training(e, x_train, y_train, x_test, y_test):
         history = model.fit(
             x_train,
             y_train,
-            batch_size=_e.parameters['BATCH_SIZE'],
-            epochs=_e.parameters['EPOCHS'],
+            batch_size=e.BATCH_SIZE,
+            epochs=e.EPOCHS,
             validation_data=(x_test, y_test),
             validation_freq=1,
             callbacks=LogProgressCallback(
-                logger=_e.logger,
-                epoch_step=_e.parameters['EPOCH_STEP'],
+                logger=e.logger,
+                epoch_step=e.EPOCH_STEP,
                 identifier=f'val_mean_squared_error'
             ),
             verbose=[]
@@ -250,14 +259,14 @@ with Skippable(), (e := Experiment(BASE_PATH, NAMESPACE, globals())):
 
 
     for rep in range(REPETITIONS):
-        e.info(f'REPETITION ({rep+1}/{REPETITIONS})')
+        e.log(f'REPETITION ({rep+1}/{REPETITIONS})')
 
-        e.info('creating train test split...')
+        e.log('creating train test split...')
         train_indices = random.sample(dataset_indices, k=int(TRAIN_RATIO * len(dataset_indices)))
         test_indices = [index for index in dataset_indices if index not in train_indices]
         e[f'train_indices/{rep}'] = train_indices
         e[f'test_indices/{rep}'] = test_indices
-        e.info(f'determined {len(train_indices)} train_indices and {len(test_indices)} test indices')
+        e.log(f'determined {len(train_indices)} train_indices and {len(test_indices)} test indices')
 
         # This turns the list of graph dicts into the final form which we need for the training of the model:
         # keras RaggedTensors which contain all the graphs.
@@ -268,105 +277,161 @@ with Skippable(), (e := Experiment(BASE_PATH, NAMESPACE, globals())):
             use_importances=False,
             use_graph_attributes=e.parameters['USE_GRAPH_ATTRIBUTES'],
         )
-        e.info(f'num elements x tuple: {len(x_train)}')
-        e.info(f'num elements y tuple: {len(y_train)}')
+        e.log(f'num elements x tuple: {len(x_train)}')
+        e.log(f'num elements y tuple: {len(y_train)}')
 
-        with tf.device(DEVICE):
-            model = e.apply_hook('create_model')
 
-            e.info('starting model training...')
-            e.apply_hook('before_training')
+        model = e.apply_hook('create_model')
 
-            history = e.apply_hook(
-                'model_training',
-                x_train=x_train,
-                y_train=y_train,
-                x_test=x_test,
-                y_test=y_test
-            )
-            e[f'history/{rep}'] = history
+        e.log('starting model training...')
+        e.apply_hook('before_training')
 
-            # -- EVALUATING ON TEST SET --
-            e.info('evaluating on test set...')
-            e.apply_hook('before_evaluation')
-
-            out_pred = model(x_test)
-            out_pred = np.array(out_pred.numpy())
-            out_true = y_test[0]
-
+        history = e.apply_hook(
+            'model_training',
+            x_train=x_train,
+            y_train=y_train,
+            x_test=x_test,
+            y_test=y_test
+        )
+        e[f'history/{rep}'] = history
+        
+        num_params = model.count_params()
+        e.log(f'number of model parameters: {num_params}')
+        
+        @e.hook('model_evaluation', default=True)
+        def model_evaluation(e: Experiment,
+                             key: str,
+                             rep: int,
+                             model: t.Any,
+                             x: tuple,
+                             y: np.ndarray):
+            
+            e.log(f'evaluating "{key}" set...')
+            out_pred = model(x)
+            out_true = y[0]
+            
             # ~ visualizing the evaluation results
             # This section generates a PDF which contains the R2 scores for all the different target values,
             # calculated using the test set predictions.
             # The PDF also visualizes the regression results using a regression "scatter" plot.
-            pdf_path = os.path.join(e.path, f'training_{rep:02d}.pdf')
-            with PdfPages(pdf_path) as pdf:
-                n_cols = len(TARGET_NAMES)
-                n_rows = 1
 
-                # First page is the regressions scatter plots for each of the targets
-                fig, rows = plt.subplots(ncols=n_cols, nrows=n_rows, figsize=(10 * n_cols, 10), squeeze=False)
-                for i, name in enumerate(TARGET_NAMES):
-                    ax = rows[0][i]
+            n_cols = len(TARGET_NAMES)
+            n_rows = 1
 
-                    values_true = []
-                    values_pred = []
-                    for value_true, value_pred in zip(out_true, out_pred):
-                        if not np.isnan(value_true[i]) and not np.isnan(value_pred[i]):
-                            values_true.append(value_true[i])
-                            values_pred.append(value_pred[i])
+            # First page is the regressions scatter plots for each of the targets
+            fig, rows = plt.subplots(ncols=n_cols, nrows=n_rows, figsize=(10 * n_cols, 10), squeeze=False)
+            for i, name in enumerate(TARGET_NAMES):
+                ax = rows[0][i]
 
-                    plot_regression_fit(
-                        values_true=values_true,
-                        values_pred=values_pred,
-                        ax=ax
-                    )
+                values_true = []
+                values_pred = []
+                for value_true, value_pred in zip(out_true, out_pred):
+                    if not np.isnan(value_true[i]) and not np.isnan(value_pred[i]):
+                        values_true.append(value_true[i])
+                        values_pred.append(value_pred[i])
 
-                    r2_value = r2_score(values_true, values_pred)
-                    mse_value = mean_squared_error(values_true, values_pred)
-                    rmse_value = np.sqrt(mse_value)
-                    ax.set_title(f'"{name}"\n'
-                                 f'r2: {r2_value:.2f} \n'
-                                 f'mse: {mse_value:.2f} \n'
-                                 f'rmse: {rmse_value:.2f}')
+                plot_regression_fit(
+                    values_true=values_true,
+                    values_pred=values_pred,
+                    ax=ax
+                )
 
-                    # We also want to save it to the experiment store so that we can use that information
-                    # again later on.
-                    e[f'r2/{name}/{rep}'] = float(r2_value)
-                    e[f'mse/{name}/{rep}'] = float(mse_value)
-                    e[f'rmse/{name}/{rep}'] = float(rmse_value)
+                r2_value = r2_score(values_true, values_pred)
+                mse_value = mse_score(values_true, values_pred)
+                rmse_value = np.sqrt(mse_value)
+                mae_value = mae_score(values_true, values_pred)
+                ax.set_title(f'"{name}"\n'
+                                f'r2: {r2_value:.3f} \n'
+                                f'mse: {mse_value:.3f} \n'
+                                f'rmse: {rmse_value:.3f} \n'
+                                f'mae: {mae_value:.3f}')
 
-                pdf.savefig(fig)
-                plt.close(fig)
+                # We also want to save it to the experiment store so that we can use that information
+                # again later on.
+                e[f'r2/{key}/{name}/{rep}'] = float(r2_value)
+                e[f'mse/{key}/{name}/{rep}'] = float(mse_value)
+                e[f'rmse/{key}/{name}/{rep}'] = float(rmse_value)
+                e[f'mae/{key}/{name}/{rep}'] = float(mae_value)
+
+            fig_path = os.path.join(e.path, f'{key}_{rep}.pdf')
+            fig.savefig(fig_path)
+            plt.close(fig)
+
+        # ~ EVALUATING ON TRAIN SET
+        e.apply_hook(
+            'model_evaluation',
+            key='train',
+            rep=rep,
+            model=model,
+            x=x_train,
+            y=y_train,
+        )
+
+        # ~ EVALUATING ON TEST SET
+        e.apply_hook(
+            'model_evaluation',
+            key='test',
+            rep=rep,
+            model=model,
+            x=x_test,
+            y=y_test,
+        )
 
 
-with Skippable(), e.analysis:
+@experiment.analysis
+def analysis(e: Experiment):
 
     # Creating latex code to display the results in a table
-    e.info('rendering latex table...')
-    column_names = [
-        r'Target Name',
-        r'$\text{MSE} \downarrow $',
-        r'$\text{RMSE} \downarrow $',
-        r'$R^2 \uparrow $',
-    ]
-    rows = []
-    for name in TARGET_NAMES:
-        row = []
+    
+    @e.hook('create_latex_table', default=True)
+    def create_latex_table(e: Experiment,
+                           key: str,
+                           names: t.List[str]):
+        
+        e.log(f'rendering latex table "{key}"...')
+        column_names = [
+            r'Target Name',
+             r'$\text{MAE} \downarrow $',
+            r'$\text{MSE} \downarrow $',
+            r'$\text{RMSE} \downarrow $',
+            r'$R^2 \uparrow $',
+        ]
+        rows = []
+        for name in names:
+            row = []
 
-        row.append(name)
-        row.append([e[f'mse/{name}/{rep}'] for rep in range(REPETITIONS)])
-        row.append([e[f'rmse/{name}/{rep}'] for rep in range(REPETITIONS)])
-        row.append([e[f'r2/{name}/{rep}'] for rep in range(REPETITIONS)])
+            row.append(name)
+            row.append([e[f'mae/{key}/{name}/{rep}'] for rep in range(e.REPETITIONS)])
+            row.append([e[f'mse/{key}/{name}/{rep}'] for rep in range(e.REPETITIONS)])
+            row.append([e[f'rmse/{key}/{name}/{rep}'] for rep in range(e.REPETITIONS)])
+            row.append([e[f'r2/{key}/{name}/{rep}'] for rep in range(e.REPETITIONS)])
 
-        rows.append(row)
+            rows.append(row)
 
-    content, table = latex_table(
-        column_names=column_names,
-        rows=rows,
-        list_element_cb=latex_table_element_mean,
-        caption=f'Results of {REPETITIONS} repetition(s) of ' + r'\textbf{' + MODEL_NAME + '}'
+        content, table = latex_table(
+            column_names=column_names,
+            rows=rows,
+            list_element_cb=latex_table_element_mean,
+            caption=f'Results of {e.REPETITIONS} repetition(s) of ' + r'\textbf{' + e.MODEL_NAME + '}'
+        )
+        e.commit_raw('table.tex', table)
+        pdf_path = os.path.join(e.path, f'table_{key}.pdf')
+        render_latex({'content': table}, output_path=pdf_path)
+        e.log('rendered latex table')
+        
+    # ~ Latex table for the training evaluation results
+    e.apply_hook(
+        'create_latex_table',
+        key='train',
+        names=e.TARGET_NAMES,
     )
-    e.commit_raw('table.tex', table)
-    pdf_path = os.path.join(e.path, 'table.pdf')
-    render_latex({'content': table}, output_path=pdf_path)
-    e.info('rendered latex table')
+    
+    # ~ Latex table for the testing evaluation results
+    e.apply_hook(
+        'create_latex_table',
+        key='test',
+        names=e.TARGET_NAMES,
+    )
+
+
+experiment.run_if_main()

@@ -1,3 +1,7 @@
+"""
+This module contains visualization utility functions.
+
+"""
 from collections import defaultdict
 from typing import List, Dict, Callable, Optional
 import typing as t
