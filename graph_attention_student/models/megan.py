@@ -25,6 +25,7 @@ from graph_attention_student.training import shifted_sigmoid
 from graph_attention_student.models.utils import tf_cosine_sim, tf_pairwise_cosine_sim
 from graph_attention_student.models.utils import tf_cauchy_sim, tf_pairwise_cauchy_sim
 from graph_attention_student.models.utils import tf_pairwise_euclidean_distance
+from graph_attention_student.models.utils import tf_pairwise_variance
 from graph_attention_student.models.utils import tf_ragged_random_binary_mask
 
 
@@ -527,8 +528,8 @@ class Megan(ks.models.Model):
                         outs_approx,
                         shift=self.importance_multiplier,
                         multiplier=1
-                    ) * out_true
-                    exp_loss = self.compiled_classification_loss(outs_class, outs_approx)
+                    ) * tf.cast(out_true, tf.float32)
+                    exp_loss = self.compiled_classification_loss(out_true, outs_class)
 
                 loss += self.importance_factor * exp_loss
                     
@@ -728,6 +729,7 @@ class Megan2(Megan):
                  fidelity_factor: float = 0.0,
                  fidelity_funcs: t.List[t.Callable] = [],
                  # constrastive representation learning related
+                 embedding_units: t.Optional[t.List[int]] = None,
                  contrastive_sampling_factor: float = 0.0,
                  contrastive_sampling_tau: float = 0.9,
                  positive_sampling_rate: int = 1,
@@ -763,6 +765,7 @@ class Megan2(Megan):
         self.fidelity_factor = fidelity_factor
         self.fidelity_funcs = fidelity_funcs
         # contrastive representation learning
+        self.embedding_units = embedding_units
         self.contrastive_sampling_factor = contrastive_sampling_factor
         self.contrastive_sampling_tau = contrastive_sampling_tau
         self.positive_sampling_rate = positive_sampling_rate
@@ -794,16 +797,36 @@ class Megan2(Megan):
             self.attention_layers.append(lay)
         
         # ~ adding projection network for the graph embeddings
+        
+        if embedding_units is None:
+            self.embedding_units = [self.units[-1], self.units[-1]]
+        
         self.channel_dense_layers = []
-        for k in range(self.importance_channels):
+        for _ in range(self.importance_channels):
             
-            layers = [
-                DenseEmbedding(units=self.units[-1], activation='relu'),
-                DenseEmbedding(units=self.units[-1], activation='linear', use_bias=False),
-            ]
+            layers = []
+
+            embedding_acts = ['kgcnn>leaky_relu' for _ in self.embedding_units]
+            embedding_acts[-1] = 'linear'
+            
+            embedding_biases = [True for _ in self.embedding_units]
+            embedding_biases[-1] = False
+            
+            for u, act, bias in zip(self.embedding_units, embedding_acts, embedding_biases):
+                layers.append(DenseEmbedding(
+                    units=u,
+                    activation=act,
+                    use_bias=bias,
+                ))
+            
             self.channel_dense_layers.append(layers)
             
-        # self.var_bias = tf.Variable(tf.constant(np.zeros(shape=(self.final_units[-1], ), dtype=np.float32)), dtype=tf.float32, trainable=True)
+        # ~ contrsative learning related
+        self.x_support: t.Optional[tuple] = None
+        self.graph_embeddings_support = None
+        self.step_counter = tf.Variable(0, trainable=False, dtype=tf.int64)
+        self.step_delay: int = 2
+        self.num_anchors: int = 5
         
     def get_config(self):
         config = super(Megan2, self).get_config()
@@ -816,6 +839,19 @@ class Megan2(Megan):
         })
         
         return config
+    
+    @property
+    def graph_embedding_shape(self) -> t.Tuple[int, int]:
+        """
+        Returns a tuple which defines contains the information about the shape of the graph embeddings (K, D)
+        where K is the number of explanation channels employed in the model and D is the number of elements in 
+        each of the embedding vectors for each of the explanation channels.
+        
+        Note that every explanation channel produces it's own graph embeddings!
+        
+        :returns: int
+        """
+        return self.importance_channels, self.embedding_units[-1]
         
     def call(self,
              inputs: tuple,
@@ -1071,129 +1107,71 @@ class Megan2(Megan):
 
         return fid_loss, deviations
     
+    def set_x_support(self, x):
+        self.x_support = x
+        
+        # graph_embeddings_support: ([S], K, D)
+        _, _, _, graph_embeddings_support = self(self.x_support, training=True, return_embeddings=True)
+        # graph_embeddings_support: ([S * K], D)
+        # graph_embeddings_support = tf.reshape(graph_embeddings_support, shape=(-1, self.graph_embedding_shape[-1]))
+        self.graph_embeddings_support = tf.Variable(graph_embeddings_support, trainable=False, dtype=tf.float32)
+
+    @tf.function
     def train_step_contrast(self, x):
+        
+        if tf.equal(self.step_counter, 0):
+            
+            # graph_embeddings_support: ([S], K, D)
+            _, _, _, graph_embeddings_support = self(self.x_support, training=True, return_embeddings=True)
+            # graph_embeddings_support: ([S * K], D)
+            # graph_embeddings_support = tf.reshape(graph_embeddings_support, shape=(-1, self.graph_embedding_shape[-1]))
+            self.graph_embeddings_support.assign(graph_embeddings_support)
+
+            self.step_counter.assign(self.step_delay)
+            
+        else:
+            graph_embeddings_support = self.graph_embeddings_support
+            self.step_counter.assign_add(-1)
         
         with tf.GradientTape() as tape:
             
-            node_attributes, edge_attributes, edge_indices = x
-            # out_pred: ([B], C)
-            _, ni_pred, ei_pred, graph_embeddings = self(x, training=True, return_embeddings=True)
-            
             loss = 0.0
             loss_contrast = 0.0
-                
-            loss_pos = 0.0
-            loss_neg = 0.0
             
-            loss_contribs_neg = 0.0
-            loss_contribs_pos = 0.0
+            node_attributes, edge_attributes, edge_indices = x
             
-            batch_size = tf.shape(graph_embeddings)[0]
-            virtual_batch_size = batch_size * self.importance_channels
-            # This reshaping operation makes it such that we treat the separate graph embeddings of each of the 
-            # channels as their own embeddings. Essentially merging the first (batch) and the second (channel) 
-            # dimension to multiply the effective samples in our batch.
+            # out_pred: ([B], C)
+            # graph_embeddings: ([B], K, D)
+            out_pred, ni_pred, ei_pred, graph_embeddings = self(x, training=True, return_embeddings=True)
             # graph_embeddings: ([B * K], D)
-            graph_embeddings = tf.reshape(graph_embeddings, shape=(-1, self.graph_embedding_shape[-1]))
+            # graph_embeddings = tf.reshape(graph_embeddings, shape=(-1, self.graph_embedding_shape[-1]))
             
-            # ~ L2 normalization
-            # Here we apply an L2 normalization on the embeddings. This is VERY important because this allows us to 
-            # later compute the cosine similarity between embedding vectors very easily as the dot product between 
-            # them, which only works for L2 normalized vectors!
-            graph_embeddings = tf.math.l2_normalize(graph_embeddings, axis=-1)
-            tf.stop_gradient(graph_embeddings)
-            
-            # ~ negative sampling
-            # For the negative sampling we simply need to create the multiplication of every graph embedding with 
-            # every other graph embedding. The following code leverages "broadcasting" to achieve just that.
-            graph_embeddings_expanded = tf.expand_dims(graph_embeddings, axis=-2)
-            # graph_embeddings_product: ([B], [B])
-            # graph_embeddings_sim = tf.reduce_sum(graph_embeddings * graph_embeddings_expanded, axis=-1)  
-            graph_embeddings_sim = tf_pairwise_cosine_sim(graph_embeddings, graph_embeddings)
-
-            # Now the problem is that we do not want to consider the terms where the elements are being multiplied 
-            # with themselves. So we mask them out by creating a diagonal mask of zeros here.
-            eye = tf.cast(1.0 - tf.eye(num_rows=virtual_batch_size, num_columns=virtual_batch_size), tf.float32)
-            graph_embeddings_sim = graph_embeddings_sim * eye
-            #graph_embeddings_sim = graph_embeddings_sim * eye * fidelity_debias
-            
-            # The rest is the formula given in the paper which I assume is some variation of a cross entropy
-            loss_contribs_neg = tf.reduce_sum(tf.exp(graph_embeddings_sim / self.contrastive_sampling_tau), axis=-1)
-            #loss_neg = tf.reduce_mean(tf.math.log(loss_contribs_neg))
-
-            
-            # ~ positive sampling
-            # The idea is that we also need positive samples as anchor points. These positive samples are supposed to 
-            # be examples of graph embeddings that are CLOSE to the original ones in the batch. We can obtain these 
-            # by data augmentation techniques. For example we can make the assumption that despite small perturbations 
-            # of the input graphs, the graph embedding should still be functionally the same.
-            
-            for p in range(self.positive_sampling_rate):
-                # first of all we create the perturbations for the input graphs and then we make another forward pass 
-                # with those inputs.
+            for k in range(self.importance_channels):
                 
-                # We can use this somewhat complicated code here to produce a random binary mask with the same shape as 
-                # the predicted node importances tensor. We effectively use this binary mask to drop out only a very few
-                # importances annotations.
-
-                # ni_pred_normalized = ni_pred / tf.reduce_max(ni_pred)
-                # ni_pred_binary = tf.cast(ni_pred_normalized > 0.5,tf.float32)
+                graph_embeddings_k = graph_embeddings[:, k, :]
+                graph_embeddings_support_k = graph_embeddings_support[:, k, :]
                 
-                # ~ node attribute data augementation
-                random_node_mask = tf_ragged_random_binary_mask(
-                    template=ni_pred,
-                    chances=[self.positive_sampling_noise_attributes, 1 - self.positive_sampling_noise_attributes],
-                    n=1,
-                )
-                _, _, _, graph_embeddings_attr = self(
-                    (node_attributes * random_node_mask, edge_attributes, edge_indices),
-                    training=True,
-                    return_embeddings=True,
-                )
-                graph_embeddings_attr = tf.reshape(graph_embeddings_attr, shape=(-1, self.graph_embedding_shape[-1]))
-                graph_embeddings_attr = tf.math.l2_normalize(graph_embeddings_attr, axis=-1)
-                    
-                graph_embeddings_sim_attr = tf_pairwise_cosine_sim(graph_embeddings, graph_embeddings_attr) * eye
-                loss_contribs_neg += tf.reduce_sum(tf.exp(graph_embeddings_sim_attr / self.contrastive_sampling_tau), axis=-1)
-                    
-                # ~ importance mask data augmentation
-                node_importances_mask = tf_ragged_random_binary_mask(
-                    template=ni_pred,
-                    chances=[self.positive_sampling_noise_importances, 1 - self.positive_sampling_noise_importances],
-                    n=self.importance_channels,
-                )
-                _, _, _, graph_embeddings_imp = self(
-                    (node_attributes, edge_attributes, edge_indices),
-                    training=True,
-                    return_embeddings=True,
-                    node_importances_mask=node_importances_mask,
-                )
-                graph_embeddings_imp = tf.reshape(graph_embeddings_imp, shape=(-1, self.graph_embedding_shape[-1]))
-                graph_embeddings_imp = tf.math.l2_normalize(graph_embeddings_imp, axis=-1)
+                # calculate the pairwise similarities of each batch embedding with each of the support embeddings
+                # sims: ([B * K], [S * K])
+                sims = tf_pairwise_cosine_sim(graph_embeddings_support_k, graph_embeddings_k, normalize=True)
+                #dists = tf_pairwise_variance(graph_embeddings_support_k, graph_embeddings_k)
                 
-                graph_embeddings_sim_imp = tf_pairwise_cosine_sim(graph_embeddings, graph_embeddings_imp) * eye
-                loss_contribs_neg += tf.reduce_sum(tf.exp(graph_embeddings_sim_imp / self.contrastive_sampling_tau), axis=-1)
+                # Now we need to choose the ones with the highest similarity and then naively create a loss 
+                # which maximizes that similarity
+                #sims_max = tf.reduce_max(sims, axis=-1)
+                sims_max = tf.math.top_k(sims, k=self.num_anchors).values
+                #dists_min = -tf.math.top_k(-dists, k=self.num_anchors).values
                 
-                # loss_contribs_pos: ([B], )
-                #loss_contribs_pos += tf.exp(tf_cosine_sim(graph_embeddings_attr, graph_embeddings_imp) / self.contrastive_sampling_tau)
+                #contribs_pos = tf.reduce_sum(tf.exp(sims_max / self.contrastive_sampling_tau), axis=-1)
+                #contribs_neg = tf.reduce_sum(tf.exp(sims_min / self.contrastive_sampling_tau), axis=-1)
                 
-                # loss_contribs_pos += tf.exp(tf_cosine_sim(graph_embeddings, graph_embeddings_imp) / self.contrastive_sampling_tau)
-                # loss_contribs_pos += tf.exp(tf_cosine_sim(graph_embeddings, graph_embeddings_attr) / self.contrastive_sampling_tau)
-                loss_contribs_pos += tf.exp(tf_cosine_sim(graph_embeddings, graph_embeddings_imp))
-                loss_contribs_pos += tf.exp(tf_cosine_sim(graph_embeddings, graph_embeddings_attr))
-                
-                #loss_contribs_pos = tf.reduce_sum(graph_embeddings_attr * graph_embeddings_imp, axis=-1) / self.contrastive_sampling_tau
-                #loss_pos = tf.reduce_mean(loss_contribs_pos)
-                
-            loss_neg = tf.reduce_mean(tf.math.log(loss_contribs_neg))
-            loss_pos = tf.reduce_mean(tf.math.log(loss_contribs_pos))
-            loss_contrast = (loss_neg - loss_pos)
-                
-            # loss_contrast *= self.var_contrastive_sampling_factor
-            loss += self.var_contrastive_sampling_factor * loss_contrast
+                loss_contrast += -tf.reduce_mean(sims_max)
+                #loss_contrast = -tf.reduce_mean(tf.math.log(contribs_pos)) + tf.reduce_mean(tf.math.log(contribs_neg))
+                loss = self.var_contrastive_sampling_factor * loss_contrast
         
         trainable_vars = self.trainable_variables
         gradients = tape.gradient(loss, trainable_vars)
+
         self.optimizer.apply_gradients(zip(gradients, trainable_vars))
             
         return loss_contrast
@@ -1258,7 +1236,14 @@ class Megan2(Megan):
             
         loss_contrast = 0
         if self.contrastive_sampling_factor != 0:
-            loss_contrast = self.train_step_contrast(x)
+            
+            if self.x_support is None:
+                print(f'WARNING: Contrastive loss for MEGAN2 model is enabled with a factor of {self.contrastive_sampling_factor} '
+                      f'but not support set is provided at attribute "model.x_support" which means that contrastive train step '
+                      f'will not be executed!')
+            
+            else:
+                loss_contrast = self.train_step_contrast(x)
 
         # Forward pass auto differentiation
         exp_metrics = {'exp_loss': 0}

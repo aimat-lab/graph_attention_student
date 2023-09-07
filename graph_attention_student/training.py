@@ -334,7 +334,9 @@ class LogProgressCallback(EpochCounterCallback):
     def on_epoch_end(self, epoch, logs=None):
         if (self.epoch % self.epoch_step == 0 or self.epoch == 1) and logs is not None:
             self.elapsed_time = time.time() - self.start_time
+            print(logs)
             value = logs[self.identifier]
+            
 
             message_parts = [
                 f'   epoch {str(self.epoch):<5}: ',
