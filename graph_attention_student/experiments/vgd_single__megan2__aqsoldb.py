@@ -40,8 +40,8 @@ SPARSITY_FACTOR = 1.0
 CONCAT_HEADS = False
 
 # == TRAINING PARAMETERS ==
-BATCH_SIZE = 8
-EPOCHS = 50
+BATCH_SIZE = 32
+EPOCHS = 100
 REPETITIONS = 1
 OPTIMIZER_CB = lambda: ks.optimizers.experimental.AdamW(
     learning_rate=0.001,
@@ -61,3 +61,5 @@ experiment = Experiment.extend(
 )
 
 experiment.run_if_main()
+
+
