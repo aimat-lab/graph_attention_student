@@ -22,9 +22,6 @@ from visual_graph_datasets.processing.base import ProcessingBase
 from visual_graph_datasets.visualization.base import draw_image
 from visual_graph_datasets.visualization.importances import plot_node_importances_background
 from visual_graph_datasets.visualization.importances import plot_edge_importances_background
-from vgd_counterfactuals import CounterfactualGenerator
-from vgd_counterfactuals.generate.molecules import get_neighborhood
-from vgd_counterfactuals.visualization import create_counterfactual_pdf
 
 from graph_attention_student.utils import array_normalize
 from graph_attention_student.models import load_model
@@ -37,11 +34,10 @@ ASSETS_PATH = os.path.join(PATH, 'assets')
 # :param MODEL_PATH:
 #       The path of the model folder that contains the MEGAN model to be used to make the prediction
 MODEL_PATH = os.path.join(ASSETS_PATH, 'aqsoldb_model')
-# :param VISUAL_GRAPH_DATASET_PATH:
-#       The path to the vgd dataset folder that was used to train the aforementioned model. Note that 
-#       the individual elements of this dataset will not actually be loaded in this experiment. The 
-#       dataset is merely required for the specific "Processing" procedure saved as part of this 
-#       dataset that determines how the SMILES string is turned into a graph representation
+# :param PROCESSING_PATH:
+#       The path to the specific "process.py" module that contains the processing rules to be applied 
+#       to convert the smiles string to the graph representation. It is important that this processing 
+#       is the exact same as the dataset that was used to train the above model.
 PROCESSING_PATH = os.path.join(ASSETS_PATH, 'aqsoldb_process.py')
 
 # :param SMILES:

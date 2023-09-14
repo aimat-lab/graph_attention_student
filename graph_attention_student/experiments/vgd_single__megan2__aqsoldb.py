@@ -51,7 +51,7 @@ DEVICE: str = 'cpu:0'
 
 # == EXPERIMENT PARAMETERS ==
 __DEBUG__ = True
-__TESTING__ = True
+__TESTING__ = False
 
 experiment = Experiment.extend(
     'vgd_single__megan2.py',
