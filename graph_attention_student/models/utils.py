@@ -31,6 +31,22 @@ def tf_pairwise_cosine_sim(tens1: tf.Tensor, tens2: tf.Tensor, normalize: bool =
     return sim
 
 
+def tf_pairwise_isc_sim(tens1: tf.Tensor, tens2: tf.Tensor, normalize: bool = False):
+    
+    tens1_norm = tf.linalg.normalize(tens1, ord=1, axis=-1)
+    tens2_norm = tf.linalg.normalize(tens2, ord=1, axis=-1)
+    
+    # tens1: (A, B)
+    # tens2: (A, B)
+    # tens_expanded: (A, 1, B)
+    tens2_expanded = tf.expand_dims(tens2, axis=-2)
+    
+    # sim: (A, A)
+    sim = tf.reduce_sum(tf.sqrt((tens1 / tens1_norm) * (tens2_expanded / tens2_norm)), axis=-1)
+    
+    return sim
+
+
 def tf_cauchy_sim(tens1: tf.Tensor, tens2: tf.Tensor):
     dist = tf.reduce_sum(tf.square(tens1 - tens2), axis=-1)
     sim = 1.0 / (1.0 + dist)
@@ -44,7 +60,7 @@ def tf_pairwise_cauchy_sim(tens1: tf.Tensor, tens2: tf.Tensor):
     tens_expanded = tf.expand_dims(tens2, axis=-2)
     
     # dist: (A, A)
-    dist = tf.reduce_sum(tf.square(tens1 - tens_expanded), axis=-1)
+    dist = tf.reduce_sum(tf.math.pow(tens1 - tens_expanded, 2), axis=-1)
     
     # sim: (A, A)
     sim = 1.0 / (1.0 + dist)
@@ -67,7 +83,27 @@ def tf_pairwise_euclidean_distance(tens1: tf.Tensor, tens2: tf.Tensor):
     tens_expanded = tf.expand_dims(tens2, axis=-2)
     
     # sim: (A, A)
-    dist = tf.reduce_sum(tf.square(tens1 - tens_expanded), axis=-1)
+    dist = tf.sqrt(tf.reduce_sum(tf.square(tens1 - tens_expanded), axis=-1))
+    
+    return dist
+
+
+def tf_manhattan_distance(tens1: tf.Tensor, tens2: tf.Tensor):
+    # tens1: (A, B)
+    # tens2: (A, B)
+    dist = tf.reduce_sum(tf.abs(tens1 - tens2), axis=-1)
+
+    return dist
+
+
+def tf_pairwise_manhattan_distance(tens1: tf.Tensor, tens2: tf.Tensor):
+    # tens1: (A, B)
+    # tens2: (A, B)
+    # tens_expanded: (A, 1, B)
+    tens_expanded = tf.expand_dims(tens2, axis=-2)
+    
+    # sim: (A, A)
+    dist = tf.sqrt(tf.reduce_sum(tf.abs(tens1 - tens_expanded), axis=-1))
     
     return dist
 
