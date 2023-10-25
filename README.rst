@@ -79,48 +79,36 @@ The package is also published as a library on PyPi and can be installed like thi
 🚀 Quickstart
 =============
 
-The MEGAN model is implemented as the ``MultiAttentionStudent`` class, which implements ``keras.Model``.
-The implementation is based on the `kgcnn`_ library for graph convolutional networks for keras. For further
-information on loading graph structured data with `kgcnn`_ visit:
-https://github.com/aimat-lab/gcnn_keras
-
-This is a simple example of how to use the model in the regression case:
+This package provides some functionality to load a pre-trained MEGAN model from the disk. The following code will illustrate 
+this for the example of predicting a molecular graph's water solubility using the default MEGAN model that is included in the 
+package for this task.
 
 .. code-block:: python
 
+    import os
+    import typing as t
+
     import tensorflow as tf
     import tensorflow.keras as ks
-    from graph_attention_student.training import NoLoss
-    from graph_attention_student.models import Megan
+    from visual_graph_datasets.utils import dynamic_import
+    from graph_attention_student.utils import ASSETS_PATH
+    from graph_attention_student.models import load_model
 
-    model = Megan(
-        # These lists define the number of layers and the number of hidden units in each layer for the
-        # various parts of the architecture
-        units=[9, 9, 9],  # The main convolutional layers
-        importance_units=[],  # The MLP that creates the node importances
-        final_units=[5, 1],  # The final MLP for graph embeddings
-        # Example for a regression problem. We need the prior knowledge about what range the values of the
-        # dataset will be expected to fall into...
-        regression_limits=(-3, +3),
-        # ... as well as a reference value.
-        regression_reference=0,
-        # This controls the weight of the explanation-only train step (gamma)
-        importance_factor=1.0,
-        importance_multiplier=5,
-        # This is the weight of the sparsity regularization
-        sparsity_factor=0.1,
-    )
+    # We want to predict the water solubility for the molecule represented as this SMILES code
+    SMILES = 'CN1C=NC2=C1C(=O)N(C(=O)N2C)C'
 
-    # The model output is actually a three tuple: (prediction, node_importances, edge_importances).
-    # This allows the importances to be trained in a supervised fashion. If we don't want that,
-    # we can simply supply the NoLoss function instead.
-    model.compile(
-        loss=[ks.losses.MeanSquaredError(), NoLoss(), NoLoss()],
-        loss_weights=[1, 1, 1],
-        optimizer=ks.optimizers.Adam(0.001)
-    )
+    # Loading the model
+    model_path = os.path.join(ASSETS_PATH, 'models', 'aqsoldb')
+    model = load_model(model_path)
 
-    # model.fit() ...
+    # For the inference we have to convert the SMILES string into the proper molecular graph
+    module = dynamic_import(os.path.join(model_path, 'process.py'))
+    processing = module.processing
+    graph = processing.process(SMILES)
+    
+    # THe model outputs the node and edge explanation masks directly alongside the main target value prediction
+    out_pred, ni_pred, ei_pred = model.predict_graphs([graph])[0]
+    print(f'Solubility: {out_pred:.2f}')
 
 
 .. _kgcnn: https://github.com/aimat-lab/gcnn_keras
@@ -167,16 +155,17 @@ training process.
     import os
     import typing as t
 
+    import tensorflow as tf
     from pycomex.functional.experiment import Experiment
     from pycomex.utils import file_namespace, folder_path
-    
+
     from graph_attention_student.utils import EXPERIMENTS_PATH
 
     # == CUSTOMIZE HERE ==
 
     # -- DATASET CONFIGURATION --
     # Fill in the path to your dataset here
-    VISUAL_GRAPH_DATASET_PATH: str = '../path/to/vgd'
+    VISUAL_GRAPH_DATASET_PATH: str = '../path/to/your/vgd'
     # The type of dataset it is
     DATASET_TYPE: str = 'regression'  # or 'classification'
     # The number of target labels that the dataset has
@@ -186,6 +175,9 @@ training process.
     # The number of randomly chosen example elements from the test set to be 
     # plotting the explanations for.
     NUM_EXAMPLES: int = 100
+
+    NODE_IMPORTANCES_KEY: t.Optional[str] = None  # dont modify
+    EDGE_IMPORTANCES_KEY: t.Optional[str] = None  # dont modify
 
     # -- MODEL CONFIGURATION --
     # the numbers of hidden units in the gnn layers
@@ -198,7 +190,7 @@ training process.
     FINAL_ACTIVATION: str = 'linear'
     # Configure the training process
     BATCH_SIZE: int = 32
-    EPOCHS: int = 100
+    EPOCHS: int = 10
     DEVICE: str = 'cpu:0'
 
     # -- EXPLANATION CONFIGURATION --
@@ -220,12 +212,16 @@ training process.
 
     # == DO NOT MODIFY ==
 
+    __DEBUG__ = False
+    __TESTING__ = False
     experiment = Experiment.extend(
         os.path.join(EXPERIMENTS_PATH, 'vgd_single__megan2.py'),
         base_path=folder_path(__file__),
         namespace=file_namespace(__file__),
         glob=globals()
     )
+
+    experiment.run_if_main()
 
 **Configuring the MEGAN model.** Much of the configuration that has to be done for the training process is similar to 
 "normal" neural network configuration, such as the choice of each layers hidden units, the final activation function, the training 
@@ -237,7 +233,19 @@ These parameters have only marginal impact on the final precition performance of
 resulting explanations will be. Some of these parameters will be discussed there briefly, but to get a better understanding of 
 the purpose of these parameters it is recommended to read the `paper`_
 
-- *Number or importance channels.* The number of channels
+- *Number or importance channels.* One of MEGAN's distinct features is that the number of explanations that is generated for each 
+  prediction is a hyperparameter ``IMPORTANCE_CHANNELS`` of the model instead of depending on the task specifications. 
+  However, to properly make use of the explanations the following restrictions currently apply: For a classification problem 
+  choose ``IMPORTANCE_CHANNELS`` same as the number of possible output classes. For regression tasks, currently only single-value 
+  regression problems are supported, in which case choose ``IMPORTANCE_CHANNELS = 2``. In this case, the first channel (index 0) will represent the 
+  negatively influencing structures and the second channel (index 1) will represent the positively influencing structures.
+- *Regression Reference.* One particularly important parameter for regression tasks is ``REGRESSION_REFERENCE``. This value determines 
+  which kinds of target values are even considered "negative" vs "positive". Therefore this parameter strongly influences how the 
+  explanations will turn out. A good starting point for this parameter is to choose it as the average value over the target labels of 
+  the given dataset. Depending on how the explanations turn out, it may have to be adjusted afterwards.
+- *Loss Weights.* During training, a MEGAN model is subject to various different loss terms whose weights can be set using the 
+  parameters ``IMPORTANCE_FACTOR``, ``FIDELITY_FACTOR`` and ``SPARSITY_FACTOR``. It is generally recommended to leave them at 
+  their default value, but depending on the circumstances it might be necessary to adjust them.
 
 ===========
 🔍 Examples

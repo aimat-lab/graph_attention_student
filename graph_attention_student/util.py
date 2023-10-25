@@ -24,6 +24,7 @@ DATASETS_FOLDER = os.path.join(PATH, 'datasets')
 EXAMPLES_FOLDER = os.path.join(PATH, 'examples')
 TEMPLATES_FOLDER = os.path.join(PATH, 'templates')
 EXPERIMENTS_PATH = os.path.join(PATH, 'experiments')
+ASSETS_PATH = os.path.join(PATH, 'assets')
 
 TEMPLATE_ENV = j2.Environment(
     loader=j2.FileSystemLoader(TEMPLATES_FOLDER),
