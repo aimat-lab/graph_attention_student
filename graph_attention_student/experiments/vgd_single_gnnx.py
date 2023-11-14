@@ -1,3 +1,7 @@
+"""
+This experiment will train a baseline GNN model on a visual graph dataset and then will produce 
+the explanations using the GNNExplainer (GNNX) method afterwards.
+"""
 import os
 import pathlib
 import random
@@ -32,15 +36,22 @@ from graph_attention_student.util import array_normalize, binary_threshold
 # These parameters define the dataset that is to be used for the experiment as well as properties of
 # that dataset such as the train test split for example.
 
-# The number of importance channels reflected in the ground truth importances loaded from the dataset
+# :param IMPORTANCE_CHANNELS: 
+#       The number of importance channels reflected in the ground truth importances loaded from the dataset!
+#       The dataset has perhaps
 IMPORTANCE_CHANNELS = 1
-# The string key of the graph dict representations to use to retrieve the ground truth node importances
-# ! Note: A visual graph dataset may have multiple different ground truth explanation annotations with
-# different numbers of channels!
+# :param NODE_IMPORTANCES_KEY:
+#       The string key within the graph dict that is used to store the ground truth node importances array.
+#       Note that providing providing ground truth importances is optional for a VGD dataset. Setting this 
+#       variable to None will disable the comparison with the ground truth importances.
+#       Also note that if a dataset contains the information about the ground truth importances, it is also 
+#       possible to have different ones (for a different number of distinct explanations / channels) which 
+#       may be indicated by a suffix to the string key!
 NODE_IMPORTANCES_KEY: t.Optional[str] = 'node_importances_1'
-# The string key of the graph dict representations to use to retrieve the ground truth edge importances
+# :param EDGE_IMPORTANCES_KEY:
+#       The string key within the graph dict that is used to store the ground truth edge importances array.
 EDGE_IMPORTANCES_KEY: t.Optional[str] = 'edge_importances_1'
-
+# :param USE_NODE_COORDINATES:
 # If this flag is true, the "node_coordinates" will be added to the other node attributes
 USE_NODE_COORDINATES: bool = False
 

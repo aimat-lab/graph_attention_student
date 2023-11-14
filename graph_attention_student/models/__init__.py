@@ -21,13 +21,15 @@ from graph_attention_student.models.megan import *
 from graph_attention_student.models.gradient import *
 from graph_attention_student.models.gnes import *
 from graph_attention_student.models.gnnx import *
+from graph_attention_student.models.baseline import *
 
 
 CUSTOM_OBJECTS = {
     'Megan': Megan,
     'Megan2': Megan2,
     'NoLoss': NoLoss,
-    'ExplanationLoss': ExplanationLoss
+    'ExplanationLoss': ExplanationLoss,
+    'GCNModel': GCNModel,
 }
 
 

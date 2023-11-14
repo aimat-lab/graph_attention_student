@@ -181,11 +181,16 @@ def experiment(e: Experiment):
         # 15.06.23 - If we encounter a target value that we do not want to be part of the dataset, the 
         # hook implementation raises a ValueError which signals to skip that particular element...
         try:
+            # :hook get_graph_labels:
+            #       this hook receives the metadata dict and the graph dict representation of a single element 
+            #       from the VGD dataset and it should return the "graph_labels" numpy array that represents the 
+            #       supervised target label for that element.
             graph['graph_labels'] = e.apply_hook(
                 'get_graph_labels', 
                 metadata=metadata, 
                 graph=graph
             )
+            
         except ValueError:
             continue
         
