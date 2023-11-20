@@ -157,14 +157,22 @@ def create_model(e):
 @experiment.hook('fit_model')
 def fit_model(e, model, x_train, y_train, x_test, y_test):
     e.log('training MEGAN model...')
-    history = model.fit(
-        x_train,
-        y_train,
-        batch_size=e.BATCH_SIZE,
-        epochs=e.EPOCHS,
-        validation_data=(x_test, y_test),
-        validation_freq=1,
-    )
+    try:    
+        history = model.fit(
+            x_train,
+            y_train,
+            batch_size=e.BATCH_SIZE,
+            epochs=e.EPOCHS,
+            validation_data=(x_test, y_test),
+            validation_freq=1,
+        )
+    except KeyboardInterrupt:
+        history = {}
+        e.log('stopping model training due to keyboard interrupt')
+        
+    num_params = model.count_params()
+    e.log(f'finished training model with {num_params} parameters')
+        
     return history.history
 
 

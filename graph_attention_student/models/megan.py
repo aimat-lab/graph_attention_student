@@ -1175,7 +1175,7 @@ class Megan2(Megan):
                     outs_class = shifted_sigmoid(
                         outs_approx,
                         shift=self.importance_multiplier,
-                        multiplier=1
+                        multiplier=0.5,
                     ) * tf.cast(out_true, tf.float32)
                     exp_loss = self.compiled_classification_loss(out_true, outs_class)
 

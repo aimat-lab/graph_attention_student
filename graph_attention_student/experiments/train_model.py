@@ -58,12 +58,12 @@ DATASET_TYPE: str = 'regression'
 #       This list determines the layer structure of the message passing part of the network. 
 #       There will be one layer for each element in this list, the integer list value determines 
 #       the number of hidden units of that layer.
-CONV_UNITS: t.List[int] = [32, 32, 32]
+CONV_UNITS: t.List[int] = [8, 8, 8]
 # :param DENSE_UNITS:
 #       This list determines the layer structure of the fully connected prediction MLP.
 #       There will be one layer for each element in this list, the integer list value determines
 #       the number of hidden units of that layer.
-DENSE_UNITS: t.List[int] = [16, 1]
+DENSE_UNITS: t.List[int] = [8, 1]
 
 # == TRAINING PARAMETERS ==
 # These parameters configure the training process itself. So things like the epochs to train 
@@ -74,7 +74,7 @@ DENSE_UNITS: t.List[int] = [16, 1]
 LEARNING_RATE: float = 1e-4
 # :param EPOCHS:
 #       The number of epochs to train the network for
-EPOCHS: int = 100
+EPOCHS: int = 150
 # :param BATCH_SIZE:
 #       The number of elements to constitute one update step of the network
 BATCH_SIZE: int = 16

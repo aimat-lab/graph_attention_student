@@ -4,6 +4,7 @@ This is the BASE experiment that implements the
 import os
 import sys
 import pathlib
+import json
 import random
 import typing as t
 from collections import Counter
@@ -11,6 +12,7 @@ from collections import Counter
 import tensorflow as tf
 import tensorflow.keras as ks
 import numpy as np
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 from sklearn.metrics import r2_score
 from sklearn.metrics import mean_squared_error
@@ -33,6 +35,8 @@ from graph_attention_student.models.megan import Megan
 from graph_attention_student.training import NoLoss
 from graph_attention_student.visualization import plot_regression_fit
 from graph_attention_student.visualization import plot_regression_value_distribution
+
+mpl.use('Agg')
 
 # == DATASET PARAMETERS ==
 # These parameters define the dataset that is to be used for the experiment as well as properties of
@@ -325,6 +329,15 @@ def experiment(e: Experiment):
             e.log(f'using {len(train_indices)} training elements and {len(test_indices)} test elements')
             e[f'train_indices/{rep}'] = train_indices
             e[f'test_indices/{rep}'] = test_indices
+            
+            # 20.11.23
+            # We'll also export the test indices for the current repetition directly as a json file so that we may easily 
+            # access and reuse them later on
+            e.log('saving the test_indices as a json file...')
+            indices_path = os.path.join(e.path, f'{rep}_test_indices.json')
+            with open(indices_path, mode='w') as file:
+                content = json.dumps(test_indices)
+                file.write(content)
 
             num_examples = min(NUM_EXAMPLES, len(test_indices)) - len(EXAMPLE_INDICES)
             example_indices = EXAMPLE_INDICES + list(random.sample(test_indices, k=num_examples))
@@ -392,6 +405,15 @@ def experiment(e: Experiment):
                 )
                 for target_index in range(e.NUM_TARGETS):
                     ax = rows[0][target_index]
+                    
+                    values_true = out_true[:, target_index]
+                    values_pred = out_pred[:, target_index]
+                    # We want to add the numerical evaluation metrics as the title of the plot
+                    r2_value = r2_score(values_true, values_pred)
+                    mae_value = mean_absolute_error(values_true, values_pred)
+                    ax.set_title(f'target {target_index}\n'
+                                 f'R2: {r2_value:.3f} - MAE: {mae_value:.3f}')
+                    
                     plot_regression_fit(
                         values_true=out_true[:, target_index],
                         values_pred=out_pred[:, target_index],
