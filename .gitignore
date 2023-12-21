@@ -5,5 +5,7 @@ dist/*
 __pycache__/*
 venv/*
 results/*
+graph_attention_student/__pycache__/*
 graph_attention_student/experiments/results/*
+tests/__pycache__/*
 tests/artifacts/*
