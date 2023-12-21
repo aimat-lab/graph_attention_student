@@ -54,12 +54,22 @@ DATASET_TYPE: str = 'regression'
 #       This needs to be the number of targets which are part of this dataset aka the number of outputs
 #       that will be produced by the model.
 NUM_TARGETS: int = 1
-# :param USE_DATASET_SPLIT: 
+# :param TEST_INDICES_PATH:
+#       Optionally, this parameter may specify the absolute string path to a JSON file which contains a list of 
+#       integer indices. These indices will then be used as the test indices for the experiment. In this case,
+#       the rest of the indices will be used as the training indices.
+TEST_INDICES_PATH: t.Optional[str] = None
+# :param USE_DATASET_SPLIT:
+#       Alternatively, 
 #       This variable controls if and which existing dataset split to use from the dataset. A visual graph dataset 
 #       may contain multiple canonical data splits which are numbered with integer indices. Setting this variable 
 #       to such an integer value will select the corresponding split. This value can be set to None, in which case 
 #       a new random split will be created for each run of the experiment.
 USE_DATASET_SPLIT: t.Optional[int] = None
+# :param NUM_TEST:
+#       This defines the integer number of elements to be randomly sampled to make up the test set of the 
+#       experiment. The rest of the elements will be used as the train set.
+NUM_TEST: int = 1000
 # :param TRAIN_RATIO:
 #       The relative ratio of the dataset that will be used during model training
 TRAIN_RATIO: float = 0.8
@@ -105,6 +115,10 @@ MODEL_NAME: str = 'MOCK'
 # == TRAINING PARAMETERS ==
 # These parameters control the training process of the models
 
+# :param RANDOM_SEED:
+#       This is an integer that determines the behavior of randomized processes in the experiment to make those 
+#       semi-deterministic.
+RANDOM_SEED: int = 42
 # :param REPETITIONS:
 #       The number of indepedent repetitions of the training to perform to average the results over at the end
 REPETITIONS: int = 1
@@ -156,6 +170,12 @@ def experiment(e: Experiment):
 
     if e.__TESTING__:
         e.EPOCHS = 2
+        
+    # 21.12.23
+    # Setting the random seed so that all the random behaviors in this experiment have a replicable 
+    # semi-deterministic behavior.
+    e.log(f'setting the random seed: {e.RANDOM_SEED}')
+    random.seed(e.RANDOM_SEED)
 
     vgd_name = os.path.basename(VISUAL_GRAPH_DATASET_PATH)
     e.log(f'Starting to train model on vgd "{vgd_name}"')
@@ -309,26 +329,62 @@ def experiment(e: Experiment):
 
         with tf.device(DEVICE):
 
-            e.log(f'using split from the dataest: {e.USE_DATASET_SPLIT}')
-            if e.USE_DATASET_SPLIT is not None:
+            e.log(f'determining the dataset train-test split...')
+                       
+            if e.TEST_INDICES_PATH is not None:
+                e.log(f'using external test indices @ {e.TEST_INDICES_PATH}')
+                with open(e.TEST_INDICES_PATH, mode='r') as file:
+                    content = file.read()
+                    test_indices = json.loads(content)
+                
+            elif e.USE_DATASET_SPLIT is not None:
                 e.log(f'creating train test split from dataset...')
-                train_indices = [index for index, data in index_data_map.items()
-                                 if USE_DATASET_SPLIT in data['metadata']['train_indices']]
+                e.log(f'using split from the dataest: {e.USE_DATASET_SPLIT}')
+                # A dataset itself has the option to contain one or more *canonical* train test splits. This is 
+                # realized as the metadata in every element of the dataset containing a "test_indices" list and 
+                # in this list there are multiple "split indices". If this list contains the index of a certain 
+                # split then it is a test element for that split.
                 test_indices = [index for index, data in index_data_map.items()
                                 if USE_DATASET_SPLIT in data['metadata']['test_indices']]
 
             else:
                 e.log(f'creating random train test split...')
-                train_indices = random.sample(dataset_indices, k=int(TRAIN_RATIO * dataset_length))
-                train_indices_set = set(train_indices)
-                test_indices_set =dataset_indices_set.difference(train_indices_set)
-                test_indices = list(test_indices_set)
+                test_indices = random.sample(dataset_indices, k=e.NUM_TEST)
 
-            test_indices_set = set(test_indices) | set(EXAMPLE_INDICES)
-            test_indices = list(test_indices_set)
+            # In any case, the train indices are all the rest that is left from the elements when we exclude the 
+            # test indices - chosen previously by whatever method
+            train_indices = list(set(dataset_indices).difference(set(test_indices)))
+            
             e.log(f'using {len(train_indices)} training elements and {len(test_indices)} test elements')
             e[f'train_indices/{rep}'] = train_indices
             e[f'test_indices/{rep}'] = test_indices
+            
+            # :hook filter_indices:
+            #       This hook is being called right after the train test split was created for a specific 
+            #       experiment repetition. This hook receives as parameters the train indices list, the 
+            #       test indices list and the repetition index. The hook function is supposed to return 
+            #       a tuple (train_indices, test_indices) consisting of the modified index lists.
+            train_indices, test_indices = e.apply_hook(
+                'filter_indices',
+                train_indices=train_indices,
+                test_indices=test_indices,
+                rep=rep,
+                default=(train_indices, test_indices)
+            )
+            
+            # 21.12.23
+            # We also want to export the training and testing indices directly into their own JSON files so that we can 
+            # immediately verify them and also we might need those exported files later on as the input to another experiment 
+            # which is supposed to operate on the same indices.
+            train_indices_path = os.path.join(e.path, f'train_indices__{rep}.json')
+            with open(train_indices_path, mode='w') as file:
+                content = json.dumps(train_indices)
+                file.write(content)
+                
+            test_indices_path = os.path.join(e.path, f'test_indices__{rep}.json')
+            with open(test_indices_path, mode='w') as file:
+                content = json.dumps(test_indices)
+                file.write(content)
             
             # 20.11.23
             # We'll also export the test indices for the current repetition directly as a json file so that we may easily 
