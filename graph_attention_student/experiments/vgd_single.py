@@ -365,8 +365,10 @@ def experiment(e: Experiment):
                 y_test=y_test,
             )
             e[f'history/{rep}'] = history
-            e[f'epochs/{rep}'] = list(range(EPOCHS))
-
+            num_epochs = len(history['loss'])
+            e[f'epochs/{rep}'] = num_epochs
+            e.log(f'finished model training after {num_epochs} epochs')
+                
             # -- EVALUATING THE MODEL --
             e.log('evaluating test set...')
             out_pred, ni_pred, ei_pred = e.apply_hook(

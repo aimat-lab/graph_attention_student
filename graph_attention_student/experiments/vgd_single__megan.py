@@ -166,14 +166,15 @@ def fit_model(e, model, x_train, y_train, x_test, y_test):
             validation_data=(x_test, y_test),
             validation_freq=1,
         )
+        history = history.history
     except KeyboardInterrupt:
-        history = {}
+        history = {'loss': []}
         e.log('stopping model training due to keyboard interrupt')
         
     num_params = model.count_params()
     e.log(f'finished training model with {num_params} parameters')
         
-    return history.history
+    return history
 
 
 @experiment.hook('query_model')
