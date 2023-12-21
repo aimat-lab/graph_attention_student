@@ -7,5 +7,6 @@ venv/*
 results/*
 graph_attention_student/__pycache__/*
 graph_attention_student/experiments/results/*
+graph_attention_student/examples/results/*
 tests/__pycache__/*
 tests/artifacts/*
