@@ -122,7 +122,8 @@ experiment = Experiment.extend(
 @experiment.hook('create_model', default=False)
 def create_model(e):
     
-    e.log('constructing model MEGAN2')
+    e.log(f'constructing model "Megan2"...')
+    e.log(f' * final dropout: {e.FINAL_DROPOUT}')
     model = Megan2(
         units=e.UNITS,
         dropout_rate=e.DROPOUT_RATE,

@@ -200,13 +200,23 @@ class Megan(ks.models.Model):
         self.final_acts = ['kgcnn>leaky_relu' for _ in self.final_units]
         self.final_acts[-1] = 'linear'
         self.final_layers = []
-        for u, act in zip(self.final_units, self.final_acts):
+        
+        self.final_dropouts = [0.0 for _ in self.final_units]
+        self.final_dropouts[-2] = final_dropout_rate
+        self.dropout_layers = []
+        
+        for u, act, rate in zip(self.final_units, self.final_acts, self.final_dropouts):
             lay = DenseEmbedding(
                 units=u,
                 activation=act,
                 use_bias=True,
             )
             self.final_layers.append(lay)
+            
+            # 21.12.23
+            # These are the dropout layers that we will be using for the monte carlo dropout uncertainty prediction
+            lay_dropout = DropoutEmbedding(rate=rate)
+            self.dropout_layers.append(lay_dropout)
             
         self.lay_pool_out = PoolingNodes(pooling_method='sum')
             
@@ -418,8 +428,9 @@ class Megan(ks.models.Model):
         
         # Appyling all the layers of the final prediction MLP
         output = graph_embeddings
-        for lay in self.final_layers:
+        for lay, lay_dropout in zip(self.final_layers, self.dropout_layers):
             output = lay(output)
+            output = lay_dropout(output, training=training)
             
         output = self.lay_final_activation(output)
             
@@ -600,6 +611,54 @@ class Megan(ks.models.Model):
         return samples, mask
     
     # ~ IMPLEMENTS "PredictGraphsMixin"
+    
+    def predict_graphs_monte_carlo(self, 
+                                   graphs: t.List[tv.GraphDict],
+                                   num_repetitions: int,
+                                   batch_size: int = 10_000,
+                                   ) -> t.List[t.Any]:
+        """
+        Given a list of graphs, this method performs a prediction of the given ``graphs`` using the 
+        monte carlo dropout method. The method will query the model ``num_repetitions`` times in *training* mode, 
+        meaning that the dropout layers will be applied. The method will return a tuple (out_mean, out_std) where 
+        out_mean is a numpy array containing the mean output predictions and out_std an array containing the 
+        standard deviation for each of those outputs.
+        
+        **NOTE** Unlike the predict_graphs method, this method will NOT return the model explanations but only 
+        the primary model target predictions.
+        
+        :param graphs: A list of GraphDict instances representing the elements for which the model predictions 
+            should be calculated
+        :param num_repetitions: The integer number of times to query the model to then infere the mean and 
+            standard devation from. A higher number should provide a more robust result but also requires a 
+            higher runtime.
+        :param batch_size: The number of elements the model should be queried with at once.
+        
+        :returns: (out_mean, out_std).
+            out_mean shape (num_graphs, num_outputs)
+            out_std shape (num_graphs, num_outputs)
+        """
+        out_mean = []
+        out_std = []
+        
+        for graphs_batch in Batched(graphs, batch_size=batch_size):
+            x = tensors_from_graphs(graphs_batch)
+            
+            outs = []
+            for _ in range(num_repetitions):
+                out, _, _ = self(x, training=True)
+                outs.append(out)
+                
+            outs = np.stack(outs, axis=0)
+            out_mean.append(np.mean(outs, axis=0))
+            out_std.append(np.std(outs, axis=0))
+            
+        # out_mean: (num_graphs, num_outputs)
+        out_mean = np.concatenate(out_mean, axis=0)
+        # out_std: (num_graphs, num_outputs)
+        out_std = np.concatenate(out_std, axis=0)
+        
+        return out_mean, out_std
     
     def predict_graphs(self,
                        graphs: t.List[tv.GraphDict],
@@ -980,8 +1039,9 @@ class Megan2(Megan):
         
         # Appyling all the layers of the final prediction MLP
         output = graph_embeddings
-        for lay in self.final_layers:
+        for lay, lay_dropout in zip(self.final_layers, self.dropout_layers):
             output = lay(output)
+            output = lay_dropout(output, training=training)
             
         output = self.lay_final_activation(output)
             

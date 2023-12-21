@@ -16,7 +16,7 @@ from graph_attention_student.util import normalize_importances_fidelity
 
 from .util import ASSETS_PATH, ARTIFACTS_PATH
 
-mpl.use('TkAgg')
+mpl.use('Agg')
 
 
 def test_normalize_importances_fidelity():

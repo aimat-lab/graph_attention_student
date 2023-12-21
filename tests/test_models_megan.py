@@ -1,5 +1,6 @@
 import os
 import tempfile
+import pytest
 
 import tensorflow as tf
 import tensorflow.keras as ks
@@ -156,3 +157,41 @@ def test_megan2_basically_works():
         model_loaded = load_model(path)
         assert isinstance(model_loaded, Megan2)
         assert not np.isclose(model_loaded.var_bias.numpy(), 0).all()
+        
+        
+@pytest.mark.parametrize('num_targets,num_channels,num_reps', [
+    (1, 2, 10),
+])
+def test_megan_predict_graphs_monte_carlo(num_targets, num_channels, num_reps):
+    
+    # we need to load the mock dataset for the testing
+    _, index_data_map = load_visual_graph_dataset(MOCK_PATH)
+    num_elements = len(index_data_map)
+    
+    # We need to set up the minimal model as well
+    model = Megan2(
+        units=[32, 32, 32],
+        final_units=[32, num_targets],
+        final_activation='linear',
+        importance_channels=num_channels,
+        # We want to enable all the additional loss computations to test if they work
+        importance_factor=1.0,
+        final_dropout_rate=0.2,
+    )
+    
+    # 
+    graphs = [data['metadata']['graph'] for data in index_data_map.values()]
+    out_mean, out_std = model.predict_graphs_monte_carlo(
+        graphs=graphs,
+        num_repetitions=num_reps,
+    )
+    print('out_mean shape', out_mean.shape)
+    print('out_std shape', out_std.shape)
+    
+    assert isinstance(out_mean, np.ndarray)
+    assert out_mean.shape == (num_elements, num_targets)
+    
+    assert isinstance(out_std, np.ndarray)
+    assert out_std.shape == (num_elements, num_targets)
+    assert np.mean(out_std) > 1e-6
+    print('mean std', np.mean(out_std))

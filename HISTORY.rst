@@ -143,3 +143,14 @@ described changes to the MLP structure so as to not give the model the chance to
 - Added the option to return the pooled graph embeddings for a MEGAN model instead of the final prediction and also 
   added the method ``embedd_graphs`` which does this for a list of graph dicts.
 - Added the TADF dataset training sub-experiment modules
+
+0.13.0 - 21.12.2023
+-------------------
+
+- Quality of life improvements to the "vgd_single.py" base experiment. For example it is not possible to inject 
+  an external list of integer indices to act as the test indices for the experiment. It is also possible to load 
+  the dataset from the remote file share.
+- Changed the base Megan model to now also use dropout layers in the final prediction MLP
+- Added the method "predict_graphs_monte_carlo" to the Megan models which can be used to create an uncertainty 
+  estimation for the model based on the monte-carlo dropout method.
+  

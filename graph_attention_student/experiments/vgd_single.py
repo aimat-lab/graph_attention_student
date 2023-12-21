@@ -1,5 +1,15 @@
 """
-This is the BASE experiment that implements the 
+This is the BASE experiment that implements the training of a single model on the training set. 
+
+**CHANGELOG**
+
+21.12.23 - (1) modified the way that datasets can be input to the experiment. Alternatively 
+to an absolute string path on the local system, it can now also be a valid name for the a dataset 
+on the remote file share provider. (2) Added a way to insert external test indices to be used in 
+the experiment by optionally providing the path to a JSON file containing integer dataset indices.
+(3) Added a new hook "filter_indices" which is called after the train test split is obtained and 
+which provides the option to modify the train or test index lists before they are used for the 
+model training process.
 """
 import os
 import sys
@@ -23,6 +33,8 @@ from sklearn.metrics import roc_auc_score
 from pycomex.functional.experiment import Experiment
 from pycomex.utils import folder_path, file_namespace
 from visual_graph_datasets.data import load_visual_graph_dataset
+from visual_graph_datasets.config import Config
+from visual_graph_datasets.web import ensure_dataset
 from visual_graph_datasets.visualization.importances import create_importances_pdf
 from kgcnn.data.utils import ragged_tensor_from_nested_numpy
 
@@ -45,6 +57,8 @@ mpl.use('Agg')
 # :param VISUAL_GRAPH_DATASET_PATH:
 #       This is the string path to the visual graph dataset folder which will be loaded to train the model.
 #       Make sure to adapt this parameter to an existing folder path on your system.
+#       Alternatively this may also be a valid string identifier that uniquely identifies one of the datasets 
+#       stored on the default remote file share server.
 VISUAL_GRAPH_DATASET_PATH: str = os.path.expanduser('/media/ssd/.visual_graph_datasets/datasets/rb_dual_motifs')
 # :param DATASET_TYPE:
 #       A string which identifies the type of the dataset to be processed here, which at the moment can
@@ -177,13 +191,30 @@ def experiment(e: Experiment):
     e.log(f'setting the random seed: {e.RANDOM_SEED}')
     random.seed(e.RANDOM_SEED)
 
+    # -- DATASET LOADING --
+    # In this section we are loading the dataset itself. The dataset is in a special format called "visual_graph_dataset".
+    # This special dataset format directly contains the full graph dictionary representation including the node and edge 
+    # feature vectors as well as canonical visualizations of every graph element in the form of a PNG image.
+    
     vgd_name = os.path.basename(VISUAL_GRAPH_DATASET_PATH)
     e.log(f'Starting to train model on vgd "{vgd_name}"')
 
-    # -- DATASET LOADING --
+    if os.path.exists(e.VISUAL_GRAPH_DATASET_PATH):
+        e.log(f'the dataset is provided as a path @ {e.VISUAL_GRAPH_DATASET_PATH}')
+        dataset_path = e.VISUAL_GRAPH_DATASET_PATH
+    
+    # 21.12.23
+    # If the dataset is not provided as a valid path on the local system we are going to try and interpret it as the name 
+    # of a dataset on the remote file share location.
+    else:
+        e.log(f'the dataset is not a valid local path, attempting to fetch from file share...')
+        config = Config()
+        config.load()
+        dataset_path = ensure_dataset(e.VISUAL_GRAPH_DATASET_PATH, config)        
 
+    e.log('loading the dataset...')
     metadata_map, index_data_map = load_visual_graph_dataset(
-        VISUAL_GRAPH_DATASET_PATH,
+        dataset_path,
         logger=e.logger,
         log_step=LOG_STEP_EVAL,
         metadata_contains_index=True
