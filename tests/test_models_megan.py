@@ -179,14 +179,17 @@ def test_megan_predict_graphs_monte_carlo(num_targets, num_channels, num_reps):
         final_dropout_rate=0.2,
     )
     
-    # 
     graphs = [data['metadata']['graph'] for data in index_data_map.values()]
-    out_mean, out_std = model.predict_graphs_monte_carlo(
+    outs_raw, out_mean, out_std = model.predict_graphs_monte_carlo(
         graphs=graphs,
         num_repetitions=num_reps,
     )
+    print('outs_raw shape', outs_raw.shape)
     print('out_mean shape', out_mean.shape)
     print('out_std shape', out_std.shape)
+    
+    assert isinstance(outs_raw, np.ndarray)
+    assert outs_raw.shape == (num_reps, num_elements, num_targets)
     
     assert isinstance(out_mean, np.ndarray)
     assert out_mean.shape == (num_elements, num_targets)

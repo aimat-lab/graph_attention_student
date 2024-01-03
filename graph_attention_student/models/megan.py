@@ -627,6 +627,17 @@ class Megan(ks.models.Model):
         **NOTE** Unlike the predict_graphs method, this method will NOT return the model explanations but only 
         the primary model target predictions.
         
+        **PSEUDOCODE EXAMPLE**
+        
+        ..code-block:: python
+
+            num_reps = 10
+            
+            outs_raw, out_mean, out_std = model.predict_graphs_monto_carlo(
+                graphs=graphs,
+                num_repetitions=num_reps,
+            )
+        
         :param graphs: A list of GraphDict instances representing the elements for which the model predictions 
             should be calculated
         :param num_repetitions: The integer number of times to query the model to then infere the mean and 
@@ -634,10 +645,12 @@ class Megan(ks.models.Model):
             higher runtime.
         :param batch_size: The number of elements the model should be queried with at once.
         
-        :returns: (out_mean, out_std).
+        :returns: (outs_raw, out_mean, out_std).
+            outs_raw shape (num_repetitions, num_graphs, num_outputs)
             out_mean shape (num_graphs, num_outputs)
             out_std shape (num_graphs, num_outputs)
         """
+        outs_raw = []
         out_mean = []
         out_std = []
         
@@ -649,16 +662,25 @@ class Megan(ks.models.Model):
                 out, _, _ = self(x, training=True)
                 outs.append(out)
                 
+            # (num_repetitions, num_graphs, num_outputs)
             outs = np.stack(outs, axis=0)
+            outs_raw.append(outs)
+            
             out_mean.append(np.mean(outs, axis=0))
             out_std.append(np.std(outs, axis=0))
             
+        
+        # outs_raw: (num_repetitions, num_graphs, num_outputs)
+        outs_raw = np.concatenate(outs_raw, axis=1)
         # out_mean: (num_graphs, num_outputs)
         out_mean = np.concatenate(out_mean, axis=0)
         # out_std: (num_graphs, num_outputs)
         out_std = np.concatenate(out_std, axis=0)
         
-        return out_mean, out_std
+        return outs_raw, out_mean, out_std
+    
+        # out, _, _ = predict_graphs(graphs)
+        # out_raw, out_mean, out_std = predict_graphs_monto_carlo(graphs, num_repetitions=5)
     
     def predict_graphs(self,
                        graphs: t.List[tv.GraphDict],
