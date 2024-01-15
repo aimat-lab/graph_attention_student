@@ -23,6 +23,7 @@ from visual_graph_datasets.config import Config
 
 from graph_attention_student.data import tensors_from_graphs
 from graph_attention_student.models.baseline import GCNModel
+from graph_attention_student.models.baseline import GATv2Model
 from graph_attention_student.models import load_model
 
 PATH: str = pathlib.Path(__file__).parent.absolute()
@@ -44,7 +45,7 @@ TEST_INDICES_PATH: t.Optional[str] = os.path.join(PATH, 'assets', 'test_indices_
 # :param NUM_TEST:
 #       Only used if no test indices are explictly given. In that case the test set is randomly 
 #       chosen as this given number of elements.
-NUM_TEST: int = 9000
+NUM_TEST: int = 1000
 # :param DATASET_TYPE:
 #       Either "regression" or "classification" which determimes how the model functions and how 
 #       the results are evaluated.
@@ -58,12 +59,12 @@ DATASET_TYPE: str = 'regression'
 #       This list determines the layer structure of the message passing part of the network. 
 #       There will be one layer for each element in this list, the integer list value determines 
 #       the number of hidden units of that layer.
-CONV_UNITS: t.List[int] = [32, 32, 32]
+CONV_UNITS: t.List[int] = [64, 64, 64]
 # :param DENSE_UNITS:
 #       This list determines the layer structure of the fully connected prediction MLP.
 #       There will be one layer for each element in this list, the integer list value determines
 #       the number of hidden units of that layer.
-DENSE_UNITS: t.List[int] = [16, 1]
+DENSE_UNITS: t.List[int] = [64, 1]
 
 # == TRAINING PARAMETERS ==
 # These parameters configure the training process itself. So things like the epochs to train 
@@ -71,13 +72,13 @@ DENSE_UNITS: t.List[int] = [16, 1]
 
 # :param LEARNING_RATE:
 #       The learning rate to be used for the ADAM optimizer during the training.
-LEARNING_RATE: float = 1e-4
+LEARNING_RATE: float = 1e-3
 # :param EPOCHS:
 #       The number of epochs to train the network for
 EPOCHS: int = 100
 # :param BATCH_SIZE:
 #       The number of elements to constitute one update step of the network
-BATCH_SIZE: int = 32
+BATCH_SIZE: int = 100
 
 
 __DEBUG__ = True
