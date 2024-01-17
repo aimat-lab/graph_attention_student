@@ -13,6 +13,47 @@ from graph_attention_student.torch.data import data_list_from_graphs
 
 
 class AbstractGraphModel(pl.LightningModule):
+    """
+    This is the abstract base class for implementing a graph property prediction model.
+    
+    **PREDICT GRAPHS**
+    
+    This abstract base class implements the method "predict_graphs" which is a convenience wrapper around the 
+    function of the model. The method simply receives a list of B graphs in the GraphDict format and returns 
+    a numpy array with the shape (B, O) where O is the number of model outputs, that assigns the models predictions 
+    to each of the given input graphs in the same order.
+
+    This function is implemented agnostic of the actual network implementation - so long as that implementation 
+    conforms to the interface of the "forward" function that is defined by this abstract base class and which will
+    be explained in the next section.
+    
+    **ARBITRARY FORWARD RETURNS**
+    
+    This abstract base class enforces a certain interface for the forward, which dictates that the forward method 
+    receives a pytorch_geometric ``Data`` instance as input and returns a *dictionary* object. The keys of this 
+    dictionary should be some string identifier and the values are supposed to be torch tensor objects that are the 
+    result of the models forward pass. The one entry that this dict HAS TO contain is "graph_output" which is supposed 
+    to be the (B * V, O). The entry with this key will be necessary to compute the main prediction loss.
+    
+    In addition to that, the returned dict may contain arbitrary additional tensors that may want to be returned as 
+    side results of the prediction process, such as the intermediate graph embedding representations or explanation 
+    masks.
+    
+    When adding additional tensors to be returned as part of the dictionary, the following naming scheme has to be used:
+    - starting with the prefix "graph" for tensors of the shape (B, ...)
+    - starting with the prefix "node" for tensors of the shape (B * V, ...)
+    - starting with the prefix "edge" for tensors of the shape (B * E, ...)
+    
+    The class also implements the method "forward_graphs" which is a convenience method that can be used to obtain the 
+    various model outputs for a set of graphs given as a list of GraphDict instances. The method takes a list of graph 
+    dicts as an input and returns a list of corresponding output dicts. Each output dict will contain numpy arrays 
+    for that particular graph with all attributes that conform to the previously described naming scheme!
+    
+    B - batch dimensions, number of graphs
+    V - number of nodes
+    E - number of edges
+    O - output dimension, number of outputs that the network generates for each graph
+    """
     
     # :attr BATCH_SIZE: 
     #       This is the default batch size that is being used in all the methods for the model INFERENCE
@@ -106,25 +147,6 @@ class AbstractGraphModel(pl.LightningModule):
         
         predictions = [result['graph_output'] for result in results]
         return np.stack(predictions, axis=0)
-    
-    def explain_graphs(self,
-                       graphs: t.List[tv.GraphDict],
-                       batch_size: int = BATCH_SIZE
-                       ) -> t.Tuple[t.List[np.ndarray], t.List[np.ndarray]]:
-        
-        loader = self._loader_from_graphs(graphs, batch_size)
-        
-        node_importance_list = []
-        edge_importance_list = []
-        for batch in loader:
-            
-            info: dict = self(batch)
-            
-            assert 'ni' in info, 'The network output does not contain "ni" information!'
-            assert 'ei' in info, 'The network output does not contain "ei" information!'
-            
-            node_importances = info['ni'].numpy()
-            edge_importances = info['ei'].numpy()
     
     def _loader_from_graphs(self,
                             graphs: t.List[tv.GraphDict], 

@@ -9,6 +9,7 @@ import pytorch_lightning as pl
 import numpy as np
 from torch_geometric.nn import GATv2Conv
 from torch_geometric.nn.aggr import SumAggregation
+from torch_geometric.nn.aggr import MeanAggregation
 from torch_geometric.data import Data
 
 from graph_attention_student.torch.model import AbstractGraphModel
@@ -17,17 +18,8 @@ from graph_attention_student.torch.layers import GraphAttentionLayer
 
 
 class Megan(AbstractGraphModel):
-    
-    # :attr IMPORTANCE_MODES:
-    #       This attribute defines the possible values for the "importance_mode" parameter of the model
-    #       that parameter determines how the explanation co-training procedure is realized during the 
-    #       models training_step.
-    #       For None, the explanation co-training is disabled completely.
-    IMPORTANCE_MODES = [None, 'regression', 'classification']
-    
     """
-    
-    **NOMENCLATURE**
+    **SHAPE DOCUMENTATION**
     
     In the context of this class, the following abbreviations are used:
     
@@ -39,7 +31,40 @@ class Megan(AbstractGraphModel):
     - M: The dimensionality of the edge feature vector
     - K: The number of importance channels
     
+    :param node_dim: the integer number of features of the input node features vectors
+    :param edge_dim: the integer number of features of the input edge feature vectors
+    :param units: A list of integers, where each entry defines one layer in the attention-based graph
+        encoder part of the network. The integer number defines the number of hidden units.
+    :param importance_mode: A string identifier which defines what kind of task to be solved w.r.t 
+        the model's explanation masks.
+    :param importance_factor: A float factor that is multiplied with the explanation co-training loss
+    :param num_channels: The integer number of explanation channels. For a regression task this has 
+        to be ==2, for a classification task this has to equal to the number of possible classes.
+    :param importance_units: A list of integers, where each entry defines one layer in the dense network 
+        that predicts the node attention mask from the node embedding vector. The integer number 
+        defines the number of hidden units.
+    :param projection_units: A list of integers, where each entry defines one layer in the dense 
+        networks that project the graph embedding into the graph projection. The integer number 
+        defines the number of hidden units. The last integer in this list will determine the 
+        dimensionality of the graph embeddings for each channel. Every explanation channel, will 
+        have it's own projection network.
+    :param sparsity_factor: A float factor that is multiplied with the sparsity regularization loss.
+        The higher this factor the more the explanations will be promoted to be sparse (less nodes 
+        being highlighted as important)
+    :param final_units: The 
     """
+    
+    # :attr IMPORTANCE_MODES:
+    #       This attribute defines the possible values for the "importance_mode" parameter of the model
+    #       that parameter determines how the explanation co-training procedure is realized during the 
+    #       models training_step.
+    #       For None, the explanation co-training is disabled completely.
+    IMPORTANCE_MODES = [None, 'regression', 'classification']
+    # :attr PREDICTION_MODES:
+    #       This attribute defines the possible values for the "prediction_mode" parameter of the model
+    #       that determines whether the model is supposed to solve a regression or a classification task
+    PREDICTION_MODES = ['regression', 'classification']
+    
     def __init__(self,
                  # encoder-related
                  node_dim: int = 3,
@@ -62,11 +87,20 @@ class Megan(AbstractGraphModel):
                  ):
         pl.LightningModule.__init__(self)
         
+        # The last integer value in the list of final_units determines the output dimension of the network aka how 
+        # many graph properties the network will predict at the same time.
+        self.out_dim = final_units[-1]
+        
         # ~ validating the parameters
         # There are some parameters whose values we want to validate before starting to construct the 
         # the instance, because choosing the incorrect values for some parameters will lead to uninformative errors 
         # down the line.
-        assert importance_mode in self.IMPORTANCE_MODES, f'importance_mode has to be value from {self.IMPORTANCE_MODES}'
+        assert importance_mode in self.IMPORTANCE_MODES, f'importance_mode has to be one of {self.IMPORTANCE_MODES}'
+        assert prediction_mode in self.PREDICTION_MODES, f'prediction_mode has to be one of {self.PREDICTION_MODES}'
+        if prediction_mode == 'regression':
+            assert num_channels == 2, 'for regression explanations, num_channels must be 2 (negative & positive)!'
+        if prediction_mode == 'classification':
+            assert num_channels == self.out_dim, 'for classification explanations, num_channels must be number of outputs!'
         
         self.node_dim = node_dim
         self.edge_dim = edge_dim
@@ -86,7 +120,11 @@ class Megan(AbstractGraphModel):
         
         self.learning_rate = learning_rate
 
-        # We need to update this dict here so that we can update it later.
+        # The "hparams" attribute that a pl.LightningModule has anyways. This dict is used to store the hyper 
+        # parameter configuration of the module so that it can be serialized and saved when creating a persistent 
+        # model checkpoint file. When later loading that checkpoint file, these hyperparameters will then be used 
+        # as the parameters of the constructor to re-construct the model object instance. So the string key names 
+        # in this dict have to match the names of the constructor parameters.
         self.hparams.update({
             'node_dim':                 node_dim,
             'edge_dim':                 edge_dim,
@@ -94,14 +132,21 @@ class Megan(AbstractGraphModel):
             'importance_units':         importance_units,
             'projection_units':         projection_units,
             'final_units':              final_units,  
+            'num_channels':             num_channels,
             'prediction_mode':          prediction_mode,
         })
 
-        # ~ Graph Message passing layers
+        # ~ Graph encoder layers
+        # The following section sets up all the layers for the graph encoder part of the network. This part 
+        # consists of multiple multi-head attention layers that at the end produce the final node embedding 
+        # representation
         
         self.encoder_layers = nn.ModuleList()
         prev_features = node_dim
         for num_features in units:
+            # Each layer in the encoder is a multi-head attention layer, where the number of parallel heads is 
+            # also defined as the number of explanation "channels". The idea is that each of these channels captures 
+            # explanations according to their pre-defined behavior.
             lay = MultiHeadAttention([
                 GraphAttentionLayer(
                     in_dim=prev_features,
@@ -109,17 +154,22 @@ class Megan(AbstractGraphModel):
                     edge_dim=edge_dim,
                 )
                 for _ in range(num_channels)
-            ])
+            ], aggregation='mean')
             prev_features = num_features
             self.encoder_layers.append(lay)
             
         # The last number of units in the graph encoder part determines the embedding dimension
         self.embedding_dim = prev_features
             
-        self.lay_pool = SumAggregation()
+        # At the end of the graph encoder, the node embeddings for all the nodes are aggregated into one final 
+        # graph embedding vector by doing an attention-weighted sum.
+        self.lay_pool = MeanAggregation()
         self.lay_pool_importance = SumAggregation()
             
-        # ~ Importance Attention Layers
+        # ~ Importance/Attention Layers
+        # The attention values for the final attention-weighted aggregation of the nodes is calculated from 
+        # the node embeddings using an MLP. The layers of which are set up in the following section
+        
         self.importance_layers = nn.ModuleList()
         prev_features = self.embedding_dim
         for num_features in importance_units:
@@ -136,6 +186,11 @@ class Megan(AbstractGraphModel):
             in_features=prev_features,
             out_features=num_channels,
         ))
+        
+        # ~ Graph embedding projection
+        # After the graph embeddigns were created as an attention-weighted sum of the node embeddings, 
+        # that graph representation is additionally subjected to a projection MLP. The important 
+        # part in this 
         
         self.channel_projection_layers = nn.ModuleList()
         for k in range(num_channels):
@@ -283,6 +338,9 @@ class Megan(AbstractGraphModel):
         
         batch_size = np.max(data.batch.cpu().numpy()) + 1
         
+        # Conforming to the AbstractGraphModel, the "forward" method that is being invoked here 
+        # returns a dictionary structure, whose values are torch tensor object that are somehow 
+        # produced by the forward pass of the model.
         info: dict = self(data)
         
         # out_pred: (B, O)
@@ -290,9 +348,11 @@ class Megan(AbstractGraphModel):
         # out_pred: (B, O)
         out_true = data.y.view(out_pred.shape)
         
+        # In the classification case the model outputs the classification LOGITS and it has to 
+        # stay like that, but for the loss calculation we need the class proabilities which is 
+        # why we apply the softmax function here.
         if self.prediction_mode == 'classification':
             out_pred = F.softmax(out_pred, dim=-1)
-            out_true = torch.argmax(out_true, dim=-1)
         
         # ~ prediction loss
         loss_pred = self.loss_pred(out_pred, out_true)
@@ -304,6 +364,9 @@ class Megan(AbstractGraphModel):
         )
         
         # ~ explanaition co-training
+        # The "training_explanation" method will calculate the loss for the explanation co-training 
+        # procedure, IF the explanation is enabled (importance_mode != None), otherwise it will 
+        # return a constant loss of 0.0
         
         loss_expl = self.training_explanation(
             data=data,
@@ -319,12 +382,15 @@ class Megan(AbstractGraphModel):
         
         # ~ explanation regularization
         
+        # Here we regularize the method to  
         loss_spar = (
             torch.mean(torch.abs(info['node_importance'])) +
             torch.mean(torch.abs(info['edge_importance']))
         )
         
         # ~ adding the various loss terms
+        # In this section we are simply accumulating the overall loss term as a combination of all the individual loss 
+        # terms that were previously constructed.
         
         loss = (
             # loss from the primary output predictions

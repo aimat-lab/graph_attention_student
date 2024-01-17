@@ -20,6 +20,7 @@ from visual_graph_datasets.visualization.importances import plot_edge_importance
 
 from graph_attention_student.visualization import create_embeddings_pdf
 from graph_attention_student.visualization import plot_embeddings_3d
+from graph_attention_student.visualization import plot_embeddings_2d
 from graph_attention_student.torch.data import data_from_graph
 from graph_attention_student.torch.data import data_list_from_graphs
 from graph_attention_student.torch.model import AbstractGraphModel
@@ -275,6 +276,54 @@ def evaluate_model(e: Experiment,
             colors = colormap(alphas)
 
             plot_embeddings_3d(
+                embeddings=embeddings_combined,
+                ax=ax,
+                color=colors,
+                label=channel_info['name'],
+                scatter_kwargs={'alpha': 0.2},
+            )
+            fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=colormap), ax=ax)
+            
+            fig.savefig(os.path.join(e[f'path/{rep}'], 'embeddings_density.pdf'))
+            
+        if model.embedding_dim == 2:
+            
+            # ~ channel embeddings
+            fig = plt.figure(figsize=(5, 5))
+            ax = fig.add_subplot(111)
+            ax.set_title('Graph Embeddings')
+            
+            x_range = (np.min(embeddings[:, 0, :]), np.max(embeddings[:, 0, :]))
+            y_range = (np.min(embeddings[:, 1, :]), np.max(embeddings[:, 1, :]))
+            
+            for k, channel_info in e.CHANNEL_INFOS.items():
+                
+                plot_embeddings_2d(
+                    embeddings=embeddings[:, :, k],
+                    ax=ax,
+                    color=channel_info['color'],
+                    label=channel_info['name'],
+                    scatter_kwargs={'alpha': 0.8},
+                    x_range=x_range,
+                    y_range=y_range,
+                )
+                
+            ax.legend()
+            fig.savefig(os.path.join(e[f'path/{rep}'], 'embeddings.pdf'))
+            fig.savefig(os.path.join(e[f'path/{rep}'], 'embeddings.png'))
+            plt.close(fig)
+
+            # density plot
+            fig = plt.figure(figsize=(5, 5))
+            ax = fig.add_subplot(111)
+            ax.set_title('Graph Embeddings with Local Density')
+            
+            norm = mcolors.Normalize(vmin=min_density, vmax=max_density)
+            colormap = plt.cm.RdPu
+            alphas = norm(local_density)
+            colors = colormap(alphas)
+
+            plot_embeddings_2d(
                 embeddings=embeddings_combined,
                 ax=ax,
                 color=colors,

@@ -403,7 +403,7 @@ def experiment(e: Experiment):
                 
                 fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(5, 5))
                 ax.set_title('Receiver Operating Curve')
-                fpr, tpr = roc_curve(out_true[:, 1], out_pred[:, 1])
+                fpr, tpr, _ = roc_curve(out_true[:, 1], out_pred[:, 1])
                 ax.plot(
                     fpr, tpr,
                     color='orange',
@@ -415,6 +415,8 @@ def experiment(e: Experiment):
                     zorder=-10,
                     label='random'
                 )
+                ax.set_xlabel('False Positive Rate')
+                ax.set_ylabel('True Positive Rate')
                 ax.legend()
                 fig.savefig(os.path.join(e[f'path/{rep}'], 'auc.pdf'))
                 plt.close(fig)

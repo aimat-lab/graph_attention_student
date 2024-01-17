@@ -8,15 +8,26 @@ from torch_geometric.nn.conv import GINEConv
 
 
 NAME_ACTIVATION_MAP: t.Dict[str, t.Callable] = {
-    None:       lambda: nn.Identity(),
-    'linear':   lambda: nn.Identity(),
-    'relu':     lambda: nn.ReLU(),
-    'silu':     lambda: nn.SiLU(),
+    None:       nn.Identity,
+    'linear':   nn.Identity,
+    'relu':     nn.ReLU,
+    'silu':     nn.SiLU,
 }
 
 
 class AbstractAttentionLayer(MessagePassing):
+    """
+    This is the abstract base class that can be used to create custom (MEGAN-compatible) graph attention layers.
+    The defining property of such a graph attention layer is that it uses some sort of attention mechanism during 
+    the message passing - so that the layer produces a set of attention weights for EDGE in the graph. 
+    The "forward" method of this class is therefore expected to not just return the next node feature vector, 
+    but instead to return a tuple (node_embedding, edge_attention_logits) where edge_attention_logits is a (E, 1) 
+    that contains one attention LOGIT value for each edge.
     
+    :param in_dim: the integer number of features in the input node feature vector
+    :param out_dim: the integer number of features that the output node feature vector is supposed to have
+    :param edge_dim: the integer number of features that the edge feature vector has
+    """
     def __init__(self, 
                  in_dim: int,
                  out_dim: int,
@@ -31,6 +42,9 @@ class AbstractAttentionLayer(MessagePassing):
                 **kwargs
                 ) -> t.Tuple[torch.Tensor, torch.Tensor]:
         """
+        This method has to return a tuple (node_embedding, edge_attention_logit) where node_embedding is 
+        an array of the shape (B * V, out) and edge_attention_logit is an array of shape (B * V, 1) which 
+        assigns an edge attention LOGIT value to each of the graph edges.
         """
         raise NotImplementedError('A graph attention layer must implement the "forward" method '
                                   'to return a tuple of the new node attributes and edge attentions')
@@ -38,42 +52,93 @@ class AbstractAttentionLayer(MessagePassing):
 
 class MultiHeadAttention(nn.Module):
     
+    AGGREGATION_MAP: t.Dict[str, t.Callable] = {
+        'sum':      torch.sum,
+        'mean':     torch.mean,
+        'max':      torch.amax,   
+    }
+    
+    """
+    This class can be used to join multiple implementations of the ``AbstractAttentionLayer`` interface together 
+    into a single multi-head prediction layer.
+    
+    An instance can be instantiated from a list of AbstractAttentionLayer instances which should be combined into
+    parallel prediction heads. Depending on the specific aggregation function, the individual node embeddings of 
+    these layers are aggregated into a single node embedding vector which is then returned by the forward method.
+    This obviously means that all the input and output dimensions of the individual attention layers that are 
+    given to this class have to be the same.
+    
+    Besides returning the node embedding array, the forward method returns an ``edge_attention_logit`` tensor of 
+    the shape (B * E, K) which contains the K attention LOGIT values for each edge in the graphs and where K is 
+    the number of individual attention layers used to construct the multi-head.
+    
+    B - batch dimension
+    V - number of nodes
+    E - number of edges
+    K - number of prediction heads
+    """
     def __init__(self,
-                 layers: t.List[nn.Module],
+                 layers: t.List[AbstractAttentionLayer],
                  activation: str = 'silu',
+                 aggregation: str = 'sum',
                  ):
         super().__init__()
         
+        assert aggregation in self.AGGREGATION_MAP, (
+            f'The given aggregation "{aggregation}" is not one of the valid keywords {list(self.AGGREGATION_MAP.keys())}'
+        )
+        
         self.layers = nn.ModuleList(layers)
         
+        self.activation = activation
         self.lay_act = NAME_ACTIVATION_MAP[activation]()
+        
+        self.aggregation = aggregation
+        self.aggregate = self.AGGREGATION_MAP[aggregation]
         
     def forward(self,
                 x: torch.Tensor,
                 edge_attr: torch.Tensor,
                 edge_index: torch.Tensor,
                 **kwargs,
-                ) -> torch.Tensor:
+                ) -> t.Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Given the previous node embedding tensor ``x``, the edge embedding tensor ``edge_attr`` and the 
+        tensor of edge indices ``edge_index``, this method will perform one round of attention message 
+        passing and return the tuple (node_embedding, edge_attention_logit).
         
+        ``node_embedding`` is the tensor of new node embeddings with the shape (B * V, out)
+        
+        ``edge_attention_logit`` is the tensor of shape (B * E, K) which assigns K attention logits 
+        to each edge of the graphs - where K is the number of individual attention heads.
+        
+        :param x: The previous node embedding tensor (B * E, in)
+        :param edge_attr: The edge embeddign tensor (B * E, edge)
+        :param edge_index: The tensor of edge indices (B * E, 2)
+        
+        :returns: Tuple (node_embedding, edge_attention_logit)
+        """
         # In these two lists we will store the results of the individual attention heads outputs.
         # Each head will produce the transformed node features vector and the edge attention weights.
         node_embeddings: t.List[torch.Tensor] = []
         alphas: t.List[torch.Tensor] = []
         
         for lay in self.layers:
+            # node_embedding: (B * V, out)
+            # alpha: (B * E, 1)
             node_embedding, alpha = lay(x, edge_attr, edge_index)
             node_embedding = self.lay_act(node_embedding)
             
             node_embeddings.append(node_embedding)
             alphas.append(alpha)
     
-        # node_attributes: (B * V, out, K)
-        node_embeddings = torch.cat([tens.unsqueeze(-1) for tens in node_embeddings], dim=-1)
-        # node_attributes: (B * V, out)
-        node_embeddings = torch.sum(node_embeddings, dim=-1)
-        #node_embeddings = torch.amax(node_embeddings, dim=-1)
+        # node_embeddings: (B * V, out, K)
+        node_embeddings = torch.stack(node_embeddings, dim=-1)
         
-        # alphas: (B * V, K)
+        # node_embeddings: (B * V, out)
+        node_embeddings = self.aggregate(node_embeddings, dim=-1)
+        
+        # alphas: (B * E, K)
         alphas = torch.cat(alphas, dim=-1)
     
         return node_embeddings, alphas

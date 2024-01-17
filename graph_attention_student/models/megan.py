@@ -89,6 +89,9 @@ class Megan(ks.models.Model):
     - C: Number of output values expected from the network as a whole
         - c: counter variable for the "current" output value
     - D: Number of elements in the graph embedding vector -> embedding dimension
+    
+    :param units: A list of integers, where each entry defines one layer in the attention-based graph
+        encoder part of the network. The integer number defines the number of hidden units.
     """
     
     def __init__(self,

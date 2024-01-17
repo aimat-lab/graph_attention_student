@@ -54,23 +54,41 @@ TARGET_NAMES: t.Dict[int, str] = {
 #       This list determines the layer structure of the model's graph encoder part. Each element in 
 #       this list represents one layer, where the integer value determines the number of hidden units 
 #       in that layer of the encoder network.
-UNITS: t.List[int] = [64, 64]
+UNITS: t.List[int] = [64, 64, 64]
 # :param IMPORTANCE_UNITS:
 #       This list determines the layer structure of the importance MLP which determines the node importance 
 #       weights from the node embeddings of the graph. 
 IMPORTANCE_UNITS: t.List[int] = [32, ]
+# :param CHANNEL_INFOS:
+#       This dictionary can be used to add additional information about the explanation channels that 
+#       are used in this experiment. The integer keys of the dict are the indices of the channels
+#       and the values are dictionaries that contain the information about the channel with that index.
+#       This dict has to have as many entries as there are explanation channels defined for the 
+#       model. The info dict for each channel may contain a "name" string entry for a human readable name 
+#       asssociated with that channel and a "color" entry to define a color of that channel in the 
+#       visualizations.
+CHANNEL_INFOS: dict = {
+    0: {
+        'name': 'non-mutagenic',
+        'color': 'khaki',
+    },
+    1: {
+        'name': 'mutagenic',
+        'color': 'violet',
+    }
+}
 # :param PROJECTION_LAYERS:
 #       This list determines the layer structure of the MLP's that act as the channel-specific projections.
 #       Each element in this list represents one layer where the integer value determines the number of hidden
 #       units in that layer.
-PROJECTION_UNITS: t.List[int] = [3, ]
+PROJECTION_UNITS: t.List[int] = [64, 2]
 # :param FINAL_UNITS:
 #       This list determines the layer structure of the model's final prediction MLP. Each element in 
 #       this list represents one layer, where the integer value determines the number of hidden units 
 #       in that layer of the prediction network.
 #       Note that the last value of this list determines the output shape of the entire network and 
 #       therefore has to match the number of target values given in the dataset.
-FINAL_UNITS: t.List[int] = [64, 64, 2]
+FINAL_UNITS: t.List[int] = [2]
 # :param NUM_CHANNELS:
 #       The number of explanation channels for the model.
 NUM_CHANNELS: int = 2
@@ -98,12 +116,12 @@ REGRESSION_REFERENCE: t.Optional[float] = None
 # :param EPOCHS:
 #       The integer number of epochs to train the dataset for. Each epoch means that the model is trained 
 #       once on the entire training dataset.
-EPOCHS: int = 200
+EPOCHS: int = 100
 # :param BATCH_SIZE:
 #       The batch size to use while training. This is the number of elements from the dataset that are 
 #       presented to the model at the same time to estimate the gradient direction for the stochastic gradient 
 #       descent optimization.
-BATCH_SIZE: int = 64
+BATCH_SIZE: int = 32
 # :param LEARNING_RATE:
 #       This float determines the learning rate of the optimizer.
 LEARNING_RATE: float = 1e-3
