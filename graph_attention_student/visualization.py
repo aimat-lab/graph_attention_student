@@ -2,10 +2,14 @@
 This module contains visualization utility functions.
 
 """
+import os
+import logging
+import tempfile
+import typing as t
 from collections import defaultdict
 from typing import List, Dict, Callable, Optional
-import typing as t
 
+import imageio.v2 as imageio
 import numpy as np
 import networkx as nx
 import matplotlib.pyplot as plt
@@ -13,7 +17,9 @@ import matplotlib.colors as mcolors
 import matplotlib.patches as mpatches
 from matplotlib.backends.backend_pdf import PdfPages
 from imageio.v2 import imread
+from umap import AlignedUMAP
 
+from graph_attention_student.utils import NULL_LOGGER
 from graph_attention_student.typing import GraphDict, RgbList
 
 
@@ -28,6 +34,256 @@ reds_cmap: mcolors.Colormap = mcolors.LinearSegmentedColormap.from_list(
 
 
 # == MISC. VISUALIZATIONS ==
+
+def plot_embeddings_2d(embeddings: np.ndarray,
+                       ax: plt.Axes,
+                       color: str = 'black',
+                       label: t.Optional[str] = None,
+                       x_range: t.Optional[tuple] = None,
+                       y_range: t.Optional[tuple] = None,
+                       **kwargs
+                       ) -> None:
+    if x_range is None:
+        x_range = np.min(embeddings[:, 0]), np.max(embeddings[:, 0])
+    if y_range is None:
+        y_range = np.min(embeddings[:, 1]), np.max(embeddings[:, 1])
+    
+    x_min, x_max = x_range
+    y_min, y_max = y_range
+
+    xs, ys = embeddings[:, 0], embeddings[:, 1]
+    
+    ax.scatter(
+        xs, ys,
+        c=color,
+        label=label,
+    )
+    ax.set_xlim([x_min, x_max])
+    ax.set_ylim([y_min, y_max])
+
+
+def plot_embeddings_3d(embeddings: np.ndarray,
+                       ax: plt.Axes,
+                       color: str = 'black',
+                       scatter_kwargs: dict = {},
+                       shadow_color: str = 'lightgray',
+                       shadow_alpha: float = 0.1,
+                       label: t.Optional[str] = None,
+                       x_range: t.Optional[tuple] = None,
+                       y_range: t.Optional[tuple] = None,
+                       z_range: t.Optional[tuple] = None,
+                       **kwargs
+                       ) -> None:
+    
+    if x_range is None:
+        x_range = np.min(embeddings[:, 0]), np.max(embeddings[:, 0])
+    if y_range is None:
+        y_range = np.min(embeddings[:, 1]), np.max(embeddings[:, 1])
+    if z_range is None:
+        z_range = np.min(embeddings[:, 2]), np.max(embeddings[:, 2])
+    
+    x_min, x_max = x_range
+    y_min, y_max = y_range
+    z_min, z_max = z_range
+    
+    xs, ys, zs = embeddings[:, 0], embeddings[:, 1], embeddings[:, 2],
+    
+    ax.scatter(xs, ys, z_min, c=shadow_color, zorder=-10, edgecolors='none', alpha=shadow_alpha)
+    ax.scatter(xs, y_max, zs, c=shadow_color, zorder=-10, edgecolors='none', alpha=shadow_alpha)
+    ax.scatter(x_min, ys, zs, c=shadow_color, zorder=-10, edgecolors='none', alpha=shadow_alpha)
+    
+    ax.scatter(
+        xs, ys, zs,
+        c=color,
+        **scatter_kwargs,
+        label=label,
+        zorder=0,
+        edgecolors='none',
+    )
+    ax.set_xlim([x_min, x_max])
+    ax.set_ylim([y_min, y_max])
+    ax.set_zlim([z_min, z_max])
+
+
+def create_embeddings_pdf(embeddings: np.ndarray,
+                          output_path: str,
+                          title: t.Optional[str | list] = None,
+                          colors: t.Optional[list] = None,
+                          color_map: t.Optional[mcolors.Colormap] = None,
+                          logger: logging.Logger = NULL_LOGGER,
+                          num_neighbors: int = 50,
+                          num_components: int = 2,
+                          metric: str = 'euclidean',
+                          umap_kwargs: dict = {},
+                          scatter_kwargs: dict = {},
+                          animation_path: t.Optional[str] = None,
+                          ) -> None:
+    """
+    This function can be used to visualize a series of vector embeddings as represented by the ``embeddings`` array 
+    parameter. This visualization will be done in the form of a multi page PDF file containing one plot per page and 
+    one page per plot in the series of embeddings. The pdf will be saved to the absolute string path ``output_path``.
+    
+    The main point of this function is that it will appropriately visualize a (time) series consisting of multiple 
+    different embedding arrays - therefore suitable to visualize for example the evolution of an embedding space over time.
+    The ``embeddings`` array should be of the shape (T, N, D) where T is the number of distinct (time) steps; N the number of 
+    elements in the dataset and D the embedding dimensionality.
+    
+    **DIMENSIONALITY**
+    
+    The function is able to plot 2D and 3D embeddings nativley. If the dimensionality of the embeddings is however larger 
+    then a dimensionality reduction method using AlignedUMAP mapper will be applied first to reduce the dimensionality to 
+    ``num_components`` dimensions, which can be either 2 or 3.
+    
+    :params embeddings: array of the shape (T, N, D)
+    
+    :returns: None
+    """
+    logger.info(f'creating embedding PDF for the given embeddings of shape {embeddings.shape}')
+    
+    # 1. (Optional) dimensionality reduction
+    # If the embeddings are in a high dimensional space, they can't be visualized effectively, which is why 
+    # a dimensionality reduction method is applied in this first step to transform them into a lower dimensional 
+    # space.
+    # Specifically, the dimensionality reduction method that we are using here is AlignedUMAP. It is important to 
+    # use the aligned version here because we want each time step to be somewhat comparable to the previous one!
+    
+    num_steps = embeddings.shape[0]
+    num_elements = embeddings.shape[1]
+    num_dimensions = embeddings.shape[2]
+    
+    if num_dimensions > 3:
+        logger.info(f'reducing embedding dimension {num_dimensions} -> {num_components}')
+
+        mapper = AlignedUMAP(
+            n_neighbors=num_neighbors,
+            n_components=num_components,
+            metric=metric,
+            alignment_window_size=2,
+            alignment_regularisation=1e-3,
+            min_dist=0.0,
+            repulsion_strength=100.0,
+            **umap_kwargs,
+        )
+        mapped = mapper.fit_transform(
+            [embeddings[t, :, :] for t in range(num_steps)],
+            # The AlignedUMAP needs one additional parametere besided the actual embeddings, which is this "relations" list.
+            # this is supposed to be a list of T-1 dictionaries, which each describe the relationship mapping from one 
+            # time step to the next. The values are the INTEGER INDICES of the elements in the (relatively seen) current 
+            # embeddings array and the values are the integer indices of the SAME elements within the next time step. 
+            # In this case it is very trivial since the order of the elements does not change.
+            relations=[{i:i for i in range(num_elements)} for t in range(num_steps - 1)]
+        )
+        embeddings = np.concatenate([np.expand_dims(arr, axis=0) for arr in mapped], axis=0)
+        logger.info(f' * new embeddings shape: {embeddings.shape}')
+
+    # 2. Actually plot the embeddings
+    # After the optional dimensionality reduction has been completed we can then actually plot the 
+    # embeddings.
+    
+    num_dimensions = embeddings.shape[2]
+    
+    # ~ optional title argument
+    # optionally, it is possible to pass the "title" argument to the function as well. This may be a single string - in which 
+    # case that string will be used as the title for all of the individual pages. The argument may also be a list of strings 
+    # in which case each string will be used as the plot title for the page with the same index.
+    # In any case, we construct a list of fixed format here so that we dont have to check for edge cases during the loop.
+    if isinstance(title, list):
+        assert len(title) == num_steps, 'the number of plot titles has to match the number of steps in the embeddings array!'
+        titles = title
+    elif isinstance(title, str):
+        titles = [title for _ in range(num_steps)]
+    else:
+        titles = ['' for _ in range(num_steps)]
+    
+    # ~ determine the plot bounds
+    x_min, x_max = np.min(embeddings[:, :, 0]), np.max(embeddings[:, :, 0])
+    y_min, y_max = np.min(embeddings[:, :, 1]), np.max(embeddings[:, :, 1])
+    if num_dimensions == 3:
+        z_min, z_max = np.min(embeddings[:, :, 2]), np.max(embeddings[:, :, 2])
+    
+    axs: t.List[plt.Axes] = []
+    logger.info('plotting embeddings...')
+    with PdfPages(output_path) as pdf, tempfile.TemporaryDirectory() as tmp_path:
+        
+        # In this structure we will collect the absolute string paths to the PNG images that act as the individual frames 
+        # for the potential animation. These frames will be stored in the tmp_path
+        frame_paths: t.List[str] = []
+        
+        for t in range(num_steps):
+            fig = plt.figure(figsize=(10, 10))
+            c = 'lightgray' if colors is None else colors[t]
+            
+            if num_dimensions == 2:
+                ax = fig.add_subplot(1, 1, 1)
+                ax.scatter(
+                    embeddings[t, :, 0], embeddings[t, :, 1],
+                    c=c,
+                    **scatter_kwargs,
+                )
+                ax.set_xlim([x_min, x_max])
+                ax.set_ylim([y_min, y_max])
+                
+            if num_dimensions == 3:
+                ax = fig.add_subplot(1, 1, 1, projection='3d')
+                xs, ys, zs = embeddings[t, :, 0], embeddings[t, :, 1], embeddings[t, :, 2],
+                ax.scatter(
+                    xs, ys, zs,
+                    c=c,
+                    **scatter_kwargs,
+                )
+                ax.set_xlim([x_min, x_max])
+                ax.set_ylim([y_min, y_max])
+                ax.set_zlim([z_min, z_max])
+                
+                # ax.contour(xs, ys, zs, zdir='z', offset=z_min, cmap='coolwarm')
+                ax.scatter(xs, ys, z_min, c='lightgray', zorder=-10, edgecolors=None, alpha=0.5)
+                ax.scatter(xs, y_max, zs, c='lightgray', zorder=-10, edgecolors=None, alpha=0.5)
+                ax.scatter(x_min, ys, zs, c='lightgray', zorder=-10, edgecolors=None, alpha=0.5)
+                
+            ax.set_title(titles[t])
+                
+            # It is optionally possible to provide a color map to this function as well, which will then 
+            # be used to display a color bar next to each of the plots.
+            if color_map is not None:
+                fig.colorbar(color_map, ax=ax)
+                
+            frame_path = os.path.join(tmp_path, f'frame_{t}.png')
+            frame_paths.append(frame_path)
+            fig.savefig(frame_path)
+            
+            pdf.savefig(fig)
+            plt.close(fig)
+            axs.append(ax)
+            logger.info(f' * t = {t} done')
+            
+        if animation_path is not None:
+            
+            images = [imageio.imread(path) for path in frame_paths]
+            imageio.mimsave(animation_path, images)
+
+
+def map_arrays_to_colors(arrays: t.List[np.ndarray],
+                         cmap: mcolors.Colormap = reds_cmap,
+                         ) -> t.Tuple[list, mcolors.Normalize]:
+    """
+    Maps all the values of the given list of numpy ``arrays`` into a color using the given ``cmap`` color map.
+    
+    One could argue, that a color map could directly do this anyways. The main point of this function is that 
+    all the individual arrays in the given list can be regarded as a time-series of arrays that are somewhat 
+    connected and this function will choose the scaling for the color conversion globally. That means that the 
+    same color map with the same scaling is used for all the arrays in the given list. The function also returns 
+    the Normalize object that was used for this scaling besides the actual converted color values.
+    
+    :returns: a tuple (colors, norm) where colors is the list of color lists and norm is the matplotlib Normalize 
+        instance that was used to transform the values into the normalized color range.
+    """
+    min_value = np.min([np.min(arr) for arr in arrays])
+    max_value = np.max([np.max(arr) for arr in arrays])
+    
+    norm = mcolors.Normalize(vmin=min_value, vmax=max_value)
+    colors = [cmap(norm(arr)) for arr in arrays]
+
+    return colors, norm
 
 
 def plot_regression_value_distribution(values: np.ndarray,

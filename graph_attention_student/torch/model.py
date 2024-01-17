@@ -59,6 +59,7 @@ class AbstractGraphModel(pl.LightningModule):
             for index in range(_batch_size):
                 
                 node_mask = (data.batch == index)
+                edge_mask = node_mask[data.edge_index[0]] & node_mask[data.edge_index[1]]
                 
                 result = {}
                 for key, value in info.items():
@@ -76,6 +77,10 @@ class AbstractGraphModel(pl.LightningModule):
                         
                     elif key.startswith('node'):
                         array = value[node_mask].detach().numpy()
+                        result[key] = array
+                        
+                    elif key.startswith('edge'):
+                        array = value[edge_mask].detach().numpy()
                         result[key] = array
                     
                 results.append(result)
