@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import torch.nn as nn
 import pytorch_lightning as pl
+from matplotlib.backends.backend_pdf import PdfPages
 from sklearn.metrics import r2_score
 from sklearn.metrics import mean_absolute_error
 from sklearn.metrics import mean_squared_error
@@ -24,11 +25,13 @@ from sklearn.metrics import roc_auc_score
 from sklearn.metrics import f1_score
 from sklearn.metrics import roc_curve
 from sklearn.metrics import confusion_matrix
+from sklearn.metrics import pairwise_distances
 from pycomex.functional.experiment import Experiment
 from pycomex.utils import file_namespace, folder_path
 from visual_graph_datasets.config import Config
 from visual_graph_datasets.web import ensure_dataset
 from visual_graph_datasets.data import VisualGraphDatasetReader
+from visual_graph_datasets.visualization.base import draw_image
 from torch_geometric.data import Data
 from torch_geometric.loader import DataLoader
 from lightning.pytorch.loggers import CSVLogger
@@ -70,7 +73,7 @@ USE_BOOTSTRAPPING: bool = False
 #       This integer determines how many elements to sample from the test set elements to act as 
 #       examples for the evaluation process. These examples will be visualized together with their
 #       predictions.
-NUM_EXAMPLES: int = 100
+NUM_EXAMPLES: int = 25
 # :param TARGET_NAMES:
 #       This dictionary structure can be used to define the human readable names for the various 
 #       target values that are part of the dataset. The keys of this dict have to be integer indices 
@@ -307,6 +310,10 @@ def experiment(e: Experiment):
     
         graphs_test = [index_data_map[i]['metadata']['graph'] for i in test_indices]
         
+        example_indices = e[f'example_indices/{rep}']
+        metadatas_example = [index_data_map[i]['metadata'] for i in example_indices]
+        graphs_example = [metadata['graph'] for metadata in metadatas_example]
+        
         # out_true np.ndarray: (B, O)
         out_true = np.array([graph['graph_labels'] for graph in graphs_test])
         # out_pred np.ndarray: (B, O)
@@ -447,6 +454,46 @@ def experiment(e: Experiment):
             ax.set_ylabel('Loss')
             ax.set_xlabel('Epoch')
             fig.savefig(os.path.join(e[f'path/{rep}'], 'loss.pdf'))
+            
+        # ~ visualizing examples
+        # In this section we want to visualize the graph visualizations of the example elements
+        
+        e.log('visualizing examples...')
+        infos_example = model.forward_graphs(graphs_example)
+        
+        pdf_path = os.path.join(e[f'path/{rep}'], 'example_graphs.pdf')
+        with PdfPages(pdf_path) as pdf:
+            
+            for index, metadata, info in zip(example_indices, metadatas_example, infos_example):
+                
+                graph = metadata['graph']
+                
+                fig, rows = plt.subplots(ncols=3, nrows=1, figsize=(15, 5), squeeze=False)
+                fig.suptitle(f'index: {index}')
+    
+                ax_img = rows[0][0]
+                draw_image(ax=ax_img, image_path=index_data_map[index]['image_path'])
+                for node_index, (x, y) in zip(graph['node_indices'], graph['node_positions']):
+                    ax_img.text(x, y, s=str(node_index))
+                
+                if 'node_embedding' in info:
+                    ax_node = rows[0][1]
+                    ax_node.set_title('Node Embedding Pairwise Distance')
+                    # node_embedding: (V, D)
+                    node_embedding = info['node_embedding']
+                    # node_dist: (V, V)
+                    #node_dist = np.corrcoef(node_embedding)
+                    node_dist = pairwise_distances(node_embedding, metric='euclidean')
+                    sns.heatmap(node_dist, ax=ax_node, annot=False, cmap='crest')
+
+                    ax_norm = rows[0][2]
+                    ax_norm.set_title('Node Embedding L1 Norm')
+                    # node_norm: (V, )
+                    node_norm = np.mean(np.abs(node_embedding), axis=-1)
+                    sns.barplot(node_norm, ax=ax_norm)
+
+                pdf.savefig(fig)
+                plt.close(fig)
     
     @e.hook('load_model')
     def load_model(e: Experiment,

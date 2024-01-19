@@ -1,6 +1,7 @@
 import os
 import typing as t
 
+import hdbscan
 import numpy as np
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -18,7 +19,7 @@ from visual_graph_datasets.visualization.importances import create_importances_p
 from visual_graph_datasets.visualization.importances import plot_node_importances_background
 from visual_graph_datasets.visualization.importances import plot_edge_importances_background
 
-from graph_attention_student.visualization import create_embeddings_pdf
+from graph_attention_student.visualization import generate_contrastive_colors
 from graph_attention_student.visualization import plot_embeddings_3d
 from graph_attention_student.visualization import plot_embeddings_2d
 from graph_attention_student.torch.data import data_from_graph
@@ -77,6 +78,11 @@ FINAL_UNITS: t.List[int] = [32, 1]
 #       This is the coefficient that is used to scale the explanation co-training loss during training.
 #       Roughly, the higher this value, the more the model will prioritize the explanations during training.
 IMPORTANCE_FACTOR: float = 1.0
+# :param IMPORTANCE_OFFSET:
+#       This parameter more or less controls how expansive the explanations are - how much of the graph they
+#       tend to cover. Higher values tend to lead to more expansive explanations while lower values tend to 
+#       lead to sparser explanations. Typical value range 0.5 - 1.5
+IMPORTANCE_OFFSET: float = 0.8
 # :param SPARSITY_FACTOR:
 #       This is the coefficient that is used to scale the explanation sparsity loss during training.
 #       The higher this value the more explanation sparsity (less and more discrete explanation masks)
@@ -89,6 +95,22 @@ SPARSITY_FACTOR: float = 1.0
 #       for this parameter is the average target value of the training dataset. Depending on the results for 
 #       that choice it is possible to adjust the value to adjust the explanations.
 REGRESSION_REFERENCE: t.Optional[float] = 0.0
+# :param CONTRASTIVE_FACTOR:
+#       This is the factor of the contrastive representation learning loss of the network. If this value is 0 
+#       the contrastive repr. learning is completely disabled (increases computational efficiency). The higher 
+#       this value the more the contrastive learning will influence the network during training.
+CONTRASTIVE_FACTOR: float = 1.0
+# :param CONTRASTIVE_NOISE:
+#       This float value determines the noise level that is applied when generating the positive augmentations 
+#       during the contrastive learning process.
+CONTRASTIVE_NOISE: float = 0.1
+# :param CONTRASTIVE_TAU:
+#       This float value is a hyperparameters of the de-biasing improvement of the contrastive learning loss. 
+#       This value should be chosen as roughly the inverse of the number of expected concepts. So as an example 
+#       if it is expected that each explanation consists of roughly 10 distinct concepts, this should be chosen 
+#       as 1/10 = 0.1
+CONTRASTIVE_TAU: float = 0.1
+
 
 __DEBUG__ = True
 
@@ -139,9 +161,13 @@ def train_model(e: Experiment,
             final_units=e.FINAL_UNITS,
             num_channels=e.NUM_CHANNELS,
             importance_factor=e.IMPORTANCE_FACTOR,
+            importance_offset=e.IMPORTANCE_OFFSET,
             sparsity_factor=e.SPARSITY_FACTOR,
             regression_reference=e.REGRESSION_REFERENCE,
             prediction_mode=e.DATASET_TYPE,
+            contrastive_factor=e.CONTRASTIVE_FACTOR,
+            contrastive_noise=e.CONTRASTIVE_NOISE,
+            contrastive_tau=e.CONTRASTIVE_TAU,
             learning_rate=e.LEARNING_RATE,
         )
         
@@ -223,115 +249,97 @@ def evaluate_model(e: Experiment,
         # embeddings: (N*K, D)
         embeddings_combined = np.concatenate([embeddings[:, :, k] for k in range(e.NUM_CHANNELS)], axis=0)
         # We calculate the local density using the K nearest neighbors of each embedding.
-        num_neighbors = 50
-        neighbors = NearestNeighbors(
-            n_neighbors=num_neighbors+1, 
-            algorithm='ball_tree'
-        ).fit(embeddings_combined)
-        distances, indices = neighbors.kneighbors(embeddings_combined)
-        # local_density: (N*K, )
-        local_density = np.mean(distances[:, 1:], axis=1)
-        local_density = np.max(local_density) - local_density
-        min_density = np.min(local_density)
-        max_density = np.max(local_density)
+        
+        colormap = mpl.cm.RdPu
+        num_neighbors = 100
+        
+        if model.embedding_dim == 3: 
+            plot_func = plot_embeddings_3d
+        if model.embedding_dim == 2:
+            plot_func = plot_embeddings_2d
         
         e.log('plotting the embeddings...')
+        # ~ channel embeddings
+        num_cols = 3
+        fig = plt.figure(figsize=(8 * num_cols, 8 * e.NUM_CHANNELS))
+        fig.suptitle('Graph Embeddings')
+        plot_kwargs = {}
+        
+        x_range = (np.min(embeddings[:, 0, :]), np.max(embeddings[:, 0, :]))
+        plot_kwargs['x_range'] = x_range
+        y_range = (np.min(embeddings[:, 1, :]), np.max(embeddings[:, 1, :]))
+        plot_kwargs['y_range'] = y_range
         if model.embedding_dim == 3:
-            
-            # ~ channel embeddings
-            fig = plt.figure(figsize=(5, 5))
-            ax = fig.add_subplot(111, projection='3d')
-            ax.set_title('Graph Embeddings')
-            
-            x_range = (np.min(embeddings[:, 0, :]), np.max(embeddings[:, 0, :]))
-            y_range = (np.min(embeddings[:, 1, :]), np.max(embeddings[:, 1, :]))
             z_range = (np.min(embeddings[:, 2, :]), np.max(embeddings[:, 2, :]))
+            plot_kwargs['z_range'] = z_range
+        
+        index = 1
+        for k, channel_info in e.CHANNEL_INFOS.items():
             
-            for k, channel_info in e.CHANNEL_INFOS.items():
-                
-                plot_embeddings_3d(
-                    embeddings=embeddings[:, :, k],
-                    ax=ax,
-                    color=channel_info['color'],
-                    label=channel_info['name'],
-                    scatter_kwargs={'alpha': 0.8},
-                    x_range=x_range,
-                    y_range=y_range,
-                    z_range=z_range,
-                )
-                
-            ax.legend()
-            fig.savefig(os.path.join(e[f'path/{rep}'], 'embeddings.pdf'))
-            fig.savefig(os.path.join(e[f'path/{rep}'], 'embeddings.png'))
-            plt.close(fig)
-
-            # density plot
-            fig = plt.figure(figsize=(5, 5))
-            ax = fig.add_subplot(111, projection='3d')
-            ax.set_title('Graph Embeddings with Local Density')
+            embeddings_k = embeddings[:, :, k]
             
+            ax_chan = fig.add_subplot(e.NUM_CHANNELS, num_cols, index, projection='3d')
+            index += 1
+            plot_func(
+                embeddings=embeddings[:, :, k],
+                ax=ax_chan,
+                color=channel_info['color'],
+                label=channel_info['name'],
+                scatter_kwargs={'alpha': 0.8},
+                **plot_kwargs
+            )
+            ax_chan.legend()
+            
+            ax_dens = fig.add_subplot(e.NUM_CHANNELS, num_cols, index, projection='3d')
+            index += 1
+            # We calculate the local density using the K nearest neighbors of each embedding.
+            neighbors = NearestNeighbors(
+                n_neighbors=num_neighbors+1, 
+                algorithm='ball_tree',
+            ).fit(embeddings_k)
+            distances, indices = neighbors.kneighbors(embeddings_k)
+            # local_density: (N, )
+            local_density = np.mean(distances[:, 1:], axis=1)
+            local_density = np.max(local_density) - local_density
+            min_density = np.min(local_density)
+            max_density = np.max(local_density)
             norm = mcolors.Normalize(vmin=min_density, vmax=max_density)
-            colormap = plt.cm.RdPu
             alphas = norm(local_density)
             colors = colormap(alphas)
 
-            plot_embeddings_3d(
-                embeddings=embeddings_combined,
-                ax=ax,
+            plot_func(
+                embeddings=embeddings_k,
+                ax=ax_dens,
                 color=colors,
                 label=channel_info['name'],
                 scatter_kwargs={'alpha': 0.2},
+                **plot_kwargs
             )
-            fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=colormap), ax=ax)
+            fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=colormap), ax=ax_dens, fraction=0.046, pad=0.04)
             
-            fig.savefig(os.path.join(e[f'path/{rep}'], 'embeddings_density.pdf'))
-            
-        if model.embedding_dim == 2:
-            
-            # ~ channel embeddings
-            fig = plt.figure(figsize=(5, 5))
-            ax = fig.add_subplot(111)
-            ax.set_title('Graph Embeddings')
-            
-            x_range = (np.min(embeddings[:, 0, :]), np.max(embeddings[:, 0, :]))
-            y_range = (np.min(embeddings[:, 1, :]), np.max(embeddings[:, 1, :]))
-            
-            for k, channel_info in e.CHANNEL_INFOS.items():
-                
-                plot_embeddings_2d(
-                    embeddings=embeddings[:, :, k],
-                    ax=ax,
-                    color=channel_info['color'],
-                    label=channel_info['name'],
-                    scatter_kwargs={'alpha': 0.8},
-                    x_range=x_range,
-                    y_range=y_range,
-                )
-                
-            ax.legend()
-            fig.savefig(os.path.join(e[f'path/{rep}'], 'embeddings.pdf'))
-            fig.savefig(os.path.join(e[f'path/{rep}'], 'embeddings.png'))
-            plt.close(fig)
-
-            # density plot
-            fig = plt.figure(figsize=(5, 5))
-            ax = fig.add_subplot(111)
-            ax.set_title('Graph Embeddings with Local Density')
-            
-            norm = mcolors.Normalize(vmin=min_density, vmax=max_density)
-            colormap = plt.cm.RdPu
-            alphas = norm(local_density)
-            colors = colormap(alphas)
-
-            plot_embeddings_2d(
-                embeddings=embeddings_combined,
-                ax=ax,
+            ax_clus = fig.add_subplot(e.NUM_CHANNELS, num_cols, index, projection='3d')
+            index += 1
+            clusterer = hdbscan.HDBSCAN(
+                min_samples=25,
+            )
+            cluster_labels = clusterer.fit_predict(embeddings_k)
+            cluster_indices = list(set(cluster_labels))
+            num_clusters = len(cluster_indices) - 1
+            color_map = generate_contrastive_colors(num_clusters)
+            colors = [(1, 1, 1, 1) if label < 0 else color_map[label] for label in cluster_labels]
+            plot_func(
+                embeddings=embeddings_k,
+                ax=ax_clus,
                 color=colors,
                 label=channel_info['name'],
-                scatter_kwargs={'alpha': 0.2},
+                scatter_kwargs={'alpha': 0.8},
+                **plot_kwargs
             )
-            fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=colormap), ax=ax)
             
-            fig.savefig(os.path.join(e[f'path/{rep}'], 'embeddings_density.pdf'))
+            e.log(f' * channel {k} - num elements {len(embeddings_k)} - num clusters: {len(cluster_indices)} ')
+            
+        fig.savefig(os.path.join(e[f'path/{rep}'], 'embeddings.pdf'))
+        fig.savefig(os.path.join(e[f'path/{rep}'], 'embeddings.png'))
+        plt.close(fig)
 
 experiment.run_if_main()

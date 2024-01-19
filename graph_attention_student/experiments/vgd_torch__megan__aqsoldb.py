@@ -53,23 +53,23 @@ TARGET_NAMES: t.Dict[int, str] = {
 #       This list determines the layer structure of the model's graph encoder part. Each element in 
 #       this list represents one layer, where the integer value determines the number of hidden units 
 #       in that layer of the encoder network.
-UNITS: t.List[int] = [64, 64, 64, 64, 64]
+UNITS: t.List[int] = [64, 64, 64]
 # :param IMPORTANCE_UNITS:
 #       This list determines the layer structure of the importance MLP which determines the node importance 
 #       weights from the node embeddings of the graph. 
-IMPORTANCE_UNITS: t.List[int] = [32, ]
+IMPORTANCE_UNITS: t.List[int] = [ ]
 # :param PROJECTION_LAYERS:
 #       This list determines the layer structure of the MLP's that act as the channel-specific projections.
 #       Each element in this list represents one layer where the integer value determines the number of hidden
 #       units in that layer.
-PROJECTION_UNITS: t.List[int] = [3,]
+PROJECTION_UNITS: t.List[int] = [64, 64, 3]
 # :param FINAL_UNITS:
 #       This list determines the layer structure of the model's final prediction MLP. Each element in 
 #       this list represents one layer, where the integer value determines the number of hidden units 
 #       in that layer of the prediction network.
 #       Note that the last value of this list determines the output shape of the entire network and 
 #       therefore has to match the number of target values given in the dataset.
-FINAL_UNITS: t.List[int] = [32, 32, 1]
+FINAL_UNITS: t.List[int] = [32, 1]
 # :param NUM_CHANNELS:
 #       The number of explanation channels for the model.
 NUM_CHANNELS: int = 2
@@ -77,6 +77,11 @@ NUM_CHANNELS: int = 2
 #       This is the coefficient that is used to scale the explanation co-training loss during training.
 #       Roughly, the higher this value, the more the model will prioritize the explanations during training.
 IMPORTANCE_FACTOR: float = 1.0
+# :param IMPORTANCE_OFFSET:
+#       This parameter more or less controls how expansive the explanations are - how much of the graph they
+#       tend to cover. Higher values tend to lead to more expansive explanations while lower values tend to 
+#       lead to sparser explanations. Typical value range 0.5 - 1.5
+IMPORTANCE_OFFSET: float = 0.4
 # :param SPARSITY_FACTOR:
 #       This is the coefficient that is used to scale the explanation sparsity loss during training.
 #       The higher this value the more explanation sparsity (less and more discrete explanation masks)
@@ -88,10 +93,25 @@ SPARSITY_FACTOR: float = 1.0
 #       negative / positive in regard to the negative and the positive explanation channel. A good first choice 
 #       for this parameter is the average target value of the training dataset. Depending on the results for 
 #       that choice it is possible to adjust the value to adjust the explanations.
-REGRESSION_REFERENCE: t.Optional[float] = -2.0
+REGRESSION_REFERENCE: t.Optional[float] = -3.0
+# :param CONTRASTIVE_FACTOR:
+#       This is the factor of the contrastive representation learning loss of the network. If this value is 0 
+#       the contrastive repr. learning is completely disabled (increases computational efficiency). The higher 
+#       this value the more the contrastive learning will influence the network during training.
+CONTRASTIVE_FACTOR: float = 1.0
+# :param CONTRASTIVE_NOISE:
+#       This float value determines the noise level that is applied when generating the positive augmentations 
+#       during the contrastive learning process.
+CONTRASTIVE_NOISE: float = 0.1
+# :param CONTRASTIVE_TAU:
+#       This float value is a hyperparameters of the de-biasing improvement of the contrastive learning loss. 
+#       This value should be chosen as roughly the inverse of the number of expected concepts. So as an example 
+#       if it is expected that each explanation consists of roughly 10 distinct concepts, this should be chosen 
+#       as 1/10 = 0.1
+CONTRASTIVE_TAU: float = 0.1
 
-
-EPOCHS: int = 50
+EPOCHS: int = 200
+BATCH_SIZE: int = 128
 
 __DEBUG__ = True
 __TESTING__ = False

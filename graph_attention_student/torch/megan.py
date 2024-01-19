@@ -10,11 +10,13 @@ import numpy as np
 from torch_geometric.nn import GATv2Conv
 from torch_geometric.nn.aggr import SumAggregation
 from torch_geometric.nn.aggr import MeanAggregation
+from torch_geometric.nn.aggr import MaxAggregation
 from torch_geometric.data import Data
 
 from graph_attention_student.torch.model import AbstractGraphModel
 from graph_attention_student.torch.layers import MultiHeadAttention
 from graph_attention_student.torch.layers import GraphAttentionLayer
+from graph_attention_student.torch.layers import AttentiveFpLayer
 
 
 class Megan(AbstractGraphModel):
@@ -43,6 +45,10 @@ class Megan(AbstractGraphModel):
     :param importance_units: A list of integers, where each entry defines one layer in the dense network 
         that predicts the node attention mask from the node embedding vector. The integer number 
         defines the number of hidden units.
+    :param importance_offset: A float integer that influences the behavior of the explanation co-training
+        procedure. In an approximative sense, this parameter influences how much of the graph will be 
+        covered by the explanations. Lower values tend to produce more focused explanations, while higher 
+        values may result in more expansive explanations.
     :param projection_units: A list of integers, where each entry defines one layer in the dense 
         networks that project the graph embedding into the graph projection. The integer number 
         defines the number of hidden units. The last integer in this list will determine the 
@@ -51,7 +57,16 @@ class Megan(AbstractGraphModel):
     :param sparsity_factor: A float factor that is multiplied with the sparsity regularization loss.
         The higher this factor the more the explanations will be promoted to be sparse (less nodes 
         being highlighted as important)
-    :param final_units: The 
+    :param final_units: A list of integers, where each entry defines one layer in the final prediction 
+        MLP of the network. Each integer entry defines the hidden layers size of the corresponding layer.
+        The last value in this list determines the output shape of the entire network and therefore has 
+        to match the number of target values in the dataset.
+    :param prediction_mode: A string identifier that determines what kind of task the network should 
+        be used for - regression or classification. This determines the loss function that will be used 
+        for the training of the prediction output.
+    :param use_bias: A boolean flag of whether to use bias terms in the networks.
+    :param learning_rate: A float value which determines the learning rate during the gradient descent 
+        optimization of the network.
     """
     
     # :attr IMPORTANCE_MODES:
@@ -76,8 +91,15 @@ class Megan(AbstractGraphModel):
                  num_channels: int = 2,
                  importance_mode: t.Optional[str] = None,
                  importance_factor: float = 0.0,
+                 importance_offset: float = 0.8,
                  regression_reference: float = 0.0,
                  sparsity_factor: float = 0.0,
+                 # contrastive representation related
+                 contrastive_factor: float = 0.0,
+                 contrastive_noise: float = 0.1,
+                 contrastive_temp: float = 1.0,
+                 contrastive_beta: float = 1.0,
+                 contrastive_tau: float = 0.1,
                  # prediction-related
                  final_units: t.List[int] = [16, 1],
                  prediction_mode: str = 'regression',
@@ -112,8 +134,15 @@ class Megan(AbstractGraphModel):
         self.importance_mode = importance_mode
         self.num_channels = num_channels
         self.importance_factor = importance_factor
+        self.importance_offset = importance_offset
         self.regression_reference = regression_reference
         self.sparsity_factor = sparsity_factor
+        
+        self.contrastive_factor = contrastive_factor
+        self.contrastive_noise = contrastive_noise
+        self.contrastive_temp = contrastive_temp
+        self.contrastive_beta = contrastive_beta
+        self.contrastive_tau = contrastive_tau
         
         self.prediction_mode = prediction_mode
         self.final_untis = final_units
@@ -130,6 +159,7 @@ class Megan(AbstractGraphModel):
             'edge_dim':                 edge_dim,
             'units':                    units,
             'importance_units':         importance_units,
+            'importance_offset':        importance_offset,
             'projection_units':         projection_units,
             'final_units':              final_units,  
             'num_channels':             num_channels,
@@ -141,12 +171,26 @@ class Megan(AbstractGraphModel):
         # consists of multiple multi-head attention layers that at the end produce the final node embedding 
         # representation
         
+        # This layer will be applied to node input representations to embedd them into a higher dimensional 
+        # space before passing that node embedding vector to the graph encoder layer for the actual message 
+        # passing.
+        self.lay_embedd = nn.Linear(
+            in_features=node_dim,
+            out_features=units[0]
+        )
+        
         self.encoder_layers = nn.ModuleList()
-        prev_features = node_dim
-        for num_features in units:
+        prev_features = units[0]
+        # These are the activations that will be used on the result of the muli-head encoding. The important 
+        # thing here is that we use a linear / identity activation for the very last layer since we dont want 
+        # to restrict the expressiveness of the values which will ultimately become the graph embedding.
+        activations = ['relu' for _ in units]
+        activations[-1] = 'linear'
+        for num_features, act in zip(units, activations):
             # Each layer in the encoder is a multi-head attention layer, where the number of parallel heads is 
             # also defined as the number of explanation "channels". The idea is that each of these channels captures 
             # explanations according to their pre-defined behavior.
+            
             lay = MultiHeadAttention([
                 GraphAttentionLayer(
                     in_dim=prev_features,
@@ -154,7 +198,16 @@ class Megan(AbstractGraphModel):
                     edge_dim=edge_dim,
                 )
                 for _ in range(num_channels)
-            ], aggregation='mean')
+            ], activation=act)
+            # lay = MultiHeadAttention([
+            #     AttentiveFpLayer(
+            #         in_dim=prev_features,
+            #         out_dim=num_features,
+            #         edge_dim=edge_dim,
+            #     )
+            #     for _ in range(num_channels)
+            # ])
+            
             prev_features = num_features
             self.encoder_layers.append(lay)
             
@@ -163,7 +216,8 @@ class Megan(AbstractGraphModel):
             
         # At the end of the graph encoder, the node embeddings for all the nodes are aggregated into one final 
         # graph embedding vector by doing an attention-weighted sum.
-        self.lay_pool = MeanAggregation()
+        self.lay_pool = SumAggregation()
+        self.lay_pool_edge = MaxAggregation()
         self.lay_pool_importance = SumAggregation()
             
         # ~ Importance/Attention Layers
@@ -222,21 +276,21 @@ class Megan(AbstractGraphModel):
             prev_features = num_features
             self.dense_layers.append(lay)
             
-        self.lay_act = nn.SiLU()
+        self.lay_act = nn.ReLU()
         
         self.lay_act_final = nn.Identity()
         if self.prediction_mode == 'regression':
             self.loss_pred = nn.MSELoss()
             
         elif self.prediction_mode == 'classification':
-            self.loss_pred = nn.CrossEntropyLoss(label_smoothing=0.1)
+            self.loss_pred = nn.CrossEntropyLoss(label_smoothing=0.0)
             
-    def forward(self, data: Data):
+    def forward(self, data: Data, node_mask=None):
     
         node_input, edge_input, edge_index = data.x, data.edge_attr, data.edge_index
         
         # node_embedding: (B * V, N_0)
-        node_embedding = node_input
+        node_embedding = self.lay_embedd(node_input)
         
         node_embeddings = []
         
@@ -265,15 +319,17 @@ class Megan(AbstractGraphModel):
         # node_embeddings = torch.stack(node_embeddings, axis=-1)
         # node_embedding = torch.amax(node_embeddings, axis=-1)
             
-        edge_importance = torch.cat([alpha.unsqueeze(-1) for alpha in alphas], dim=-1)
+        # edge_importance: (B * E, K, L)
+        edge_importance = torch.stack(alphas, dim=-1)
         # edge_importance: (B * E, K)
         edge_importance = torch.sum(edge_importance, dim=-1)
+        #edge_importance = torch.amin(edge_importance, dim=-1)
         edge_importance = F.sigmoid(edge_importance)
         
         # edge_importance_pooled: (B * V, K)
         edge_importance_pooled = 0.5 * (
-            self.lay_pool(edge_importance, edge_index[0]) + 
-            self.lay_pool(edge_importance, edge_index[1])   
+            self.lay_pool_edge(edge_importance, edge_index[0]) + 
+            self.lay_pool_edge(edge_importance, edge_index[1])   
         )
             
         # ~ importance masks / explanations
@@ -286,7 +342,11 @@ class Megan(AbstractGraphModel):
         node_importance = self.importance_layers[-1](node_importance)
         node_importance = torch.sigmoid(node_importance)
         
-        node_importance = node_importance * edge_importance_pooled
+        #node_importance = node_importance * edge_importance_pooled
+        node_importance = edge_importance_pooled
+        
+        if node_mask is not None:
+            node_importance = node_importance * node_mask
             
         # node_embedding: (B * V, D)
         # node_embedding_channels: (B * V, K, D)
@@ -309,7 +369,9 @@ class Megan(AbstractGraphModel):
             
                 graph_embedding_ = layers[-1](graph_embedding_)
                 
-            graph_embedding_ = F.tanh(graph_embedding_)
+            #graph_embedding_ = F.tanh(graph_embedding_)
+            #graph_embedding_ = F.sigmoid(graph_embedding_)
+            graph_embedding_ = F.normalize(graph_embedding_)
             graph_embedding_channels.append(graph_embedding_)
             
         # graph_embedding: (B, D, K)
@@ -317,6 +379,7 @@ class Megan(AbstractGraphModel):
         
         # output: (B, D * K)
         output = torch.cat(graph_embedding_channels, dim=-1)
+        # output = torch.sum(graph_embedding, dim=-1)
         
         for lay in self.dense_layers[:-1]:
             output = lay(output)    
@@ -347,6 +410,8 @@ class Megan(AbstractGraphModel):
         out_pred = info['graph_output']
         # out_pred: (B, O)
         out_true = data.y.view(out_pred.shape)
+        # graph_embedding: (B, D)
+        graph_embedding = info['graph_embedding']
         
         # In the classification case the model outputs the classification LOGITS and it has to 
         # stay like that, but for the loss calculation we need the class proabilities which is 
@@ -364,28 +429,62 @@ class Megan(AbstractGraphModel):
         )
         
         # ~ explanaition co-training
-        # The "training_explanation" method will calculate the loss for the explanation co-training 
-        # procedure, IF the explanation is enabled (importance_mode != None), otherwise it will 
-        # return a constant loss of 0.0
+        # The explanation co-training procedure will try to approximately solve the prediction task that is 
+        # given to the network purely through a sub-graph identification based on each individual channel's 
+        # explanation masks. So this procedure will promote the explanation masks to form in such a way that 
+        # they by themselves will already be maximally informative towards solving the main prediction problem 
+        # without taking the actual features into account.
         
-        loss_expl = self.training_explanation(
-            data=data,
-            info=info,
-            batch_size=batch_size,
-        )
+        loss_expl = 0.0
+        if self.importance_factor != 0:
+            # The "training_explanation" method will calculate the loss for the explanation co-training 
+            # procedure.
+            loss_expl = self.training_explanation(
+                data=data,
+                info=info,
+                batch_size=batch_size,
+            )
+        
         self.log(
             'loss_expl', loss_expl,
             prog_bar=True,
             on_epoch=True,
+            on_step=True,
             batch_size=batch_size,
         )
         
         # ~ explanation regularization
         
-        # Here we regularize the method to  
+        # Here we regularize the explanation masks to be more sparse by penalizing the L1 norm of those 
+        # explanation masks, which will lead those node/edge values to become closer to 0, which are not 
+        # absolutely needed to maintain either the prediction or the explanation performance.
         loss_spar = (
             torch.mean(torch.abs(info['node_importance'])) +
             torch.mean(torch.abs(info['edge_importance']))
+        )
+        
+        # ~ contrastive loss
+        # The contrastive loss is applied to improve the *representation learning*. More specifically we 
+        # want to learn semantic representations of the explained subgraphs. So in each channel's graph 
+        # embedding space we want to promote that similiarly structured sub-graph explanations are 
+        # grouped together in clusters.
+        
+        loss_cont = 0.0
+        if self.contrastive_factor != 0:
+            # The "training_representation" method will calculate the loss for the contrastive 
+            # representation learning of the graph embeddings.
+            loss_cont = self.training_representation(
+                data=data,
+                info=info,
+                batch_size=batch_size,
+            )
+        
+        self.log(
+            'loss_cont', loss_cont,
+            prog_bar=True,
+            on_epoch=True,
+            on_step=True,
+            batch_size=batch_size,
         )
         
         # ~ adding the various loss terms
@@ -399,9 +498,61 @@ class Megan(AbstractGraphModel):
             + self.importance_factor * loss_expl
             # loss to encourage sparsity of explanations
             + self.sparsity_factor * loss_spar
+            + self.contrastive_factor * loss_cont
         )
         
         return loss
+    
+    def training_representation(self,
+                                data: Data,
+                                info: dict,
+                                batch_size: int
+                                ) -> float:
+        
+        loss_cont = 0.0
+        
+        noise = 1 - self.contrastive_noise
+        noise_mask = torch.full_like(info['node_importance'], noise).to(self.device)
+        
+        node_mask_1 = torch.bernoulli(noise_mask).float()
+        info_1 = self(data, node_mask=node_mask_1)
+        #info_1 = info
+        
+        node_mask_2 = torch.bernoulli(noise_mask).float()
+        #node_mask_2 = ((1 - noise) * torch.rand(noise_mask.shape) + noise).to(self.device)
+        info_2 = self(data, node_mask=node_mask_2)
+        
+        mask = torch.ones((batch_size, 2 * batch_size), dtype=bool).to(self.device)
+        for i in range (batch_size):
+            mask[i, i] = 0
+            mask[i, i + batch_size] = 0
+        mask = torch.cat([mask, mask], dim=0)
+    
+        for k in range(self.num_channels):
+            
+            graph_embedding_1 = info_1['graph_embedding'][:, :, k]
+            graph_embedding_2 = info_2['graph_embedding'][:, :, k]
+            graph_embedding_all = torch.cat([graph_embedding_1, graph_embedding_2], dim=0)
+                
+            sim_neg = (graph_embedding_all.unsqueeze(0) * graph_embedding_all.unsqueeze(1)).sum(dim=-1)
+            sim_neg = torch.exp(sim_neg / self.contrastive_temp)
+            sim_neg = sim_neg.masked_select(mask).view(2 * batch_size, -1)
+            
+            sim_pos = (graph_embedding_1 * graph_embedding_2).sum(dim=-1)
+            sim_pos = torch.exp(sim_pos / self.contrastive_temp)
+            sim_pos = torch.cat([sim_pos, sim_pos], dim=0)
+            
+            N = batch_size * 2 - 2
+            imp = (self.contrastive_beta * sim_neg.log()).exp()
+            reweight_neg = (imp * sim_neg).sum(dim=-1) / imp.mean(dim=-1)
+            Neg = (-N*self.contrastive_tau*sim_pos + sim_neg.sum(dim=-1)) / (1-self.contrastive_tau)
+            Neg = torch.clamp(Neg, min=N*np.e**(-1/self.contrastive_temp))
+            Neg = sim_neg.sum(dim=-1)
+            
+            loss_cont += (1 / self.num_channels) * torch.mean(-torch.log(sim_pos / (sim_pos + Neg)))
+            #loss_cont += (1 / self.num_channels) * (10*sim_neg.mean() - sim_pos.mean())
+            
+        return loss_cont
     
     def training_explanation(self, 
                              data: Data,
@@ -410,11 +561,6 @@ class Megan(AbstractGraphModel):
                              ) -> float:
         
         loss_expl = 0.0
-        # Here we treat the default case of importance_mode being None, which signals that the explanation 
-        # co-training should be disabled completly. In that case we simply return a constant loss of 0 which 
-        # will not result in any network gradients and therefore no weight updates.
-        if self.importance_mode is None:
-            return loss_expl
         
         # ~ aggregating the explanation masks as predicted values
         
@@ -434,6 +580,7 @@ class Megan(AbstractGraphModel):
         
         if self.importance_mode == 'regression':
             
+            """
             # values_true: (B, 2)
             values_true = torch.cat([
                 torch.abs(out_true - self.regression_reference), 
@@ -450,13 +597,24 @@ class Megan(AbstractGraphModel):
             ], axis=1).float()
             
             loss_expl = torch.mean(torch.square(values_true - values_pred) * mask)
+            """
+            
+            values_true = torch.cat([
+                (out_true < self.regression_reference), 
+                (out_true > self.regression_reference),
+            ], 
+            axis=1).float()
+            # values_pred: (B, K)
+            values_pred = torch.sigmoid(3 * (pooled_importance - self.importance_offset))
+            
+            loss_expl = F.binary_cross_entropy(values_pred, values_true)
             
         elif self.importance_mode == 'classification':
             
             # values_true: (B, K)
             values_true = out_true
             # values_pred: (B, K)
-            values_pred = torch.sigmoid(3 * (pooled_importance - 0.8))
+            values_pred = torch.sigmoid(3 * (pooled_importance - self.importance_offset))
             
             loss_expl = F.binary_cross_entropy(values_pred, values_true)
                         
@@ -470,3 +628,4 @@ class Megan(AbstractGraphModel):
         """
         optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate)
         return optimizer
+    

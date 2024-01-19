@@ -32,6 +32,16 @@ reds_cmap: mcolors.Colormap = mcolors.LinearSegmentedColormap.from_list(
     ]
 )
 
+def generate_contrastive_colors(num: int) -> t.List[str]:
+    """
+    Generate a list with a given ``num`` of matplotlib color tuples which have the highest contrast 
+    
+    :returns: a list of lists where each list contains the RGB float values for a color
+    """
+    hues = np.linspace(0, 0.9, num)
+    colors = mcolors.hsv_to_rgb([[h, 0.7, 0.9] for h in hues])
+    return colors
+
 
 # == MISC. VISUALIZATIONS ==
 
@@ -41,6 +51,7 @@ def plot_embeddings_2d(embeddings: np.ndarray,
                        label: t.Optional[str] = None,
                        x_range: t.Optional[tuple] = None,
                        y_range: t.Optional[tuple] = None,
+                       size: int = 8,
                        **kwargs
                        ) -> None:
     if x_range is None:
@@ -57,6 +68,9 @@ def plot_embeddings_2d(embeddings: np.ndarray,
         xs, ys,
         c=color,
         label=label,
+        edgecolors='none',
+        s=size,
+        alpha=0.8,
     )
     ax.set_xlim([x_min, x_max])
     ax.set_ylim([y_min, y_max])
@@ -72,6 +86,7 @@ def plot_embeddings_3d(embeddings: np.ndarray,
                        x_range: t.Optional[tuple] = None,
                        y_range: t.Optional[tuple] = None,
                        z_range: t.Optional[tuple] = None,
+                       size: int = 8,
                        **kwargs
                        ) -> None:
     
@@ -88,9 +103,9 @@ def plot_embeddings_3d(embeddings: np.ndarray,
     
     xs, ys, zs = embeddings[:, 0], embeddings[:, 1], embeddings[:, 2],
     
-    ax.scatter(xs, ys, z_min, c=shadow_color, zorder=-10, edgecolors='none', alpha=shadow_alpha)
-    ax.scatter(xs, y_max, zs, c=shadow_color, zorder=-10, edgecolors='none', alpha=shadow_alpha)
-    ax.scatter(x_min, ys, zs, c=shadow_color, zorder=-10, edgecolors='none', alpha=shadow_alpha)
+    ax.scatter(xs, ys, z_min, c=shadow_color, zorder=-10, edgecolors='none', alpha=shadow_alpha, s=size)
+    ax.scatter(xs, y_max, zs, c=shadow_color, zorder=-10, edgecolors='none', alpha=shadow_alpha, s=size)
+    ax.scatter(x_min, ys, zs, c=shadow_color, zorder=-10, edgecolors='none', alpha=shadow_alpha, s=size)
     
     ax.scatter(
         xs, ys, zs,
@@ -99,6 +114,7 @@ def plot_embeddings_3d(embeddings: np.ndarray,
         label=label,
         zorder=0,
         edgecolors='none',
+        s=size,
     )
     ax.set_xlim([x_min, x_max])
     ax.set_ylim([y_min, y_max])

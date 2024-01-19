@@ -1,17 +1,21 @@
 import typing as t
 
 import torch
+from torch._tensor import Tensor
 import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.nn import MessagePassing
 from torch_geometric.nn.conv import GINEConv
+from torch_geometric.utils import softmax
 
 
 NAME_ACTIVATION_MAP: t.Dict[str, t.Callable] = {
-    None:       nn.Identity,
-    'linear':   nn.Identity,
-    'relu':     nn.ReLU,
-    'silu':     nn.SiLU,
+    None:           nn.Identity,
+    'linear':       nn.Identity,
+    'relu':         nn.ReLU,
+    'silu':         nn.SiLU,
+    'leaky_relu':   nn.LeakyReLU,
+    'tanh':         nn.Tanh,
 }
 
 
@@ -79,8 +83,8 @@ class MultiHeadAttention(nn.Module):
     """
     def __init__(self,
                  layers: t.List[AbstractAttentionLayer],
-                 activation: str = 'silu',
-                 aggregation: str = 'sum',
+                 activation: str = 'relu',
+                 aggregation: str = 'max',
                  ):
         super().__init__()
         
@@ -155,7 +159,7 @@ class GraphAttentionLayer(AbstractAttentionLayer):
             in_dim=in_dim,
             out_dim=out_dim,
             edge_dim=edge_dim,
-            aggr='add'
+            aggr='sum',
         )
         
         self.lay_linear = nn.Linear(
@@ -164,11 +168,11 @@ class GraphAttentionLayer(AbstractAttentionLayer):
         )
         
         self.lay_attention = nn.Linear(
-            in_features=(2 * out_dim) + edge_dim,
+            in_features=(2 * in_dim) + edge_dim,
             out_features=1,
         )
         
-        self.lay_act = nn.SiLU()
+        self.lay_act = nn.LeakyReLU()
         self.lay_transform = nn.Linear(
             in_features=out_dim+in_dim,
             out_features=out_dim,
@@ -189,14 +193,14 @@ class GraphAttentionLayer(AbstractAttentionLayer):
         # At first we apply a linear transformation on the input node features themselves so that they 
         # have the dimension which will later also be the output dimension.
         # node_embedding: (B * V, out)
-        node_embedding = self.lay_linear(x)
+        # node_embedding = self.lay_linear(x)
         
         self._attention = None
         self._attention_logits = None
         # node_embedding: (B * V, out)
         node_embedding = self.propagate(
             edge_index,
-            x=node_embedding, 
+            x=x, 
             edge_attr=edge_attr
         )
         
@@ -218,4 +222,74 @@ class GraphAttentionLayer(AbstractAttentionLayer):
         self._attention_logits = self.lay_attention(message)
         self._attention = F.sigmoid(self._attention_logits)
         
-        return self._attention * x_j
+        return self._attention * self.lay_linear(x_j)
+    
+    
+class AttentiveFpLayer(AbstractAttentionLayer):
+    
+    def __init__(self, 
+                 in_dim: int,
+                 out_dim: int,
+                 edge_dim: int,
+                 **kwargs):
+        super().__init__(
+            in_dim=in_dim,
+            out_dim=out_dim,
+            edge_dim=edge_dim,
+            aggr='sum',
+        )
+        
+        self.lay_linear = nn.Linear(
+            in_features=in_dim,
+            out_features=out_dim,
+        )
+        
+        self.lay_alignment = nn.Linear(
+            in_features=(2 * in_dim) + edge_dim,
+            out_features=1,
+        )
+        
+        self.lay_recurrent = nn.GRUCell(
+            input_size=out_dim,
+            hidden_size=in_dim,
+        )
+        
+        # We will use this instance property to transport the attention weights from the class' 
+        # "message" method to the "forward" method. So during the "message" method we will actually
+        # assign a tensor value to this attribute.
+        self._attention: t.Optional[torch.Tensor] = None
+        self._attention_logits: t.Optional[torch.Tensor] = None
+        
+    def forward(self,
+                x: torch.Tensor,
+                edge_attr: torch.Tensor,
+                edge_index: torch.Tensor,
+                **kwargs):
+        
+        context = self.propagate(
+            edge_index,
+            x=x,
+            edge_attr=edge_attr,
+        )
+        context = F.elu(context)
+        
+        node_embedding = self.lay_recurrent(context, x)
+        return node_embedding, self._attention_logits
+        
+    def message(self,
+                x_i, x_j,
+                edge_attr,
+                index,
+                ptr,
+                size_i,
+                ):
+        
+        # aligned: (B * E, out)
+        aligned = self.lay_alignment(torch.cat([x_i, x_j, edge_attr], dim=-1))
+        #aligned = F.leaky_relu(aligned)
+        
+        self._attention_logits = aligned
+        self._attention = F.sigmoid(self._attention_logits)
+        #self._attention = softmax(self._attention_logits, index, ptr, size_i)
+        
+        return self._attention * self.lay_linear(x_j)

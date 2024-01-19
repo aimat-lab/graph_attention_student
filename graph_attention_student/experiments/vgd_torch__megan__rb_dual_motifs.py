@@ -53,16 +53,16 @@ TARGET_NAMES: t.Dict[int, str] = {
 #       This list determines the layer structure of the model's graph encoder part. Each element in 
 #       this list represents one layer, where the integer value determines the number of hidden units 
 #       in that layer of the encoder network.
-UNITS: t.List[int] = [32, 32, 32,]
+UNITS: t.List[int] = [32, 32, 32]
 # :param IMPORTANCE_UNITS:
 #       This list determines the layer structure of the importance MLP which determines the node importance 
 #       weights from the node embeddings of the graph. 
-IMPORTANCE_UNITS: t.List[int] = [32, ]
+IMPORTANCE_UNITS: t.List[int] = [ ]
 # :param PROJECTION_LAYERS:
 #       This list determines the layer structure of the MLP's that act as the channel-specific projections.
 #       Each element in this list represents one layer where the integer value determines the number of hidden
 #       units in that layer.
-PROJECTION_UNITS: t.List[int] = [2, ]
+PROJECTION_UNITS: t.List[int] = [32, 32, 3]
 # :param FINAL_UNITS:
 #       This list determines the layer structure of the model's final prediction MLP. Each element in 
 #       this list represents one layer, where the integer value determines the number of hidden units 
@@ -89,6 +89,8 @@ SPARSITY_FACTOR: float = 1.0
 #       for this parameter is the average target value of the training dataset. Depending on the results for 
 #       that choice it is possible to adjust the value to adjust the explanations.
 REGRESSION_REFERENCE: t.Optional[float] = 0.0
+
+# LEARNING_RATE = 1e-2
 
 EPOCHS = 50
 
