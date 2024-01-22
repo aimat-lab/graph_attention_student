@@ -154,3 +154,20 @@ described changes to the MLP structure so as to not give the model the chance to
 - Added the method "predict_graphs_monte_carlo" to the Megan models which can be used to create an uncertainty 
   estimation for the model based on the monte-carlo dropout method.
   
+0.14.0 - 22.01.2024
+-------------------
+
+The MEGAN pytorch port: The self-explaining Megan graph neural network model has been ported to a pytorch version. 
+All future developments will likely be done with this pytorch version, due to pytorch's significantly higher 
+flexibility (it does not need to be compiled into a static graph like tensorflow which enables the use of arbitrary 
+python during the forward pass and the training step implementation)
+
+- Created a new subpackage ``torch`` which contains the ported model, custom layer implementations and torch-specific 
+  data processing utils.
+- Created a new set of experiment modules that use the pytorch version of the MEGAN model
+  - ``vgd_torch.py`` the base model that implements the training and evaluation of any ``AbstractGraphModel`` based model 
+    without an explenatory aspect
+  - ``vgd_torch__megan.py`` specific implementation for the MEGAN model which includes the explanation specific evaluation
+  - ``vgd_torch__megan__rb_dual_motifs.py``
+  - ``vgd_torch__megan__aqsoldb.py``
+  - ``vgd_torch__megan__mutagenicity.py``
