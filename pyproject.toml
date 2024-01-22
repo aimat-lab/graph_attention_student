@@ -29,11 +29,12 @@ exclude = [
 graph_attention_student = 'graph_attention_student.cli:cli'
 
 [tool.poetry.dependencies]
-python = ">=3.8.0,<3.11"
+python = ">=3.10.0,<3.11"
 pycomex = ">=0.9.2"
 click = ">=7.1.2"
 jinja2 = ">=3.0.3"
 matplotlib = ">=3.5.3"
+seaborn = ">=0.13.1"
 imageio = ">=2.19.0"
 cairosvg = ">=2.5.2"
 numpy = ">=1.22.0"
@@ -48,6 +49,7 @@ visual_graph_datasets = ">=0.11.0"
 vgd_counterfactuals = ">=0.1.0"
 hdbscan = ">=0.8.33"
 torch = "==2.1.2"
+torch_scatter = "==2.1.2"
 torch_geometric = "==2.4.0"
 lightning = "==2.1.3"
 
