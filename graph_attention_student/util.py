@@ -2,6 +2,7 @@
 Utility methods
 """
 import os
+import csv
 import pathlib
 import tempfile
 import logging
@@ -103,6 +104,55 @@ class PathDict:
         current_dict[current_key] = value
 
 # == GENERAL GRAPH OPERATIONS ===============================================================================
+
+def export_metadatas_csv(metadatas: t.List[dict],
+                         path: str = int,
+                         ) -> t.List[dict]:
+    """
+    Given a list of visual graph metadata dicts ``metadatas`` this function will export the basic information 
+    about those graphs to a CSV file with the given absolute string ``path``.
+    
+    :param metadatas: The list of visual graph dataset metadata dictionaries to be exported
+    :param path: The absolute string path at which to create the csv file
+    
+    :returns: Returns a list of row dictionaries, which contain the exact information that was exported to 
+        the csv file. 
+    """
+    # We dont want to export ALL the information in the metadata dict to the CSV file. That would be way 
+    # too much information, since that would include the full graph represenation as well. So in this 
+    # first step we select a few key entries from the metadata dict to then actually save to the csv
+    rows: t.List[dict] = []
+    for metadata in metadatas:
+        
+        # Some entries have to be in the metadata dict as per the definition of the visual graph dataset 
+        # format, but some values are optional and might not be there - for those we add placeholders 
+        # initially and then check for each individual entry if they exist within the dict structure.
+        row = {
+            'index':    metadata['index'],
+            'name':     None,
+            'value':    metadata['repr'],
+            'out_true': metadata['graph']['graph_labels'],
+            'out_pred': None,
+        }
+        
+        if 'name' in metadata:
+            row['name'] = metadata['name']
+        
+        if 'graph_output' in metadata['graph']:
+            row['out_pred'] = metadata['graph']['graph_output']
+
+        rows.append(row)
+
+    # Now in the next step we can export those row dicts as the actual csv file.
+    with open(path, mode='w') as file:
+        
+        writer = csv.DictWriter(file, fieldnames=['index', 'name', 'value', 'out_true', 'out_pred'])
+        writer.writeheader()
+        
+        for row in rows:
+            writer.writerow(row)
+
+    return rows
 
 
 def node_adjacency_sliding_window(node_indices: List[int],

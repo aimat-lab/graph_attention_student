@@ -69,7 +69,7 @@ IMPORTANCE_UNITS: t.List[int] = [ ]
 #       This list determines the layer structure of the MLP's that act as the channel-specific projections.
 #       Each element in this list represents one layer where the integer value determines the number of hidden
 #       units in that layer.
-PROJECTION_UNITS: t.List[int] = [512, 256, 128]
+PROJECTION_UNITS: t.List[int] = [512, 256, 64]
 # :param FINAL_UNITS:
 #       This list determines the layer structure of the model's final prediction MLP. Each element in 
 #       this list represents one layer, where the integer value determines the number of hidden units 
@@ -118,7 +118,7 @@ CONTRASTIVE_NOISE: float = 0.1
 CONTRASTIVE_TAU: float = 0.1
 
 EPOCHS: int = 100
-BATCH_SIZE: int = 16
+BATCH_SIZE: int = 32
 
 __DEBUG__ = True
 __TESTING__ = False

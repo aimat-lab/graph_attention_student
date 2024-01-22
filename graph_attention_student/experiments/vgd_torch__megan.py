@@ -37,9 +37,11 @@ from visual_graph_datasets.visualization.importances import plot_node_importance
 from visual_graph_datasets.visualization.importances import plot_edge_importances_background
 from visual_graph_datasets.visualization.base import draw_image
 
+from graph_attention_student.utils import export_metadatas_csv
 from graph_attention_student.visualization import generate_contrastive_colors
 from graph_attention_student.visualization import plot_embeddings_3d
 from graph_attention_student.visualization import plot_embeddings_2d
+from graph_attention_student.visualization import plot_leave_one_out_analysis
 from graph_attention_student.torch.data import data_from_graph
 from graph_attention_student.torch.data import data_list_from_graphs
 from graph_attention_student.torch.model import AbstractGraphModel
@@ -236,8 +238,7 @@ def evaluate_model(e: Experiment,
     out_true = np.array([graph['graph_labels'] for graph in graphs_test])
     # out_pred np.ndarray: (B, O)
     out_pred = model.predict_graphs(graphs_test)
-    
-    
+
     e.log('visualizing the example graphs...')
     example_indices: t.List[int] = e[f'example_indices/{rep}']
     graphs_example = [index_data_map[i]['metadata']['graph'] for i in example_indices]
@@ -256,6 +257,24 @@ def evaluate_model(e: Experiment,
         plot_node_importances_cb=plot_node_importances_background,
         plot_edge_importances_cb=plot_edge_importances_background,
     )
+    
+    # ~ explanation fidelity analysis
+    # Explanation fidelity is a metric that essentially tells how much a given attributional explanation mask 
+    # actually influences the behavior of the model. It is usually measured as the deviation of the model output 
+    # if the areas highlighted by the explanation are removed from the input data structure. 
+    # The fidelity of the MEGAN model is a special case because it can be calculated for every explanation 
+    # channel independently
+    
+    e.log(f'calculating explanation fidelity...')
+    
+    # leave_one_out: (B, O, K) numpy
+    leave_one_out = model.leave_one_out_deviations(graphs_test)
+    fig = plot_leave_one_out_analysis(
+        leave_one_out,
+        num_channels=e.NUM_CHANNELS,
+        num_targets=e.FINAL_UNITS[-1],
+    )
+    fig.savefig(os.path.join(e[f'path/{rep}'], 'leave_one_out.pdf'))
 
     # ~ visualizing the graph embedding space
     # Another thing we would like to do for the MEGAN model is to visualize the graph embedding space to see 

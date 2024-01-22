@@ -1,3 +1,4 @@
+import os
 import pytest
 import random
 import typing as t
@@ -7,11 +8,55 @@ import visual_graph_datasets.typing as tv
 import pytorch_lightning as pl
 from torch_geometric.loader import DataLoader
 
+from graph_attention_student.visualization import plot_leave_one_out_analysis
 from graph_attention_student.testing import get_mock_graphs
 from graph_attention_student.torch.data import data_list_from_graphs
 from graph_attention_student.torch.model import AbstractGraphModel
 from graph_attention_student.torch.megan import Megan
 
+from .util import ARTIFACTS_PATH
+
+
+@pytest.mark.parametrize('num_graphs, node_dim, edge_dim, output_dim', [
+    (100, 10, 4, 3),
+])
+def test_megan_leave_one_out_deviations(num_graphs, node_dim, edge_dim, output_dim):
+    
+    # ~ test configuration
+    num_channels = 2
+    embedding_dim = 32
+
+    graphs = get_mock_graphs(
+        num=num_graphs,
+        num_node_attributes=node_dim,
+        num_edge_attributes=edge_dim,
+    )
+    
+    data_list = data_list_from_graphs(graphs)
+    loader = DataLoader(data_list, batch_size=32, shuffle=False)
+    model = Megan(
+        node_dim=node_dim,
+        edge_dim=edge_dim,
+        units=[32, 32, embedding_dim],
+        num_channels=num_channels, # for classification co-training must num_channels==num_outputs
+        final_units=[32, output_dim],
+    )
+    assert isinstance(model, Megan)
+    assert isinstance(model, AbstractGraphModel)
+    
+    # ~ actually testing the leave_one_out_deviations method
+    
+    deviations = model.leave_one_out_deviations(graphs)
+    assert isinstance(deviations, np.ndarray)
+    assert deviations.shape == (num_graphs, output_dim, num_channels)
+
+    fig = plot_leave_one_out_analysis(
+        deviations, 
+        num_targets=output_dim, 
+        num_channels=num_channels
+    )
+    fig.savefig(os.path.join(ARTIFACTS_PATH, f'torch_megan_leave_one_out__{output_dim}_{num_channels}.pdf'))
+    
 
 @pytest.mark.parametrize('num_graphs, node_dim, edge_dim', [
     (100, 10, 4),

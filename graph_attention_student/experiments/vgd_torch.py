@@ -46,6 +46,7 @@ from torch_geometric.data import Data
 from torch_geometric.loader import DataLoader
 from lightning.pytorch.loggers import CSVLogger
 
+from graph_attention_student.utils import export_metadatas_csv
 from graph_attention_student.visualization import plot_regression_fit
 from graph_attention_student.torch.model import AbstractGraphModel
 from graph_attention_student.torch.megan import Megan
@@ -299,6 +300,24 @@ def evaluate_model(e: Experiment,
     out_true = np.array([graph['graph_labels'] for graph in graphs_test])
     # out_pred np.ndarray: (B, O)
     out_pred = model.predict_graphs(graphs_test)
+    
+    # ~ exporting the test set
+    # Here we want to export the test set predictions into an independent CSV file. This is not strictly necessary 
+    # as all the predictions will be saved in the experiment storage anyways, but having it directly in a CSV file 
+    # makes it easier to communicate / share the results.
+    e.log('exporting test set predictions as CSV...')
+    metadatas = []
+    for index, graph, out in zip(test_indices, graphs_test, out_pred):
+        metadata = index_data_map[index]['metadata']
+        metadata['graph']['graph_output'] = out
+        metadatas.append(metadata)
+
+    csv_path = os.path.join(e[f'path/{rep}'], 'test.csv')
+    export_metadatas_csv(metadatas, csv_path)
+    
+    # ~ task specific metrics
+    # In this section we generate the performance metrics and artifacts for models depending on the specific 
+    # tasks type because regression and classification tasks need be treated differently.
 
     if e.DATASET_TYPE == 'regression':
         e.log('regression task...')

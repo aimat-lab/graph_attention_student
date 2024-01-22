@@ -376,7 +376,12 @@ def plot_leave_one_out_analysis(results: dict,
 
         for target_index in range(num_targets):
             ax = rows[channel_index][target_index]
-            values = [data[target_index][channel_index] for data in results.values()]
+            
+            if isinstance(results, dict):
+                values = [data[target_index][channel_index] for data in results.values()]
+            elif isinstance(results, np.ndarray):
+                values = results[:, target_index, channel_index]
+                
             mean = np.mean(values)
             std = np.std(values)
 

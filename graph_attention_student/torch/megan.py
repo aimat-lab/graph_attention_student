@@ -378,7 +378,6 @@ class Megan(AbstractGraphModel):
             
                 graph_embedding_ = layers[-1](graph_embedding_)
             
-            graph_embedding_ = F.normalize(graph_embedding_)
             # F.normalize will apply a transformation on the embedding so that all the embedding 
             # vectors have a constant norm == 1.
             graph_embedding_ = F.normalize(graph_embedding_)
@@ -519,76 +518,142 @@ class Megan(AbstractGraphModel):
                                 info: dict,
                                 batch_size: int
                                 ) -> float:
+        """
+        This method implements the calculation of the SimCLR method for the explanation 
+        representation learning objective.
+        Given the input ``data`` representation, this method will return the corresponding loss value.
         
+        The general idea behind SimCLR is to learn a semantic representation of the input elements in an 
+        unsupervised fashion by jointly maximizing the similarity between an element and it's positive 
+        samples (==semantically similar elements) and maximizing the similarity between an element and 
+        its negative sampels (==semantically dissimilar elements). The main challange with this approach 
+        being to obtain suitable positive and negative samples without supervised knowledge.
+        
+        In this specific case, the subject of the representatation learning will be each individual 
+        explanation channel's explanation. 
+        For the negative samples, we follow the common framework 
+        of simply declaring all other samples in a given batch as the negative samples, since the 
+        probability of them being semantically dissimiliar is higher than them being similar for a 
+        moderatbly high number of expected distinct explanations.
+        For the positive samples we apply a data augmentation where all non-explained nodes are 
+        masked during the model prediction, therefore promoting the model to find a semantic 
+        representation of the explained nodes only.
+        
+        :returns: a single loss value in a torch.Tensor
+        """
         loss_cont = 0.0
         
-        node_importance = info['node_importance']
+        # ~ positive samples / data augmentation
+        # As a first step we need to construct the data augmentation to obtain the positive 
+        # samples for the constrastive term.
+        # The general idead for the data augementation is that we want to mask out all the 
+        # information that is not explained - so all the nodes that are NOT selected in 
+        # each channels explanation mask. So by maximizing the similarity between that 
+        # augemented versions embedding and the original embeddings, we promote the 
+        # formation of a representation that encodes exactly the information that is 
+        # contained within the explanation mask.
         
+        # For this we need a way to determine which nodes are actually part of the explanation
+        # and which are not - in essence we want to binarize the explanation masks. 
+        # This is done by normalizing the importance values to a 0, 1 range and then applying 
+        # a threshold.
+        
+        # node_importance: (B * V, K)
+        node_importance = info['node_importance']
+        # node_importance_norm: (B * V, K)
         max_values = torch_scatter.scatter_max(node_importance, data.batch, dim=0)[0]
         node_importance_norm = node_importance / max_values[data.batch]
+        
+        # In the SimCLR framework we need 2 augmented views in total, so here we create the binarized 
+        # feature masks but with two slightly different thresholds to capture kind of a multi-level 
+        # information about the explanation
         node_importance_bin_1 = (node_importance_norm > 0.6).float()
         node_importance_bin_2 = (node_importance_norm > 0.4).float()
         
-        noise = 1.0
-        noise_mask = torch.full_like(node_importance, noise).to(self.device)
+        # On top of the feature masking we also apply some small amount of noise to the importance 
+        # values themselves so that there is a method here.
+        node_mask_1 = torch_uniform(
+            node_importance.shape, 
+            1.0 - self.contrastive_noise, 
+            1.0 + self.contrastive_noise,
+        ).to(self.device) * node_importance_bin_1
         
-        node_mask_1 = torch.bernoulli(noise_mask).float()
-        node_mask_1 = torch_uniform(node_importance.shape, 0.95, 1.05).to(self.device)
-        data1 = data.clone()
-        # data1.x *= torch.bernoulli(torch.full(data.x.shape, noise)).to(self.device)
+        node_mask_2 = torch_uniform(
+            node_importance.shape,
+            1.0 - self.contrastive_noise,
+            1.0 + self.contrastive_noise,
+        ).to(self.device) * node_importance_bin_2
+        
+        # To now create the corresponding graph embedding vectors for the data augmentations we have
+        # to actually query the model again with those augementations as addditional arguments.
         info_1 = self(
-            data1, 
-            #node_mask=node_mask_1, 
-            node_feature_mask=node_importance_bin_1
+            data, 
+            node_mask=node_mask_1, 
+            node_feature_mask=node_importance_bin_1,
         )
-        
-        node_mask_2 = torch.bernoulli(noise_mask).float()
-        node_mask_2 = torch_uniform(node_importance.shape, 0.95, 1.05).to(self.device)
-        data2 = data.clone()
-        # data2.x *= torch.bernoulli(torch.full(data.x.shape, noise)).to(self.device)
         info_2 = self(
-            data2, 
-            #node_mask=node_mask_2, 
-            node_feature_mask=node_importance_bin_2
+            data, 
+            node_mask=node_mask_2, 
+            node_feature_mask=node_importance_bin_2,
         )
         
+        # The negative samples are realized as simply assuming that all other samples of a current batch 
+        # are the negative samples for each element. The easiest technical implementation is to calculate 
+        # a quadratic similarity matrix of all elements with all elements and then later reduce this.
+        # However, this matrix will also contain the diagonal entries of an elements similarity with itself
+        # we dont want to affect those entries which is why we construct this mask to ignore them.
+        # (0, 1, 1, ...)
+        # (1, 0, 1, ...)
         mask = torch.ones((batch_size, 2 * batch_size), dtype=bool).to(self.device)
         for i in range (batch_size):
             mask[i, i] = 0
             mask[i, i + batch_size] = 0
         mask = torch.cat([mask, mask], dim=0)
     
+        # Essentially we want each channel to develop it's own independent embedding space, so here we 
+        # iterate over all the channels and calculate the constrastive loss contribution for each channel.
         for k in range(self.num_channels):
+            
+            # NOTE: Looking at the similarity computations, one can see that these are realized as simple 
+            # vector multiplications between the embeddings. However, the graph embeddings are inherently 
+            # L2-normalized - in this special case the multiplication of two vectors is equal to their 
+            # cosine similarity!
             
             graph_embedding_k = info['graph_embedding'][:, :, k]
             graph_embedding_1 = info_1['graph_embedding'][:, :, k]
             graph_embedding_2 = info_2['graph_embedding'][:, :, k]
-            # graph_embedding_1 = info_1['graph_projection'][:, :, k]
-            # graph_embedding_2 = info_2['graph_projection'][:, :, k]
             
+            # graph_embedding_all = (2 * B, D)
             graph_embedding_all = torch.cat([graph_embedding_k, graph_embedding_k], dim=0)
             
             sim_neg = (graph_embedding_all.unsqueeze(0) * graph_embedding_all.unsqueeze(1)).sum(dim=-1)
             sim_neg_exp = torch.exp(sim_neg / self.contrastive_temp)
+            # sim_neg_exp: (2 * B, 2 * B)
             sim_neg_exp = sim_neg_exp.masked_select(mask).view(2 * batch_size, -1)
             
+            # sim_pos_1: (B, )
             sim_pos_1 = (graph_embedding_1 * graph_embedding_k).sum(dim=-1)
             sim_pos_1_exp = torch.exp(sim_pos_1 / self.contrastive_temp)
+            # sim_pos_2: (B, )
             sim_pos_2 = (graph_embedding_2 * graph_embedding_k).sum(dim=-1)
             sim_pos_2_exp = torch.exp(sim_pos_2 / self.contrastive_temp)
             sim_pos = (graph_embedding_1 * graph_embedding_2).sum(dim=-1)
             sim_pos_exp = torch.exp(sim_pos / self.contrastive_temp)
+            # sim_pos_exp: (B, 2)
             sim_pos_exp = torch.cat([
                 torch.stack([sim_pos_exp, sim_pos_1_exp], dim=-1).sum(dim=-1),
                 torch.stack([sim_pos_exp, sim_pos_2_exp], dim=-1).sum(dim=-1),
             ], dim=0)
             
+            # In this section the actual constrastive loss aka the InfoNCE loss is calculated. However, this is 
+            # not just the simple loss term that is used in SimCLR, but also uses an additional debiasing method 
+            # that was proposed in a different paper.
             N = batch_size * 2 - 2
-            imp = (self.contrastive_beta * sim_neg_exp.log()).exp()
-            reweight_neg = (imp * sim_neg_exp).sum(dim=-1) / imp.mean(dim=-1)
+            # imp = (self.contrastive_beta * sim_neg_exp.log()).exp()
+            # reweight_neg = (imp * sim_neg_exp).sum(dim=-1) / imp.mean(dim=-1)
             Neg = (-N*self.contrastive_tau*sim_pos_exp + sim_neg_exp.sum(dim=-1)) / (1-self.contrastive_tau)
             Neg = torch.clamp(Neg, min=N*np.e**(-1/self.contrastive_temp))
-            # Neg = sim_neg_exp.sum(dim=-1)
+            
             loss_cont += (1 / self.num_channels) * torch.mean(-torch.log(sim_pos_exp / (sim_pos_exp + Neg)))
             
         return loss_cont
@@ -598,6 +663,14 @@ class Megan(AbstractGraphModel):
                              info: dict,
                              batch_size: int
                              ) -> float:
+        """
+        This method implements the explanation co-training loss that guides the explanation masks to 
+        develop according to the pre-defined interpretations of the explanation channels.
+        Given the current ``data`` instance and the resulting ``info`` of the model forward pass, 
+        this method will calculate the explanation loss.
+        
+        :returns: A torch Tensor with a single loss value
+        """
         
         loss_expl = 0.0
         
@@ -619,36 +692,29 @@ class Megan(AbstractGraphModel):
         
         if self.importance_mode == 'regression':
             
-            """
-            # values_true: (B, 2)
-            values_true = torch.cat([
-                torch.abs(out_true - self.regression_reference), 
-                torch.abs(out_true - self.regression_reference),
-            ], 
-            axis=1)
-            # values_pred: (B, 2)
-            values_pred = pooled_importance
-            
-            # mask: (B, 2)
-            mask = torch.cat([
-                out_true < self.regression_reference,
-                out_true > self.regression_reference,
-            ], axis=1).float()
-            
-            loss_expl = torch.mean(torch.square(values_true - values_pred) * mask)
-            """
+            # Here we actually deviate from the original MEGAN implementation a little bit. In the original 
+            # the explanation co-training loss for regression tasks is again an MSE loss that tries to interpolate 
+            # the exact ground truth value from the pooled mask. However, it turns out that casting this into a 
+            # classification problem and using BCE loss works better (cleaner explanation masks).
+            # So here we construct the "true" labels simply as a binary decision problem of samples being either 
+            # "positive" or "negative".
             
             values_true = torch.cat([
                 (out_true < self.regression_reference), 
                 (out_true > self.regression_reference),
             ], 
             axis=1).float()
+            
             # values_pred: (B, K)
             values_pred = torch.sigmoid(3 * (pooled_importance - self.importance_offset))
             
             loss_expl = F.binary_cross_entropy(values_pred, values_true)
             
         elif self.importance_mode == 'classification':
+            
+            # The classification case is quite simple in that we want each channels pooled importances to predict 
+            # each possible class as a binary classification problem using a BCE loss instead of a multi-class 
+            # classification problem.
             
             # values_true: (B, K)
             values_true = out_true
@@ -669,13 +735,56 @@ class Megan(AbstractGraphModel):
         return optimizer
     
     def leave_one_out_deviations(self,
-                                 graphs: t.List[tv.GraphDict]
+                                 graphs: t.List[tv.GraphDict],
+                                 batch_size: int = 10_000,
                                  ) -> np.ndarray:
-        result = np.zeros((len(graphs), self.num_channels, self.out_dim))
-        loader = self._loader_from_graphs(graphs)
+        """
+        Given a list of graph dict representations ``graphs``, this method will construct the 
+        leave one out deviation data structure that contains the fidelity values for each graph 
+        in the list and each explanation channel individually.
         
+        The array returned by this method has the shape (B, O, K) where B is the number of graphs, 
+        O the output dimension of the network and K the number of explanations channels used 
+        by the network. 
+        
+        :param graphs: A list of all graph dict representations of graphs for which to calculate 
+            the deviations
+        :param batch_size: The number of graphs to query the model with at the same time.
+        
+        :returns: numpy array of shape (B, O, K)
+        """
+        result = np.zeros((len(graphs), self.out_dim, self.num_channels,))
+        loader = self._loader_from_graphs(graphs, batch_size=batch_size)
+        
+        index = 0
+        # In the first instance we need to iterate over all the batches that were consructed from the 
+        # data loader. All data instances contain the iformation of batch_size graphs in the flattened 
+        # form
         for data in loader:
             
+            # This is the actual number of graphs in the current batch. Note that this will most likely 
+            # be == batch_size, but does not have to be when there is a number < batch_size left over at 
+            # the end!
+            _batch_size = np.max(data.batch.numpy()) + 1
+            
+            # This is the baseline for the deviation computation. This is the unmodified prediction of 
+            # the model.
+            # out_pred: (_batch_size, O) numpy
+            out_pred = self(data)['graph_output'].detach().numpy()
+            
+            # Then the whole point is that we need to calculate the fidelity for each channel 
+            # independently. So for each channel we mask out that channel and then compute the updated 
+            # predictions with that mask. This difference is the leave_one_out deviation.
             for channel_index in range(self.num_channels):
-                node_mask = None
-                out_mod = self.predict_graphs(graphs)
+                node_mask = torch.ones((data.x.shape[0], self.num_channels)).to(self.device)
+                node_mask[:, channel_index] = 0.0
+                
+                # out_mod: (_batch_size, O) numpy
+                out_mod = self(data, node_mask=node_mask)['graph_output'].detach().numpy()
+                
+                for i in range(_batch_size):
+                    result[index + i, :, channel_index] = out_pred[i, :] - out_mod[i, :]
+            
+            index += _batch_size
+                    
+        return result

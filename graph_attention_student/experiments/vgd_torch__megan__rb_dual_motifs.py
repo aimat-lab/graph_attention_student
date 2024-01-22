@@ -45,7 +45,7 @@ USE_BOOTSTRAPPING: bool = False
 #       This integer determines how many elements to sample from the test set elements to act as 
 #       examples for the evaluation process. These examples will be visualized together with their
 #       predictions.
-NUM_EXAMPLES: int = 100
+NUM_EXAMPLES: int = 25
 # :param TARGET_NAMES:
 #       This dictionary structure can be used to define the human readable names for the various 
 #       target values that are part of the dataset. The keys of this dict have to be integer indices 
@@ -101,7 +101,7 @@ REGRESSION_REFERENCE: t.Optional[float] = 0.0
 
 
 EPOCHS = 50
-BATCH_SIZE = 16
+BATCH_SIZE = 32
 
 __DEBUG__ = True
 __TESTING__ = False
