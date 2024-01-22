@@ -1,3 +1,18 @@
+"""
+This experiment extends the vgd_torch base experiment for the training of a torch-based model 
+on a visual graph dataset. This experiment will train a MEGAN model specifically to not only 
+solve a prediction task but also to create explanations about that task.
+
+In this experiment, the evaluation is extended to include the megan generated explanations as 
+well. The model evaluation process will create a PDF file visualizing the megan explanations
+for all the example elements from the test set.
+Optionally if the graph embedding latent space is either 2 or 3 dimensional, it will be 
+visualized in a plot as well for each explanation channel independently.
+
+The analysis of this experiment will perform an HDBSCAN clustering on the graph embedding latent 
+space of the all the trained models and will create PDF files that will visualize some of the 
+elements in the dataset that are the closest to the cluster centroids.
+"""
 import os
 import typing as t
 
@@ -9,15 +24,18 @@ import matplotlib.colors as mcolors
 import torch
 import torch.nn as nn
 import pytorch_lightning as pl
+from matplotlib.backends.backend_pdf import PdfPages
 from pycomex.functional.experiment import Experiment
 from pycomex.utils import folder_path, file_namespace
 from sklearn.neighbors import NearestNeighbors
+from sklearn.metrics import pairwise_distances
 from torch_geometric.data import Data
 from torch_geometric.loader import DataLoader
 from lightning.pytorch.loggers import CSVLogger
 from visual_graph_datasets.visualization.importances import create_importances_pdf
 from visual_graph_datasets.visualization.importances import plot_node_importances_background
 from visual_graph_datasets.visualization.importances import plot_edge_importances_background
+from visual_graph_datasets.visualization.base import draw_image
 
 from graph_attention_student.visualization import generate_contrastive_colors
 from graph_attention_student.visualization import plot_embeddings_3d
@@ -201,7 +219,13 @@ def evaluate_model(e: Experiment,
     the performance of the trained model on the test set. The hook receives the trained model as a parameter,
     as well as the repetition index, the full index_data_map dataset and the train and test indices.
     
-     
+    Most importantly, this function will evaluate the model twords the explanations that are created by the 
+    MEGAN model. It will create a PDF file which visualizes all the explanations that are created by the 
+    model on the example graphs from the test set.
+    
+    Optionally, if the dimensionality of the latent space is either 2 or 3, the latent spaces of the 
+    individual channels will be visualized as well. These latent space visualizations will include the 
+    density and a potential hdbscan clustering.
     """
     e.log('evaluating Megan explanations...')
 
@@ -241,7 +265,7 @@ def evaluate_model(e: Experiment,
     if model.embedding_dim <= 3:
         
         e.log('embedding graphs...')
-        infos = model.forward_graphs(graphs_test)
+        infos = model.forward_graphs(graphs)
         embeddings = np.array([info['graph_embedding'] for info in infos])
         
         # For this task we dont need to differentiate between the different explanations channels, which is 
@@ -255,10 +279,12 @@ def evaluate_model(e: Experiment,
         
         if model.embedding_dim == 3: 
             plot_func = plot_embeddings_3d
+            projection = '3d'
         if model.embedding_dim == 2:
             plot_func = plot_embeddings_2d
+            projection = None
         
-        e.log('plotting the embeddings...')
+        e.log(f'plotting the embeddings with dimension {model.embedding_dim}...')
         # ~ channel embeddings
         num_cols = 3
         fig = plt.figure(figsize=(8 * num_cols, 8 * e.NUM_CHANNELS))
@@ -278,7 +304,7 @@ def evaluate_model(e: Experiment,
             
             embeddings_k = embeddings[:, :, k]
             
-            ax_chan = fig.add_subplot(e.NUM_CHANNELS, num_cols, index, projection='3d')
+            ax_chan = fig.add_subplot(e.NUM_CHANNELS, num_cols, index, projection=projection)
             index += 1
             plot_func(
                 embeddings=embeddings[:, :, k],
@@ -290,7 +316,7 @@ def evaluate_model(e: Experiment,
             )
             ax_chan.legend()
             
-            ax_dens = fig.add_subplot(e.NUM_CHANNELS, num_cols, index, projection='3d')
+            ax_dens = fig.add_subplot(e.NUM_CHANNELS, num_cols, index, projection=projection)
             index += 1
             # We calculate the local density using the K nearest neighbors of each embedding.
             neighbors = NearestNeighbors(
@@ -317,14 +343,18 @@ def evaluate_model(e: Experiment,
             )
             fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=colormap), ax=ax_dens, fraction=0.046, pad=0.04)
             
-            ax_clus = fig.add_subplot(e.NUM_CHANNELS, num_cols, index, projection='3d')
+            ax_clus = fig.add_subplot(e.NUM_CHANNELS, num_cols, index, projection=projection)
             index += 1
             clusterer = hdbscan.HDBSCAN(
-                min_samples=25,
+                min_samples=20,
             )
             cluster_labels = clusterer.fit_predict(embeddings_k)
             cluster_indices = list(set(cluster_labels))
             num_clusters = len(cluster_indices) - 1
+            e.log(f' * channel {k} - num elements {len(embeddings_k)} - num clusters: {num_clusters} ')
+            if num_clusters < 2: # catching a possible exception
+                continue
+            
             color_map = generate_contrastive_colors(num_clusters)
             colors = [(1, 1, 1, 1) if label < 0 else color_map[label] for label in cluster_labels]
             plot_func(
@@ -336,10 +366,91 @@ def evaluate_model(e: Experiment,
                 **plot_kwargs
             )
             
-            e.log(f' * channel {k} - num elements {len(embeddings_k)} - num clusters: {len(cluster_indices)} ')
-            
         fig.savefig(os.path.join(e[f'path/{rep}'], 'embeddings.pdf'))
         fig.savefig(os.path.join(e[f'path/{rep}'], 'embeddings.png'))
         plt.close(fig)
+
+
+@experiment.analysis
+def analysis(e: Experiment):
+    """
+    This analysis
+    """
+    e.log('running MEGAN specific analysis...')
+    
+    # In the analysis routine of the parent experiment, the index data map is loaded from the disk 
+    # already and stored in this experiment storage entry, so that it can be reused here.
+    index_data_map = e['_index_data_map']
+    graphs = [data['metadata']['graph'] for data in index_data_map.values()]
+    indices = np.array(list(index_data_map.keys()))
+    
+    e.log('Clustering the latent space...')
+    min_samples = 15
+    for rep in range(e.REPETITIONS):
+        
+        e.log(f'> REP {rep}')
+        test_indices = e[f'test_indices/{rep}']
+        graphs_test = [index_data_map[index]['metadata']['graph'] for index in test_indices]
+        
+        model = e[f'_model/{rep}']
+        infos = model.forward_graphs(graphs)
+        
+        for k in range(e.NUM_CHANNELS):
+            
+            # graph_embeddings_k: (B, D)
+            graph_embeddings_k = np.array([info['graph_embedding'][:, k] for info in infos])
+
+            clusterer = hdbscan.HDBSCAN(min_samples=min_samples)
+            cluster_labels = clusterer.fit_predict(graph_embeddings_k)
+            cluster_indices = list(set(cluster_labels))
+            num_clusters = len(cluster_indices) - 1
+            e.log(f' * channel {k} - num clusters: {num_clusters}')
+            
+            with PdfPages(os.path.join(e[f'path/{rep}'], f'cluster__ch{k:02d}.pdf')) as pdf:
+                
+                for cluster_index in cluster_indices:
+                    
+                    fig, rows = plt.subplots(
+                        ncols=10, 
+                        nrows=1, 
+                        figsize=(50, 5),
+                        squeeze=False,
+                    )
+                    
+                    cluster_centroid = np.mean(graph_embeddings_k[cluster_labels == cluster_index], axis=0, keepdims=True)
+                    cosine_distances = pairwise_distances(graph_embeddings_k, cluster_centroid, metric='cosine')
+                    cosine_distances = cosine_distances.flatten()
+                    closest_indices = np.argsort(cosine_distances)[:10]
+
+                    for i, j in enumerate(closest_indices):
+                        
+                        info = infos[j]
+                        index = indices[j]
+                        ax = rows[0][i]
+                        graph = index_data_map[index]['metadata']['graph']
+                        draw_image(
+                            ax=ax,
+                            image_path=index_data_map[index]['image_path']
+                        )
+                        node_importance = info['node_importance'] / np.max(info['node_importance'])
+                        edge_importance = info['edge_importance'] / np.max(info['edge_importance'])
+                        plot_node_importances_background(
+                            ax=ax,
+                            g=graph,
+                            node_positions=graph['node_positions'],
+                            node_importances=node_importance[:, k],
+                            radius=50,
+                        )
+                        plot_edge_importances_background(
+                            ax=ax,
+                            g=graph,
+                            node_positions=graph['node_positions'],
+                            edge_importances=edge_importance[:, k],
+                            thickness=10,
+                        )
+                
+                    pdf.savefig(fig)
+                    plt.close(fig)
+            
 
 experiment.run_if_main()

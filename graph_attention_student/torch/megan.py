@@ -5,14 +5,17 @@ from pytorch_lightning.utilities.types import OptimizerLRScheduler
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch_scatter
 import pytorch_lightning as pl
 import numpy as np
+import visual_graph_datasets.typing as tv
 from torch_geometric.nn import GATv2Conv
 from torch_geometric.nn.aggr import SumAggregation
 from torch_geometric.nn.aggr import MeanAggregation
 from torch_geometric.nn.aggr import MaxAggregation
 from torch_geometric.data import Data
 
+from graph_attention_student.torch.utils import torch_uniform
 from graph_attention_student.torch.model import AbstractGraphModel
 from graph_attention_student.torch.layers import MultiHeadAttention
 from graph_attention_student.torch.layers import GraphAttentionLayer
@@ -285,7 +288,11 @@ class Megan(AbstractGraphModel):
         elif self.prediction_mode == 'classification':
             self.loss_pred = nn.CrossEntropyLoss(label_smoothing=0.0)
             
-    def forward(self, data: Data, node_mask=None):
+    def forward(self, 
+                data: Data, 
+                node_mask: t.Optional[torch.Tensor] = None,
+                node_feature_mask: t.Optional[torch.Tensor] = None
+                ) -> t.Dict[str, torch.Tensor]:
     
         node_input, edge_input, edge_index = data.x, data.edge_attr, data.edge_index
         
@@ -353,11 +360,13 @@ class Megan(AbstractGraphModel):
         node_embedding_channels = node_embedding.unsqueeze(1) * node_importance.unsqueeze(2)
             
         graph_embedding_channels = []
-        #for k in range(self.num_channels):
         for k, layers in enumerate(self.channel_projection_layers):
             node_embedding_ = node_embedding
             
             node_embedding_ = node_embedding_ * node_importance[:, k].unsqueeze(-1)
+            if node_feature_mask is not None:
+                node_embedding_ *= node_feature_mask[:, k].unsqueeze(-1)
+            
             graph_embedding_ = self.lay_pool(node_embedding_, data.batch)
 
             # The layers that are referred to here are the layers that are 
@@ -368,9 +377,10 @@ class Megan(AbstractGraphModel):
                     graph_embedding_ = self.lay_act(graph_embedding_)
             
                 graph_embedding_ = layers[-1](graph_embedding_)
-                
-            #graph_embedding_ = F.tanh(graph_embedding_)
-            #graph_embedding_ = F.sigmoid(graph_embedding_)
+            
+            graph_embedding_ = F.normalize(graph_embedding_)
+            # F.normalize will apply a transformation on the embedding so that all the embedding 
+            # vectors have a constant norm == 1.
             graph_embedding_ = F.normalize(graph_embedding_)
             graph_embedding_channels.append(graph_embedding_)
             
@@ -498,6 +508,7 @@ class Megan(AbstractGraphModel):
             + self.importance_factor * loss_expl
             # loss to encourage sparsity of explanations
             + self.sparsity_factor * loss_spar
+            # contrastive loss to encourage the formation of semantic embeddings
             + self.contrastive_factor * loss_cont
         )
         
@@ -511,16 +522,35 @@ class Megan(AbstractGraphModel):
         
         loss_cont = 0.0
         
-        noise = 1 - self.contrastive_noise
-        noise_mask = torch.full_like(info['node_importance'], noise).to(self.device)
+        node_importance = info['node_importance']
+        
+        max_values = torch_scatter.scatter_max(node_importance, data.batch, dim=0)[0]
+        node_importance_norm = node_importance / max_values[data.batch]
+        node_importance_bin_1 = (node_importance_norm > 0.6).float()
+        node_importance_bin_2 = (node_importance_norm > 0.4).float()
+        
+        noise = 1.0
+        noise_mask = torch.full_like(node_importance, noise).to(self.device)
         
         node_mask_1 = torch.bernoulli(noise_mask).float()
-        info_1 = self(data, node_mask=node_mask_1)
-        #info_1 = info
+        node_mask_1 = torch_uniform(node_importance.shape, 0.95, 1.05).to(self.device)
+        data1 = data.clone()
+        # data1.x *= torch.bernoulli(torch.full(data.x.shape, noise)).to(self.device)
+        info_1 = self(
+            data1, 
+            #node_mask=node_mask_1, 
+            node_feature_mask=node_importance_bin_1
+        )
         
         node_mask_2 = torch.bernoulli(noise_mask).float()
-        #node_mask_2 = ((1 - noise) * torch.rand(noise_mask.shape) + noise).to(self.device)
-        info_2 = self(data, node_mask=node_mask_2)
+        node_mask_2 = torch_uniform(node_importance.shape, 0.95, 1.05).to(self.device)
+        data2 = data.clone()
+        # data2.x *= torch.bernoulli(torch.full(data.x.shape, noise)).to(self.device)
+        info_2 = self(
+            data2, 
+            #node_mask=node_mask_2, 
+            node_feature_mask=node_importance_bin_2
+        )
         
         mask = torch.ones((batch_size, 2 * batch_size), dtype=bool).to(self.device)
         for i in range (batch_size):
@@ -530,27 +560,36 @@ class Megan(AbstractGraphModel):
     
         for k in range(self.num_channels):
             
+            graph_embedding_k = info['graph_embedding'][:, :, k]
             graph_embedding_1 = info_1['graph_embedding'][:, :, k]
             graph_embedding_2 = info_2['graph_embedding'][:, :, k]
-            graph_embedding_all = torch.cat([graph_embedding_1, graph_embedding_2], dim=0)
-                
-            sim_neg = (graph_embedding_all.unsqueeze(0) * graph_embedding_all.unsqueeze(1)).sum(dim=-1)
-            sim_neg = torch.exp(sim_neg / self.contrastive_temp)
-            sim_neg = sim_neg.masked_select(mask).view(2 * batch_size, -1)
+            # graph_embedding_1 = info_1['graph_projection'][:, :, k]
+            # graph_embedding_2 = info_2['graph_projection'][:, :, k]
             
+            graph_embedding_all = torch.cat([graph_embedding_k, graph_embedding_k], dim=0)
+            
+            sim_neg = (graph_embedding_all.unsqueeze(0) * graph_embedding_all.unsqueeze(1)).sum(dim=-1)
+            sim_neg_exp = torch.exp(sim_neg / self.contrastive_temp)
+            sim_neg_exp = sim_neg_exp.masked_select(mask).view(2 * batch_size, -1)
+            
+            sim_pos_1 = (graph_embedding_1 * graph_embedding_k).sum(dim=-1)
+            sim_pos_1_exp = torch.exp(sim_pos_1 / self.contrastive_temp)
+            sim_pos_2 = (graph_embedding_2 * graph_embedding_k).sum(dim=-1)
+            sim_pos_2_exp = torch.exp(sim_pos_2 / self.contrastive_temp)
             sim_pos = (graph_embedding_1 * graph_embedding_2).sum(dim=-1)
-            sim_pos = torch.exp(sim_pos / self.contrastive_temp)
-            sim_pos = torch.cat([sim_pos, sim_pos], dim=0)
+            sim_pos_exp = torch.exp(sim_pos / self.contrastive_temp)
+            sim_pos_exp = torch.cat([
+                torch.stack([sim_pos_exp, sim_pos_1_exp], dim=-1).sum(dim=-1),
+                torch.stack([sim_pos_exp, sim_pos_2_exp], dim=-1).sum(dim=-1),
+            ], dim=0)
             
             N = batch_size * 2 - 2
-            imp = (self.contrastive_beta * sim_neg.log()).exp()
-            reweight_neg = (imp * sim_neg).sum(dim=-1) / imp.mean(dim=-1)
-            Neg = (-N*self.contrastive_tau*sim_pos + sim_neg.sum(dim=-1)) / (1-self.contrastive_tau)
+            imp = (self.contrastive_beta * sim_neg_exp.log()).exp()
+            reweight_neg = (imp * sim_neg_exp).sum(dim=-1) / imp.mean(dim=-1)
+            Neg = (-N*self.contrastive_tau*sim_pos_exp + sim_neg_exp.sum(dim=-1)) / (1-self.contrastive_tau)
             Neg = torch.clamp(Neg, min=N*np.e**(-1/self.contrastive_temp))
-            Neg = sim_neg.sum(dim=-1)
-            
-            loss_cont += (1 / self.num_channels) * torch.mean(-torch.log(sim_pos / (sim_pos + Neg)))
-            #loss_cont += (1 / self.num_channels) * (10*sim_neg.mean() - sim_pos.mean())
+            # Neg = sim_neg_exp.sum(dim=-1)
+            loss_cont += (1 / self.num_channels) * torch.mean(-torch.log(sim_pos_exp / (sim_pos_exp + Neg)))
             
         return loss_cont
     
@@ -629,3 +668,14 @@ class Megan(AbstractGraphModel):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate)
         return optimizer
     
+    def leave_one_out_deviations(self,
+                                 graphs: t.List[tv.GraphDict]
+                                 ) -> np.ndarray:
+        result = np.zeros((len(graphs), self.num_channels, self.out_dim))
+        loader = self._loader_from_graphs(graphs)
+        
+        for data in loader:
+            
+            for channel_index in range(self.num_channels):
+                node_mask = None
+                out_mod = self.predict_graphs(graphs)

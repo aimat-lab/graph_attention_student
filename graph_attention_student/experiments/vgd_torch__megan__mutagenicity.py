@@ -1,3 +1,10 @@
+"""
+This experiment extends vgd_torch__megan for the training of a self-explaining MEGAN model on a 
+visual graph dataset.
+
+This experiment specifically implements the mutagenicity dataset. This is a real world classification 
+dataset for the AMES mutagenicity assay.
+"""
 import os
 import typing as t
 
@@ -59,6 +66,11 @@ UNITS: t.List[int] = [64, 64, 64]
 #       This list determines the layer structure of the importance MLP which determines the node importance 
 #       weights from the node embeddings of the graph. 
 IMPORTANCE_UNITS: t.List[int] = []
+# :param IMPORTANCE_OFFSET:
+#       This parameter more or less controls how expansive the explanations are - how much of the graph they
+#       tend to cover. Higher values tend to lead to more expansive explanations while lower values tend to 
+#       lead to sparser explanations. Typical value range 0.5 - 1.5
+IMPORTANCE_OFFSET: float = 1.0
 # :param CHANNEL_INFOS:
 #       This dictionary can be used to add additional information about the explanation channels that 
 #       are used in this experiment. The integer keys of the dict are the indices of the channels
@@ -81,7 +93,7 @@ CHANNEL_INFOS: dict = {
 #       This list determines the layer structure of the MLP's that act as the channel-specific projections.
 #       Each element in this list represents one layer where the integer value determines the number of hidden
 #       units in that layer.
-PROJECTION_UNITS: t.List[int] = [32, 32, 3]
+PROJECTION_UNITS: t.List[int] = [512, 256, 64]
 # :param FINAL_UNITS:
 #       This list determines the layer structure of the model's final prediction MLP. Each element in 
 #       this list represents one layer, where the integer value determines the number of hidden units 
@@ -116,12 +128,12 @@ REGRESSION_REFERENCE: t.Optional[float] = None
 # :param EPOCHS:
 #       The integer number of epochs to train the dataset for. Each epoch means that the model is trained 
 #       once on the entire training dataset.
-EPOCHS: int = 100
+EPOCHS: int = 200
 # :param BATCH_SIZE:
 #       The batch size to use while training. This is the number of elements from the dataset that are 
 #       presented to the model at the same time to estimate the gradient direction for the stochastic gradient 
 #       descent optimization.
-BATCH_SIZE: int = 32
+BATCH_SIZE: int = 16
 # :param LEARNING_RATE:
 #       This float determines the learning rate of the optimizer.
 LEARNING_RATE: float = 1e-3

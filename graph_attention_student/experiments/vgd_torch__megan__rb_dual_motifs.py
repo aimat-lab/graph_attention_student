@@ -1,3 +1,12 @@
+"""
+This experiment extends vgd_torch__megan for the training of a self-explaining MEGAN model on a 
+visual graph dataset.
+
+This experiment specifically implements the training on the rb_dual_motifs dataset. This is a 
+synthetic graph regression dataset based on randomly generated color graphs which were seeded 
+with value determining motifs. The advantage here is that all the ground truth explanations are 
+known and can be used to validate the effectiveness of megans explanations.
+"""
 import os
 import typing as t
 
@@ -25,7 +34,7 @@ TEST_INDICES_PATH: t.Optional[str] = None
 #       This integer number defines how many elements of the dataset are supposed to be sampled 
 #       for the unseen test set on which the model will be evaluated. This parameter will be ignored 
 #       if a test_indices file path is given.
-NUM_TEST: int = 1000
+NUM_TEST: int = 500
 # :param USE_BOOTSTRAPPING:
 #       This flag determines whether to use bootstrapping with the training elements of the dataset.
 #       If enabled, the training samples will be subsampled with the possibility of duplicates. This 
@@ -53,7 +62,7 @@ TARGET_NAMES: t.Dict[int, str] = {
 #       This list determines the layer structure of the model's graph encoder part. Each element in 
 #       this list represents one layer, where the integer value determines the number of hidden units 
 #       in that layer of the encoder network.
-UNITS: t.List[int] = [32, 32, 32]
+UNITS: t.List[int] = [64, 64, 64]
 # :param IMPORTANCE_UNITS:
 #       This list determines the layer structure of the importance MLP which determines the node importance 
 #       weights from the node embeddings of the graph. 
@@ -62,7 +71,7 @@ IMPORTANCE_UNITS: t.List[int] = [ ]
 #       This list determines the layer structure of the MLP's that act as the channel-specific projections.
 #       Each element in this list represents one layer where the integer value determines the number of hidden
 #       units in that layer.
-PROJECTION_UNITS: t.List[int] = [32, 32, 3]
+PROJECTION_UNITS: t.List[int] = [512, 256, 128]
 # :param FINAL_UNITS:
 #       This list determines the layer structure of the model's final prediction MLP. Each element in 
 #       this list represents one layer, where the integer value determines the number of hidden units 
@@ -90,9 +99,9 @@ SPARSITY_FACTOR: float = 1.0
 #       that choice it is possible to adjust the value to adjust the explanations.
 REGRESSION_REFERENCE: t.Optional[float] = 0.0
 
-# LEARNING_RATE = 1e-2
 
 EPOCHS = 50
+BATCH_SIZE = 16
 
 __DEBUG__ = True
 __TESTING__ = False

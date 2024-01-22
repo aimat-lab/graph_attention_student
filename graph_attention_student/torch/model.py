@@ -79,7 +79,7 @@ class AbstractGraphModel(pl.LightningModule):
     
     def forward_graphs(self,
                        graphs: t.List[tv.GraphDict],
-                       batch_size: int = BATCH_SIZE
+                       batch_size: int = BATCH_SIZE,
                        ) -> t.List[dict]:
         
         loader = self._loader_from_graphs(graphs, batch_size)
@@ -130,7 +130,7 @@ class AbstractGraphModel(pl.LightningModule):
     
     def predict_graphs(self, 
                        graphs: t.List[tv.GraphDict], 
-                       batch_size: int = BATCH_SIZE
+                       batch_size: int = BATCH_SIZE,
                        ) -> np.ndarray:
         """
         Given a list ``graphs`` of B graph dicts, this method will return the numpy array of the 
