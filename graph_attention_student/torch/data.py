@@ -29,9 +29,16 @@ def data_from_graph(graph: tv.GraphDict,
     # it here first.
     edge_indices = np.transpose(graph['edge_indices'])
     
+    # 24.01.24
+    # The graph labels are not always going to be given and we want to support that here as well
+    if 'graph_labels' in graph:
+        y = torch.tensor(graph['graph_labels'], dtype=dtype)
+    else:
+        y = torch.tensor([0, ], dtype=dtype)
+    
     data = Data(
         x=torch.tensor(graph['node_attributes'], dtype=dtype),
-        y=torch.tensor(graph['graph_labels'], dtype=dtype),
+        y=y,
         edge_attr=torch.tensor(graph['edge_attributes'], dtype=dtype),
         edge_index=torch.tensor(edge_indices, dtype=torch.int64),
     )

@@ -293,3 +293,26 @@ class AttentiveFpLayer(AbstractAttentionLayer):
         #self._attention = softmax(self._attention_logits, index, ptr, size_i)
         
         return self._attention * self.lay_linear(x_j)
+    
+    
+class MaskExpansionLayer(MessagePassing):
+    
+    def __init__(self,
+                 **kwargs,
+                 ) -> None:
+        super().__init__(aggr='max', **kwargs)
+        
+    def forward(self,
+                mask: torch.Tensor,
+                edge_index: torch.Tensor
+                ) -> torch.Tensor:
+        
+        return self.propagate(
+            edge_index,
+            mask=mask,
+        )
+        
+    def message(self,
+                mask_i, mask_j,
+                ) -> torch.Tensor:
+        return mask_j

@@ -115,6 +115,12 @@ SPARSITY_FACTOR: float = 1.0
 #       for this parameter is the average target value of the training dataset. Depending on the results for 
 #       that choice it is possible to adjust the value to adjust the explanations.
 REGRESSION_REFERENCE: t.Optional[float] = 0.0
+# :param REGRESSION_MARGIN:
+#       When converting the regression problem into the negative/positive classification problem for the 
+#       explanation co-training, this determines the margin for the thresholding. Instead of using the regression
+#       reference as a hard threshold, values have to be at least this margin value lower/higher than the 
+#       regression reference to be considered a class sample.
+REGRESSION_MARGIN: t.Optional[float] = 0.0
 # :param CONTRASTIVE_FACTOR:
 #       This is the factor of the contrastive representation learning loss of the network. If this value is 0 
 #       the contrastive repr. learning is completely disabled (increases computational efficiency). The higher 
@@ -123,13 +129,18 @@ CONTRASTIVE_FACTOR: float = 1.0
 # :param CONTRASTIVE_NOISE:
 #       This float value determines the noise level that is applied when generating the positive augmentations 
 #       during the contrastive learning process.
-CONTRASTIVE_NOISE: float = 0.1
+CONTRASTIVE_NOISE: float = 0.0
 # :param CONTRASTIVE_TAU:
 #       This float value is a hyperparameters of the de-biasing improvement of the contrastive learning loss. 
 #       This value should be chosen as roughly the inverse of the number of expected concepts. So as an example 
 #       if it is expected that each explanation consists of roughly 10 distinct concepts, this should be chosen 
 #       as 1/10 = 0.1
 CONTRASTIVE_TAU: float = 0.1
+# :param PREDICTION_FACTOR:
+#       This is a float value that determines the factor by which the main prediction loss is being scaled 
+#       durign the model training. Changing this from 1.0 should usually not be necessary except for regression
+#       tasks with a vastly different target value scale.
+PREDICTION_FACTOR: float = 1.0
 
 
 __DEBUG__ = True
@@ -184,7 +195,9 @@ def train_model(e: Experiment,
             importance_offset=e.IMPORTANCE_OFFSET,
             sparsity_factor=e.SPARSITY_FACTOR,
             regression_reference=e.REGRESSION_REFERENCE,
+            regression_margin=e.REGRESSION_MARGIN,
             prediction_mode=e.DATASET_TYPE,
+            prediction_factor=e.PREDICTION_FACTOR,
             contrastive_factor=e.CONTRASTIVE_FACTOR,
             contrastive_noise=e.CONTRASTIVE_NOISE,
             contrastive_tau=e.CONTRASTIVE_TAU,
@@ -404,7 +417,7 @@ def analysis(e: Experiment):
     indices = np.array(list(index_data_map.keys()))
     
     e.log('Clustering the latent space...')
-    min_samples = 15
+    min_samples = 5
     for rep in range(e.REPETITIONS):
         
         e.log(f'> REP {rep}')

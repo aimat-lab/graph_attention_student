@@ -124,13 +124,22 @@ def export_metadatas_csv(metadatas: t.List[dict],
     rows: t.List[dict] = []
     for metadata in metadatas:
         
+        # 23.01.24
+        # This is for backwards compatibility of datasets. Both of these entries refer to the same thing - 
+        # the string representation of the graph - but at some point the name for this field was changed 
+        # from "value" to "repr"
+        if 'repr' in metadata:
+            value = metadata['repr']
+        elif 'value' in metadata:
+            value = metadata['value']
+        
         # Some entries have to be in the metadata dict as per the definition of the visual graph dataset 
         # format, but some values are optional and might not be there - for those we add placeholders 
         # initially and then check for each individual entry if they exist within the dict structure.
         row = {
             'index':    metadata['index'],
             'name':     None,
-            'value':    metadata['repr'],
+            'value':    value,
             'out_true': metadata['graph']['graph_labels'],
             'out_pred': None,
         }

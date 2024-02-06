@@ -32,7 +32,7 @@ TEST_INDICES_PATH: t.Optional[str] = None
 #       This integer number defines how many elements of the dataset are supposed to be sampled 
 #       for the unseen test set on which the model will be evaluated. This parameter will be ignored 
 #       if a test_indices file path is given.
-NUM_TEST: int = 1500
+NUM_TEST: int = 500
 # :param USE_BOOTSTRAPPING:
 #       This flag determines whether to use bootstrapping with the training elements of the dataset.
 #       If enabled, the training samples will be subsampled with the possibility of duplicates. This 
@@ -69,7 +69,7 @@ IMPORTANCE_UNITS: t.List[int] = [ ]
 #       This list determines the layer structure of the MLP's that act as the channel-specific projections.
 #       Each element in this list represents one layer where the integer value determines the number of hidden
 #       units in that layer.
-PROJECTION_UNITS: t.List[int] = [512, 256, 64]
+PROJECTION_UNITS: t.List[int] = [256, 128, 64]
 # :param FINAL_UNITS:
 #       This list determines the layer structure of the model's final prediction MLP. Each element in 
 #       this list represents one layer, where the integer value determines the number of hidden units 
@@ -101,6 +101,12 @@ SPARSITY_FACTOR: float = 1.0
 #       for this parameter is the average target value of the training dataset. Depending on the results for 
 #       that choice it is possible to adjust the value to adjust the explanations.
 REGRESSION_REFERENCE: t.Optional[float] = -3.0
+# :param REGRESSION_MARGIN:
+#       When converting the regression problem into the negative/positive classification problem for the 
+#       explanation co-training, this determines the margin for the thresholding. Instead of using the regression
+#       reference as a hard threshold, values have to be at least this margin value lower/higher than the 
+#       regression reference to be considered a class sample.
+REGRESSION_MARGIN: t.Optional[float] = 0.0
 # :param CONTRASTIVE_FACTOR:
 #       This is the factor of the contrastive representation learning loss of the network. If this value is 0 
 #       the contrastive repr. learning is completely disabled (increases computational efficiency). The higher 
@@ -109,7 +115,7 @@ CONTRASTIVE_FACTOR: float = 1.0
 # :param CONTRASTIVE_NOISE:
 #       This float value determines the noise level that is applied when generating the positive augmentations 
 #       during the contrastive learning process.
-CONTRASTIVE_NOISE: float = 0.1
+CONTRASTIVE_NOISE: float = 0.0
 # :param CONTRASTIVE_TAU:
 #       This float value is a hyperparameters of the de-biasing improvement of the contrastive learning loss. 
 #       This value should be chosen as roughly the inverse of the number of expected concepts. So as an example 
@@ -117,8 +123,8 @@ CONTRASTIVE_NOISE: float = 0.1
 #       as 1/10 = 0.1
 CONTRASTIVE_TAU: float = 0.1
 
-EPOCHS: int = 100
-BATCH_SIZE: int = 32
+EPOCHS: int = 250
+BATCH_SIZE: int = 128
 
 __DEBUG__ = True
 __TESTING__ = False

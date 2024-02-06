@@ -15,11 +15,12 @@ from torch_geometric.nn.aggr import MeanAggregation
 from torch_geometric.nn.aggr import MaxAggregation
 from torch_geometric.data import Data
 
-from graph_attention_student.torch.utils import torch_uniform
+from graph_attention_student.torch.utils import torch_uniform, torch_gauss
 from graph_attention_student.torch.model import AbstractGraphModel
 from graph_attention_student.torch.layers import MultiHeadAttention
 from graph_attention_student.torch.layers import GraphAttentionLayer
 from graph_attention_student.torch.layers import AttentiveFpLayer
+from graph_attention_student.torch.layers import MaskExpansionLayer
 
 
 class Megan(AbstractGraphModel):
@@ -96,6 +97,7 @@ class Megan(AbstractGraphModel):
                  importance_factor: float = 0.0,
                  importance_offset: float = 0.8,
                  regression_reference: float = 0.0,
+                 regression_margin: float = 0.0,
                  sparsity_factor: float = 0.0,
                  # contrastive representation related
                  contrastive_factor: float = 0.0,
@@ -103,9 +105,11 @@ class Megan(AbstractGraphModel):
                  contrastive_temp: float = 1.0,
                  contrastive_beta: float = 1.0,
                  contrastive_tau: float = 0.1,
+                 contrastive_units: int = 2048,
                  # prediction-related
                  final_units: t.List[int] = [16, 1],
                  prediction_mode: str = 'regression',
+                 prediction_factor: float = 1.0,
                  use_bias: bool = True,
                  # training-related
                  learning_rate: float = 1e-3,
@@ -139,6 +143,7 @@ class Megan(AbstractGraphModel):
         self.importance_factor = importance_factor
         self.importance_offset = importance_offset
         self.regression_reference = regression_reference
+        self.regression_margin = regression_margin
         self.sparsity_factor = sparsity_factor
         
         self.contrastive_factor = contrastive_factor
@@ -146,8 +151,10 @@ class Megan(AbstractGraphModel):
         self.contrastive_temp = contrastive_temp
         self.contrastive_beta = contrastive_beta
         self.contrastive_tau = contrastive_tau
+        self.contrastive_units = contrastive_units
         
         self.prediction_mode = prediction_mode
+        self.prediction_factor = prediction_factor
         self.final_untis = final_units
         
         self.learning_rate = learning_rate
@@ -164,6 +171,12 @@ class Megan(AbstractGraphModel):
             'importance_units':         importance_units,
             'importance_offset':        importance_offset,
             'projection_units':         projection_units,
+            'contrastive_factor':       contrastive_factor,
+            'contrastive_noise':        contrastive_noise,
+            'contrastive_temp':         contrastive_temp,
+            'contrastive_beta':         contrastive_beta,
+            'contrastive_tau':          contrastive_tau,
+            'contrastive_units':        contrastive_units,
             'final_units':              final_units,  
             'num_channels':             num_channels,
             'prediction_mode':          prediction_mode,
@@ -202,14 +215,6 @@ class Megan(AbstractGraphModel):
                 )
                 for _ in range(num_channels)
             ], activation=act)
-            # lay = MultiHeadAttention([
-            #     AttentiveFpLayer(
-            #         in_dim=prev_features,
-            #         out_dim=num_features,
-            #         edge_dim=edge_dim,
-            #     )
-            #     for _ in range(num_channels)
-            # ])
             
             prev_features = num_features
             self.encoder_layers.append(lay)
@@ -281,6 +286,17 @@ class Megan(AbstractGraphModel):
             
         self.lay_act = nn.ReLU()
         
+        self.lay_mask_expansion = MaskExpansionLayer()
+        
+        self.projection_layers = nn.ModuleList()
+        for k in range(num_channels):
+            lay = nn.Linear(
+                in_features=self.embedding_dim,
+                out_features=contrastive_units,
+                #out_features=1024,
+            )
+            self.projection_layers.append(lay)
+        
         self.lay_act_final = nn.Identity()
         if self.prediction_mode == 'regression':
             self.loss_pred = nn.MSELoss()
@@ -291,6 +307,7 @@ class Megan(AbstractGraphModel):
     def forward(self, 
                 data: Data, 
                 node_mask: t.Optional[torch.Tensor] = None,
+                node_importance_overwrite: t.Optional[torch.Tensor] = None,
                 node_feature_mask: t.Optional[torch.Tensor] = None
                 ) -> t.Dict[str, torch.Tensor]:
     
@@ -354,6 +371,9 @@ class Megan(AbstractGraphModel):
         
         if node_mask is not None:
             node_importance = node_importance * node_mask
+            
+        if node_importance_overwrite is not None:
+            node_importance = node_importance_overwrite
             
         # node_embedding: (B * V, D)
         # node_embedding_channels: (B * V, K, D)
@@ -431,7 +451,7 @@ class Megan(AbstractGraphModel):
         # ~ prediction loss
         loss_pred = self.loss_pred(out_pred, out_true)
         self.log(
-            'loss_pred', loss_pred,
+            'loss_pred', self.prediction_factor * loss_pred,
             prog_bar=True,
             on_epoch=True,
             batch_size=batch_size,
@@ -502,7 +522,7 @@ class Megan(AbstractGraphModel):
         
         loss = (
             # loss from the primary output predictions
-            loss_pred
+            self.prediction_factor * loss_pred
             # loss from the explanation co-training approximation
             + self.importance_factor * loss_expl
             # loss to encourage sparsity of explanations
@@ -564,36 +584,40 @@ class Megan(AbstractGraphModel):
         max_values = torch_scatter.scatter_max(node_importance, data.batch, dim=0)[0]
         node_importance_norm = node_importance / max_values[data.batch]
         
+        # pooled_node_importance: (B, K)
+        pooled_node_importance = self.lay_pool_importance(node_importance, data.batch)
+        # is_empty: (B, K)
+        # This tensor is a binary mask on the 
+        is_empty = (pooled_node_importance < self.importance_offset).float()
+        
         # In the SimCLR framework we need 2 augmented views in total, so here we create the binarized 
         # feature masks but with two slightly different thresholds to capture kind of a multi-level 
         # information about the explanation
         node_importance_bin_1 = (node_importance_norm > 0.6).float()
         node_importance_bin_2 = (node_importance_norm > 0.4).float()
         
-        # On top of the feature masking we also apply some small amount of noise to the importance 
-        # values themselves so that there is a method here.
-        node_mask_1 = torch_uniform(
-            node_importance.shape, 
-            1.0 - self.contrastive_noise, 
-            1.0 + self.contrastive_noise,
-        ).to(self.device) * node_importance_bin_1
+        # node_importance_bin_1 = self.lay_mask_expansion(
+        #     mask=node_importance_bin_1,
+        #     edge_index=data.edge_index,
+        # )
         
-        node_mask_2 = torch_uniform(
-            node_importance.shape,
-            1.0 - self.contrastive_noise,
-            1.0 + self.contrastive_noise,
-        ).to(self.device) * node_importance_bin_2
+        # node_importance_bin_2 = self.lay_mask_expansion(
+        #     mask=node_importance_bin_2,
+        #     edge_index=data.edge_index,
+        # )
         
         # To now create the corresponding graph embedding vectors for the data augmentations we have
         # to actually query the model again with those augementations as addditional arguments.
         info_1 = self(
             data, 
-            node_mask=node_mask_1, 
+            #node_importance_overwrite=node_importance_bin_1, 
+            #node_mask=node_importance_bin_1,
             node_feature_mask=node_importance_bin_1,
         )
         info_2 = self(
             data, 
-            node_mask=node_mask_2, 
+            #node_importance_overwrite=node_importance_bin_2, 
+            #node_mask=node_importance_bin_2,
             node_feature_mask=node_importance_bin_2,
         )
         
@@ -614,14 +638,22 @@ class Megan(AbstractGraphModel):
         # iterate over all the channels and calculate the constrastive loss contribution for each channel.
         for k in range(self.num_channels):
             
+            # is_empty_k: (B, )
+            is_empty_k = torch.cat([is_empty[:, k], is_empty[:, k]], dim=0)
+            
             # NOTE: Looking at the similarity computations, one can see that these are realized as simple 
             # vector multiplications between the embeddings. However, the graph embeddings are inherently 
             # L2-normalized - in this special case the multiplication of two vectors is equal to their 
             # cosine similarity!
             
-            graph_embedding_k = info['graph_embedding'][:, :, k]
-            graph_embedding_1 = info_1['graph_embedding'][:, :, k]
-            graph_embedding_2 = info_2['graph_embedding'][:, :, k]
+            # graph_embedding_k = info['graph_embedding'][:, :, k]
+            # graph_embedding_1 = info_1['graph_embedding'][:, :, k]
+            # graph_embedding_2 = info_2['graph_embedding'][:, :, k]
+            
+            lay_proj = self.projection_layers[k]
+            graph_embedding_k = F.normalize(lay_proj(info['graph_embedding'][:, :, k]))
+            graph_embedding_1 = F.normalize(lay_proj(info_1['graph_embedding'][:, :, k]))
+            graph_embedding_2 = F.normalize(lay_proj(info_2['graph_embedding'][:, :, k]))
             
             # graph_embedding_all = (2 * B, D)
             graph_embedding_all = torch.cat([graph_embedding_k, graph_embedding_k], dim=0)
@@ -639,11 +671,12 @@ class Megan(AbstractGraphModel):
             sim_pos_2_exp = torch.exp(sim_pos_2 / self.contrastive_temp)
             sim_pos = (graph_embedding_1 * graph_embedding_2).sum(dim=-1)
             sim_pos_exp = torch.exp(sim_pos / self.contrastive_temp)
-            # sim_pos_exp: (B, 2)
+            # sim_pos_exp: (2 *B, 1)
             sim_pos_exp = torch.cat([
                 torch.stack([sim_pos_exp, sim_pos_1_exp], dim=-1).sum(dim=-1),
                 torch.stack([sim_pos_exp, sim_pos_2_exp], dim=-1).sum(dim=-1),
             ], dim=0)
+            #sim_pos_exp[is_empty_k > 0.5] = 1.0
             
             # In this section the actual constrastive loss aka the InfoNCE loss is calculated. However, this is 
             # not just the simple loss term that is used in SimCLR, but also uses an additional debiasing method 
@@ -653,8 +686,11 @@ class Megan(AbstractGraphModel):
             # reweight_neg = (imp * sim_neg_exp).sum(dim=-1) / imp.mean(dim=-1)
             Neg = (-N*self.contrastive_tau*sim_pos_exp + sim_neg_exp.sum(dim=-1)) / (1-self.contrastive_tau)
             Neg = torch.clamp(Neg, min=N*np.e**(-1/self.contrastive_temp))
+            #Neg = sim_neg_exp.sum(dim=-1)
             
-            loss_cont += (1 / self.num_channels) * torch.mean(-torch.log(sim_pos_exp / (sim_pos_exp + Neg)))
+            loss_cont += (1 / self.num_channels) * torch.mean(-torch.log((sim_pos_exp) / (sim_pos_exp + Neg)))
+            #loss_cont += (1 / self.num_channels) * torch.mean(-torch.log((sim_pos_exp) / (sim_neg_exp.mean())) * (1 - is_empty_k))
+            #print(k, (1 / self.num_channels) * torch.mean(-torch.log((sim_pos_exp) / (sim_pos_exp + Neg))))
             
         return loss_cont
     
@@ -700,8 +736,8 @@ class Megan(AbstractGraphModel):
             # "positive" or "negative".
             
             values_true = torch.cat([
-                (out_true < self.regression_reference), 
-                (out_true > self.regression_reference),
+                (out_true < self.regression_reference - self.regression_margin), 
+                (out_true > self.regression_reference + self.regression_margin),
             ], 
             axis=1).float()
             

@@ -93,7 +93,7 @@ CHANNEL_INFOS: dict = {
 #       This list determines the layer structure of the MLP's that act as the channel-specific projections.
 #       Each element in this list represents one layer where the integer value determines the number of hidden
 #       units in that layer.
-PROJECTION_UNITS: t.List[int] = [512, 256, 64]
+PROJECTION_UNITS: t.List[int] = [256, 128, 128]
 # :param FINAL_UNITS:
 #       This list determines the layer structure of the model's final prediction MLP. Each element in 
 #       this list represents one layer, where the integer value determines the number of hidden units 
@@ -108,6 +108,11 @@ NUM_CHANNELS: int = 2
 #       This is the coefficient that is used to scale the explanation co-training loss during training.
 #       Roughly, the higher this value, the more the model will prioritize the explanations during training.
 IMPORTANCE_FACTOR: float = 1.0
+# :param IMPORTANCE_OFFSET:
+#       This parameter more or less controls how expansive the explanations are - how much of the graph they
+#       tend to cover. Higher values tend to lead to more expansive explanations while lower values tend to 
+#       lead to sparser explanations. Typical value range 0.5 - 1.5
+IMPORTANCE_OFFSET: float = 1.2
 # :param SPARSITY_FACTOR:
 #       This is the coefficient that is used to scale the explanation sparsity loss during training.
 #       The higher this value the more explanation sparsity (less and more discrete explanation masks)
@@ -120,6 +125,26 @@ SPARSITY_FACTOR: float = 1.0
 #       for this parameter is the average target value of the training dataset. Depending on the results for 
 #       that choice it is possible to adjust the value to adjust the explanations.
 REGRESSION_REFERENCE: t.Optional[float] = None
+# :param CONTRASTIVE_FACTOR:
+#       This is the factor of the contrastive representation learning loss of the network. If this value is 0 
+#       the contrastive repr. learning is completely disabled (increases computational efficiency). The higher 
+#       this value the more the contrastive learning will influence the network during training.
+CONTRASTIVE_FACTOR: float = 1.0
+# :param CONTRASTIVE_NOISE:
+#       This float value determines the noise level that is applied when generating the positive augmentations 
+#       during the contrastive learning process.
+CONTRASTIVE_NOISE: float = 0.0
+# :param CONTRASTIVE_TAU:
+#       This float value is a hyperparameters of the de-biasing improvement of the contrastive learning loss. 
+#       This value should be chosen as roughly the inverse of the number of expected concepts. So as an example 
+#       if it is expected that each explanation consists of roughly 10 distinct concepts, this should be chosen 
+#       as 1/10 = 0.1
+CONTRASTIVE_TAU: float = 0.1
+# :param PREDICTION_FACTOR:
+#       This is a float value that determines the factor by which the main prediction loss is being scaled 
+#       durign the model training. Changing this from 1.0 should usually not be necessary except for regression
+#       tasks with a vastly different target value scale.
+PREDICTION_FACTOR: float = 1.0
 
 # == TRAINING PARAMETERS ==
 # These parameters configure the training process itself, such as how many epochs to train 
@@ -128,12 +153,12 @@ REGRESSION_REFERENCE: t.Optional[float] = None
 # :param EPOCHS:
 #       The integer number of epochs to train the dataset for. Each epoch means that the model is trained 
 #       once on the entire training dataset.
-EPOCHS: int = 200
+EPOCHS: int = 300
 # :param BATCH_SIZE:
 #       The batch size to use while training. This is the number of elements from the dataset that are 
 #       presented to the model at the same time to estimate the gradient direction for the stochastic gradient 
 #       descent optimization.
-BATCH_SIZE: int = 16
+BATCH_SIZE: int = 128
 # :param LEARNING_RATE:
 #       This float determines the learning rate of the optimizer.
 LEARNING_RATE: float = 1e-3

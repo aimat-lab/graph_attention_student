@@ -2,16 +2,17 @@
 This experiment extends vgd_torch__megan for the training of a self-explaining MEGAN model on a 
 visual graph dataset.
 
-This experiment specifically implements the training on the rb_dual_motifs dataset. This is a 
-synthetic graph regression dataset based on randomly generated color graphs which were seeded 
-with value determining motifs. The advantage here is that all the ground truth explanations are 
-known and can be used to validate the effectiveness of megans explanations.
+This experiment specifically implements the AqSolDB dataset which is a dataset for predicting the 
+experimentally measured values for the water solubility of compounds.
 """
 import os
+import pathlib
 import typing as t
 
 from pycomex.functional.experiment import Experiment
 from pycomex.utils import file_namespace, folder_path
+
+PATH = pathlib.Path(__file__).parent.absolute()
 
 # == DATASET PARAMETERS ==
 # The following parameters determine the dataset and how to handle said dataset.
@@ -21,20 +22,22 @@ from pycomex.utils import file_namespace, folder_path
 #       contains all the elements of a visual graph dataset. Alternatively this string can be 
 #       a valid unique identifier of a visual graph dataset which can be downloaded from the main 
 #       remote file share location.
-VISUAL_GRAPH_DATASET: str = 'rb_dual_motifs'
+VISUAL_GRAPH_DATASET: str = 'fia_49k'
 # :param DATASET_TYPE:
 #       This string has to determine the type of the dataset in regards to the target values. 
 #       This can either be "regression" or "classification". This choice influences how the model 
 #       is trained (loss function) and ultimately how it is evaluated.
 DATASET_TYPE: str = 'regression' # 'classification'
 # :param TEST_INDICES_PATH:
-#       Optionally, this may be an absolute string path to a 
-TEST_INDICES_PATH: t.Optional[str] = None
+#       Optionally, this may be an absolute string path to a file which contains a list of indices
+#       of the dataset elements which are supposed to be used as the test set. If this parameter is
+#       given, the NUM_TEST parameter will be ignored.
+TEST_INDICES_PATH: t.Optional[str] = os.path.join(PATH, 'assets', 'splits', 'fia_49k_test_indices.json')
 # :param NUM_TEST:
 #       This integer number defines how many elements of the dataset are supposed to be sampled 
 #       for the unseen test set on which the model will be evaluated. This parameter will be ignored 
 #       if a test_indices file path is given.
-NUM_TEST: int = 500
+NUM_TEST: int = 2000
 # :param USE_BOOTSTRAPPING:
 #       This flag determines whether to use bootstrapping with the training elements of the dataset.
 #       If enabled, the training samples will be subsampled with the possibility of duplicates. This 
@@ -45,14 +48,14 @@ USE_BOOTSTRAPPING: bool = False
 #       This integer determines how many elements to sample from the test set elements to act as 
 #       examples for the evaluation process. These examples will be visualized together with their
 #       predictions.
-NUM_EXAMPLES: int = 25
+NUM_EXAMPLES: int = 100
 # :param TARGET_NAMES:
 #       This dictionary structure can be used to define the human readable names for the various 
 #       target values that are part of the dataset. The keys of this dict have to be integer indices 
 #       of the targets in the order as they appear in the dataset. The values are string which will be 
 #       used as the names of these targets within the evaluation visualizations and log messages etc.
 TARGET_NAMES: t.Dict[int, str] = {
-    0: 'value'
+    0: 'fia_gas'
 }
 
 # == MODEL PARAMETERS ==
@@ -62,7 +65,7 @@ TARGET_NAMES: t.Dict[int, str] = {
 #       This list determines the layer structure of the model's graph encoder part. Each element in 
 #       this list represents one layer, where the integer value determines the number of hidden units 
 #       in that layer of the encoder network.
-UNITS: t.List[int] = [64, 64, 64]
+UNITS: t.List[int] = [128, 128, 128]
 # :param IMPORTANCE_UNITS:
 #       This list determines the layer structure of the importance MLP which determines the node importance 
 #       weights from the node embeddings of the graph. 
@@ -71,7 +74,7 @@ IMPORTANCE_UNITS: t.List[int] = [ ]
 #       This list determines the layer structure of the MLP's that act as the channel-specific projections.
 #       Each element in this list represents one layer where the integer value determines the number of hidden
 #       units in that layer.
-PROJECTION_UNITS: t.List[int] = [256, 128, 64]
+PROJECTION_UNITS: t.List[int] = [128, 256]
 # :param FINAL_UNITS:
 #       This list determines the layer structure of the model's final prediction MLP. Each element in 
 #       this list represents one layer, where the integer value determines the number of hidden units 
@@ -90,7 +93,7 @@ IMPORTANCE_FACTOR: float = 1.0
 #       This parameter more or less controls how expansive the explanations are - how much of the graph they
 #       tend to cover. Higher values tend to lead to more expansive explanations while lower values tend to 
 #       lead to sparser explanations. Typical value range 0.5 - 1.5
-IMPORTANCE_OFFSET: float = 0.8
+IMPORTANCE_OFFSET: float = 2.0
 # :param SPARSITY_FACTOR:
 #       This is the coefficient that is used to scale the explanation sparsity loss during training.
 #       The higher this value the more explanation sparsity (less and more discrete explanation masks)
@@ -102,7 +105,13 @@ SPARSITY_FACTOR: float = 1.0
 #       negative / positive in regard to the negative and the positive explanation channel. A good first choice 
 #       for this parameter is the average target value of the training dataset. Depending on the results for 
 #       that choice it is possible to adjust the value to adjust the explanations.
-REGRESSION_REFERENCE: t.Optional[float] = 0.0
+REGRESSION_REFERENCE: t.Optional[float] = 300.0
+# :param REGRESSION_MARGIN:
+#       When converting the regression problem into the negative/positive classification problem for the 
+#       explanation co-training, this determines the margin for the thresholding. Instead of using the regression
+#       reference as a hard threshold, values have to be at least this margin value lower/higher than the 
+#       regression reference to be considered a class sample.
+REGRESSION_MARGIN: t.Optional[float] = 10.0
 # :param CONTRASTIVE_FACTOR:
 #       This is the factor of the contrastive representation learning loss of the network. If this value is 0 
 #       the contrastive repr. learning is completely disabled (increases computational efficiency). The higher 
@@ -117,15 +126,15 @@ CONTRASTIVE_NOISE: float = 0.0
 #       This value should be chosen as roughly the inverse of the number of expected concepts. So as an example 
 #       if it is expected that each explanation consists of roughly 10 distinct concepts, this should be chosen 
 #       as 1/10 = 0.1
-CONTRASTIVE_TAU: float = 0.2
+CONTRASTIVE_TAU: float = 0.1
 # :param PREDICTION_FACTOR:
 #       This is a float value that determines the factor by which the main prediction loss is being scaled 
 #       durign the model training. Changing this from 1.0 should usually not be necessary except for regression
 #       tasks with a vastly different target value scale.
-PREDICTION_FACTOR: float = 1.0
+PREDICTION_FACTOR: float = 1e-3
 
-EPOCHS = 250
-BATCH_SIZE = 128
+EPOCHS: int = 250
+BATCH_SIZE: int = 128
 
 __DEBUG__ = True
 __TESTING__ = False
@@ -141,6 +150,6 @@ experiment = Experiment.extend(
 def testing(e: Experiment):
     e.log('TESTING MODE')
     e.NUM_EXAMPLE = 10
-    e.EPOCHS = 5
+    e.EPOCHS = 3
 
 experiment.run_if_main()
