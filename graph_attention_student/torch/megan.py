@@ -99,6 +99,7 @@ class Megan(AbstractGraphModel):
                  regression_reference: float = 0.0,
                  regression_margin: float = 0.0,
                  sparsity_factor: float = 0.0,
+                 normalize_embedding: bool = True,
                  # contrastive representation related
                  contrastive_factor: float = 0.0,
                  contrastive_noise: float = 0.1,
@@ -145,6 +146,7 @@ class Megan(AbstractGraphModel):
         self.regression_reference = regression_reference
         self.regression_margin = regression_margin
         self.sparsity_factor = sparsity_factor
+        self.normalize_embedding = normalize_embedding
         
         self.contrastive_factor = contrastive_factor
         self.contrastive_noise = contrastive_noise
@@ -171,6 +173,7 @@ class Megan(AbstractGraphModel):
             'importance_units':         importance_units,
             'importance_offset':        importance_offset,
             'projection_units':         projection_units,
+            'normalize_embedding':      normalize_embedding,
             'contrastive_factor':       contrastive_factor,
             'contrastive_noise':        contrastive_noise,
             'contrastive_temp':         contrastive_temp,
@@ -340,7 +343,8 @@ class Megan(AbstractGraphModel):
             node_embeddings.append(node_embedding)
             alphas.append(alpha)
             
-        # node_embeddings = torch.stack(node_embeddings, axis=-1)
+        #node_embeddings = torch.stack(node_embeddings, axis=-1)
+        #node_embedding = torch.sum(node_embeddings, axis=-1)
         # node_embedding = torch.amax(node_embeddings, axis=-1)
             
         # edge_importance: (B * E, K, L)
@@ -398,9 +402,11 @@ class Megan(AbstractGraphModel):
             
                 graph_embedding_ = layers[-1](graph_embedding_)
             
-            # F.normalize will apply a transformation on the embedding so that all the embedding 
-            # vectors have a constant norm == 1.
-            graph_embedding_ = F.normalize(graph_embedding_)
+            if self.normalize_embedding:
+                # F.normalize will apply a transformation on the embedding so that all the embedding 
+                # vectors have a constant norm == 1.
+                graph_embedding_ = F.normalize(graph_embedding_)
+                
             graph_embedding_channels.append(graph_embedding_)
             
         # graph_embedding: (B, D, K)
@@ -593,8 +599,8 @@ class Megan(AbstractGraphModel):
         # In the SimCLR framework we need 2 augmented views in total, so here we create the binarized 
         # feature masks but with two slightly different thresholds to capture kind of a multi-level 
         # information about the explanation
-        node_importance_bin_1 = (node_importance_norm > 0.6).float()
-        node_importance_bin_2 = (node_importance_norm > 0.4).float()
+        node_importance_bin_1 = (node_importance_norm > 0.5).float()
+        node_importance_bin_2 = (node_importance_norm > 0.3).float()
         
         # node_importance_bin_1 = self.lay_mask_expansion(
         #     mask=node_importance_bin_1,
@@ -606,18 +612,21 @@ class Megan(AbstractGraphModel):
         #     edge_index=data.edge_index,
         # )
         
+        node_importance_1 = node_importance + torch_gauss(list(node_importance.size()), mean=0, std=self.contrastive_noise).to(self.device)
+        node_importance_2 = node_importance + torch_gauss(list(node_importance.size()), mean=0, std=self.contrastive_noise).to(self.device)
+        
         # To now create the corresponding graph embedding vectors for the data augmentations we have
         # to actually query the model again with those augementations as addditional arguments.
         info_1 = self(
             data, 
-            #node_importance_overwrite=node_importance_bin_1, 
-            #node_mask=node_importance_bin_1,
+            node_importance_overwrite=node_importance_1, 
+            #node_mask=node_importance_1,
             node_feature_mask=node_importance_bin_1,
         )
         info_2 = self(
             data, 
-            #node_importance_overwrite=node_importance_bin_2, 
-            #node_mask=node_importance_bin_2,
+            node_importance_overwrite=node_importance_2, 
+            #node_mask=node_importance_2,
             node_feature_mask=node_importance_bin_2,
         )
         
@@ -682,9 +691,10 @@ class Megan(AbstractGraphModel):
             # not just the simple loss term that is used in SimCLR, but also uses an additional debiasing method 
             # that was proposed in a different paper.
             N = batch_size * 2 - 2
-            # imp = (self.contrastive_beta * sim_neg_exp.log()).exp()
-            # reweight_neg = (imp * sim_neg_exp).sum(dim=-1) / imp.mean(dim=-1)
-            Neg = (-N*self.contrastive_tau*sim_pos_exp + sim_neg_exp.sum(dim=-1)) / (1-self.contrastive_tau)
+            imp = (self.contrastive_beta * sim_neg_exp.log()).exp()
+            reweight_neg = (imp * sim_neg_exp).sum(dim=-1) / imp.mean(dim=-1)
+            #Neg = (-N*self.contrastive_tau*sim_pos_exp + sim_neg_exp.sum(dim=-1)) / (1-self.contrastive_tau)
+            Neg = (-N*self.contrastive_tau*sim_pos_exp + reweight_neg) / (1-self.contrastive_tau)
             Neg = torch.clamp(Neg, min=N*np.e**(-1/self.contrastive_temp))
             #Neg = sim_neg_exp.sum(dim=-1)
             

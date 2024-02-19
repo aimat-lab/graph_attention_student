@@ -24,6 +24,6 @@ def torch_gauss(size: tuple,
     
     :returns: Torch Tensor
     """
-    tens_mean = torch.full(size=size, fill_value=mean)
-    tens_std = torch.full(size=size, fill_value=std)
+    tens_mean = torch.full(size=size, fill_value=mean, dtype=torch.float32)
+    tens_std = torch.full(size=size, fill_value=std, dtype=torch.float32)
     return torch.normal(tens_mean, tens_std)

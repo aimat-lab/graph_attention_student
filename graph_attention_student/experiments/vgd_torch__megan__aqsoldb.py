@@ -69,7 +69,7 @@ IMPORTANCE_UNITS: t.List[int] = [ ]
 #       This list determines the layer structure of the MLP's that act as the channel-specific projections.
 #       Each element in this list represents one layer where the integer value determines the number of hidden
 #       units in that layer.
-PROJECTION_UNITS: t.List[int] = [256, 128, 64]
+PROJECTION_UNITS: t.List[int] = [64, 128, 512]
 # :param FINAL_UNITS:
 #       This list determines the layer structure of the model's final prediction MLP. Each element in 
 #       this list represents one layer, where the integer value determines the number of hidden units 
@@ -88,7 +88,7 @@ IMPORTANCE_FACTOR: float = 1.0
 #       This parameter more or less controls how expansive the explanations are - how much of the graph they
 #       tend to cover. Higher values tend to lead to more expansive explanations while lower values tend to 
 #       lead to sparser explanations. Typical value range 0.5 - 1.5
-IMPORTANCE_OFFSET: float = 0.8
+IMPORTANCE_OFFSET: float = 1.5
 # :param SPARSITY_FACTOR:
 #       This is the coefficient that is used to scale the explanation sparsity loss during training.
 #       The higher this value the more explanation sparsity (less and more discrete explanation masks)
@@ -115,16 +115,25 @@ CONTRASTIVE_FACTOR: float = 1.0
 # :param CONTRASTIVE_NOISE:
 #       This float value determines the noise level that is applied when generating the positive augmentations 
 #       during the contrastive learning process.
-CONTRASTIVE_NOISE: float = 0.0
+CONTRASTIVE_NOISE: float = 0.3
 # :param CONTRASTIVE_TAU:
 #       This float value is a hyperparameters of the de-biasing improvement of the contrastive learning loss. 
 #       This value should be chosen as roughly the inverse of the number of expected concepts. So as an example 
 #       if it is expected that each explanation consists of roughly 10 distinct concepts, this should be chosen 
 #       as 1/10 = 0.1
-CONTRASTIVE_TAU: float = 0.1
+CONTRASTIVE_TAU: float = 0.05
+# :param CONTRASTIVE_TEMP:
+#       This float value is a hyperparameter that controls the "temperature" of the contrastive learning loss.
+#       The higher this value, the more the contrastive learning will be smoothed out. The lower this value,
+#       the more the contrastive learning will be focused on the most similar pairs of embeddings.
+CONTRASTIVE_TEMP: float = 1.0
+# :param CONTRASTIVE_BETA:
+#       This is the float value from the paper about the hard negative mining called the concentration 
+#       parameter. It determines how much the contrastive loss is focused on the hardest negative samples.
+CONTRASTIVE_BETA: float = 1.0
 
-EPOCHS: int = 250
-BATCH_SIZE: int = 128
+EPOCHS: int = 500
+BATCH_SIZE: int = 200
 
 __DEBUG__ = True
 __TESTING__ = False

@@ -51,6 +51,12 @@ Clone the repository from github:
 
     git clone https://github.com/aimat-lab/graph_attention_student
 
+Due to a problem with the ``torch-scatter`` package, the ``torch`` package has to be installed first.
+
+.. code-block:: shell
+
+    pip3 install torch==2.1.2
+
 Then in the main folder run a ``pip install``:
 
 .. code-block:: shell

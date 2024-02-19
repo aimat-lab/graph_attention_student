@@ -121,6 +121,11 @@ REGRESSION_REFERENCE: t.Optional[float] = 0.0
 #       reference as a hard threshold, values have to be at least this margin value lower/higher than the 
 #       regression reference to be considered a class sample.
 REGRESSION_MARGIN: t.Optional[float] = 0.0
+# :param NORMALIZE_EMBEDDING:
+#       This boolean value determines whether the graph embeddings are normalized to a unit length or not.
+#       If this is true, the embedding of each individual explanation channel will be L2 normalized such that 
+#       it is projected onto the unit sphere.
+NORMALIZE_EMBEDDING: bool = True
 # :param CONTRASTIVE_FACTOR:
 #       This is the factor of the contrastive representation learning loss of the network. If this value is 0 
 #       the contrastive repr. learning is completely disabled (increases computational efficiency). The higher 
@@ -130,6 +135,15 @@ CONTRASTIVE_FACTOR: float = 1.0
 #       This float value determines the noise level that is applied when generating the positive augmentations 
 #       during the contrastive learning process.
 CONTRASTIVE_NOISE: float = 0.0
+# :param CONTRASTIVE_TEMP:
+#       This float value is a hyperparameter that controls the "temperature" of the contrastive learning loss.
+#       The higher this value, the more the contrastive learning will be smoothed out. The lower this value,
+#       the more the contrastive learning will be focused on the most similar pairs of embeddings.
+CONTRASTIVE_TEMP: float = 1.0
+# :param CONTRASTIVE_BETA:
+#       This is the float value from the paper about the hard negative mining called the concentration 
+#       parameter. It determines how much the contrastive loss is focused on the hardest negative samples.
+CONTRASTIVE_BETA: float = 0.1
 # :param CONTRASTIVE_TAU:
 #       This float value is a hyperparameters of the de-biasing improvement of the contrastive learning loss. 
 #       This value should be chosen as roughly the inverse of the number of expected concepts. So as an example 
@@ -198,8 +212,11 @@ def train_model(e: Experiment,
             regression_margin=e.REGRESSION_MARGIN,
             prediction_mode=e.DATASET_TYPE,
             prediction_factor=e.PREDICTION_FACTOR,
+            normalize_embedding=e.NORMALIZE_EMBEDDING,
             contrastive_factor=e.CONTRASTIVE_FACTOR,
+            contrastive_temp=e.CONTRASTIVE_TEMP,
             contrastive_noise=e.CONTRASTIVE_NOISE,
+            contrastive_beta=e.CONTRASTIVE_BETA,
             contrastive_tau=e.CONTRASTIVE_TAU,
             learning_rate=e.LEARNING_RATE,
         )
@@ -209,11 +226,13 @@ def train_model(e: Experiment,
         trainer = pl.Trainer(
             max_epochs=e.EPOCHS,
             logger=logger,
+            # accelerator='cpu',
         )
         trainer.fit(
             model,
             train_dataloaders=train_loader,
             val_dataloaders=test_loader,
+            
         )
         
         model.to('cpu')

@@ -171,3 +171,11 @@ python during the forward pass and the training step implementation)
   - ``vgd_torch__megan__rb_dual_motifs.py``
   - ``vgd_torch__megan__aqsoldb.py``
   - ``vgd_torch__megan__mutagenicity.py``
+
+0.15.0 - xx.xx.2024
+-------------------
+
+- Created a new experiment module ``vgd_torch__megan__fia_49k.py`` which trains the MEGAN model on the FIA dataset 
+  for predicting the lewis acidity of molecules.
+- Slightly changed the MEGAN model's contrastive learning scheme to now use a projection head before applying the SimCLR 
+  loss. This is a common practice in the literature and should improve the performance of the model.
