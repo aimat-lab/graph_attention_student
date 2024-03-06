@@ -8,10 +8,15 @@ with value determining motifs. The advantage here is that all the ground truth e
 known and can be used to validate the effectiveness of megans explanations.
 """
 import os
+import pathlib
 import typing as t
 
 from pycomex.functional.experiment import Experiment
 from pycomex.utils import file_namespace, folder_path
+
+from graph_attention_student.utils import EXPERIMENTS_PATH
+
+PATH = pathlib.Path(__file__).parent.absolute()
 
 # == DATASET PARAMETERS ==
 # The following parameters determine the dataset and how to handle said dataset.
@@ -29,12 +34,13 @@ VISUAL_GRAPH_DATASET: str = 'rb_dual_motifs'
 DATASET_TYPE: str = 'regression' # 'classification'
 # :param TEST_INDICES_PATH:
 #       Optionally, this may be an absolute string path to a 
-TEST_INDICES_PATH: t.Optional[str] = None
+TEST_INDICES_PATH: t.Optional[str] = os.path.join(EXPERIMENTS_PATH, 'assets', 'splits', 'rb_dual_motifs__test_indices.json')
+#TEST_INDICES_PATH: t.Optional[str] = None
 # :param NUM_TEST:
 #       This integer number defines how many elements of the dataset are supposed to be sampled 
 #       for the unseen test set on which the model will be evaluated. This parameter will be ignored 
 #       if a test_indices file path is given.
-NUM_TEST: int = 500
+NUM_TEST: int = 1000
 # :param USE_BOOTSTRAPPING:
 #       This flag determines whether to use bootstrapping with the training elements of the dataset.
 #       If enabled, the training samples will be subsampled with the possibility of duplicates. This 
@@ -71,8 +77,8 @@ IMPORTANCE_UNITS: t.List[int] = [ ]
 #       This list determines the layer structure of the MLP's that act as the channel-specific projections.
 #       Each element in this list represents one layer where the integer value determines the number of hidden
 #       units in that layer.
-PROJECTION_UNITS: t.List[int] = [64, 128, 256]
-#PROJECTION_UNITS = [64, 3]
+#PROJECTION_UNITS: t.List[int] = [64, 128, 256]
+PROJECTION_UNITS = []
 # :param FINAL_UNITS:
 #       This list determines the layer structure of the model's final prediction MLP. Each element in 
 #       this list represents one layer, where the integer value determines the number of hidden units 
@@ -91,7 +97,7 @@ IMPORTANCE_FACTOR: float = 1.0
 #       This parameter more or less controls how expansive the explanations are - how much of the graph they
 #       tend to cover. Higher values tend to lead to more expansive explanations while lower values tend to 
 #       lead to sparser explanations. Typical value range 0.5 - 1.5
-IMPORTANCE_OFFSET: float = 1.5
+IMPORTANCE_OFFSET: float = 0.5
 # :param SPARSITY_FACTOR:
 #       This is the coefficient that is used to scale the explanation sparsity loss during training.
 #       The higher this value the more explanation sparsity (less and more discrete explanation masks)
@@ -104,20 +110,26 @@ SPARSITY_FACTOR: float = 1.0
 #       for this parameter is the average target value of the training dataset. Depending on the results for 
 #       that choice it is possible to adjust the value to adjust the explanations.
 REGRESSION_REFERENCE: t.Optional[float] = 0.0
+# :param REGRESSION_MARGIN:
+#       When converting the regression problem into the negative/positive classification problem for the 
+#       explanation co-training, this determines the margin for the thresholding. Instead of using the regression
+#       reference as a hard threshold, values have to be at least this margin value lower/higher than the 
+#       regression reference to be considered a class sample.
+REGRESSION_MARGIN: t.Optional[float] = 0.5
 # :param NORMALIZE_EMBEDDING:
 #       This boolean value determines whether the graph embeddings are normalized to a unit length or not.
 #       If this is true, the embedding of each individual explanation channel will be L2 normalized such that 
 #       it is projected onto the unit sphere.
-NORMALIZE_EMBEDDING: bool = True
+NORMALIZE_EMBEDDING: bool = False
 # :param CONTRASTIVE_FACTOR:
 #       This is the factor of the contrastive representation learning loss of the network. If this value is 0 
 #       the contrastive repr. learning is completely disabled (increases computational efficiency). The higher 
 #       this value the more the contrastive learning will influence the network during training.
-CONTRASTIVE_FACTOR: float = 1.0
+CONTRASTIVE_FACTOR: float = 0.0
 # :param CONTRASTIVE_NOISE:
 #       This float value determines the noise level that is applied when generating the positive augmentations 
 #       during the contrastive learning process.
-CONTRASTIVE_NOISE: float = 0.3
+CONTRASTIVE_NOISE: float = 0.1
 # :param CONTRASTIVE_TEMP:
 #       This float value is a hyperparameter that controls the "temperature" of the contrastive learning loss.
 #       The higher this value, the more the contrastive learning will be smoothed out. The lower this value,
@@ -139,8 +151,9 @@ CONTRASTIVE_BETA: float = 1.0
 #       tasks with a vastly different target value scale.
 PREDICTION_FACTOR: float = 1.0
 
-EPOCHS = 200
+EPOCHS = 250
 BATCH_SIZE = 200
+REPETITIONS = 5
 
 __DEBUG__ = True
 __TESTING__ = False

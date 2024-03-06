@@ -83,8 +83,8 @@ class MultiHeadAttention(nn.Module):
     """
     def __init__(self,
                  layers: t.List[AbstractAttentionLayer],
-                 activation: str = 'relu',
-                 aggregation: str = 'max',
+                 activation: str = 'leaky_relu',
+                 aggregation: str = 'sum',
                  ):
         super().__init__()
         

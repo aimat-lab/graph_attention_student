@@ -194,6 +194,7 @@ def train_model(e: Experiment,
         
         e.log(f'Instantiating Megan model - with explanation training...')
         e.log(f'explanation mode: {e.DATASET_TYPE}')
+        e.log(f' * importance offset: {e.IMPORTANCE_OFFSET}')
         model = Megan(
             node_dim=e['node_dim'],
             edge_dim=e['edge_dim'],

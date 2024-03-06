@@ -252,6 +252,14 @@ class Megan(AbstractGraphModel):
             out_features=num_channels,
         ))
         
+        # self.node_transformation_layers = nn.ModuleList()
+        # for k in range(num_channels):
+        #     lay = nn.Linear(
+        #         in_features=self.embedding_dim,
+        #         out_features=self.embedding_dim,
+        #     )
+        #     self.node_transformation_layers.append(lay)
+        
         # ~ Graph embedding projection
         # After the graph embeddigns were created as an attention-weighted sum of the node embeddings, 
         # that graph representation is additionally subjected to a projection MLP. The important 
@@ -311,7 +319,8 @@ class Megan(AbstractGraphModel):
                 data: Data, 
                 node_mask: t.Optional[torch.Tensor] = None,
                 node_importance_overwrite: t.Optional[torch.Tensor] = None,
-                node_feature_mask: t.Optional[torch.Tensor] = None
+                node_feature_mask: t.Optional[torch.Tensor] = None,
+                stop_importance_grad: bool = False,
                 ) -> t.Dict[str, torch.Tensor]:
     
         node_input, edge_input, edge_index = data.x, data.edge_attr, data.edge_index
@@ -324,6 +333,8 @@ class Megan(AbstractGraphModel):
         # In this list we are going to store all the edge attention tensors "alpha" for the 
         # individual layers.
         alphas: t.List[nn.Module] = []
+        weights = []
+        weight = 1.0
         for lay in self.encoder_layers:
             
             # Each layer of the graph encoder part is supposed to be based on the ``AbstractAttentionLayer``
@@ -373,6 +384,11 @@ class Megan(AbstractGraphModel):
         #node_importance = node_importance * edge_importance_pooled
         node_importance = edge_importance_pooled
         
+        # TODO
+        if stop_importance_grad:
+            node_importance = node_importance.detach()
+            edge_importance = edge_importance.detach()
+        
         if node_mask is not None:
             node_importance = node_importance * node_mask
             
@@ -386,6 +402,9 @@ class Megan(AbstractGraphModel):
         graph_embedding_channels = []
         for k, layers in enumerate(self.channel_projection_layers):
             node_embedding_ = node_embedding
+            
+            # lay_node_trafo = self.node_transformation_layers[k]
+            # node_embedding_ = lay_node_trafo(node_embedding_).relu()
             
             node_embedding_ = node_embedding_ * node_importance[:, k].unsqueeze(-1)
             if node_feature_mask is not None:
@@ -422,7 +441,11 @@ class Megan(AbstractGraphModel):
             
         # output: (B, O)
         output = self.dense_layers[-1](output)
-        # output = self.lay_act_final(output)
+        
+        # We basically want to use the regression reference as a preset for the output 
+        # bias of the prediction.
+        if self.prediction_mode == 'regression':
+            output += self.regression_reference
             
         return {
             'graph_output': output,
@@ -569,6 +592,8 @@ class Megan(AbstractGraphModel):
         """
         loss_cont = 0.0
         
+        # info = self(data, stop_importance_grad=True)
+        
         # ~ positive samples / data augmentation
         # As a first step we need to construct the data augmentation to obtain the positive 
         # samples for the constrastive term.
@@ -599,8 +624,8 @@ class Megan(AbstractGraphModel):
         # In the SimCLR framework we need 2 augmented views in total, so here we create the binarized 
         # feature masks but with two slightly different thresholds to capture kind of a multi-level 
         # information about the explanation
-        node_importance_bin_1 = (node_importance_norm > 0.5).float()
-        node_importance_bin_2 = (node_importance_norm > 0.3).float()
+        node_importance_bin_1 = (node_importance_norm > 0.8).float()
+        node_importance_bin_2 = (node_importance_norm > 0.6).float()
         
         # node_importance_bin_1 = self.lay_mask_expansion(
         #     mask=node_importance_bin_1,
@@ -620,14 +645,14 @@ class Megan(AbstractGraphModel):
         info_1 = self(
             data, 
             node_importance_overwrite=node_importance_1, 
-            #node_mask=node_importance_1,
             node_feature_mask=node_importance_bin_1,
+            stop_importance_grad=False,
         )
         info_2 = self(
             data, 
             node_importance_overwrite=node_importance_2, 
-            #node_mask=node_importance_2,
             node_feature_mask=node_importance_bin_2,
+            stop_importance_grad=False,
         )
         
         # The negative samples are realized as simply assuming that all other samples of a current batch 
@@ -699,8 +724,6 @@ class Megan(AbstractGraphModel):
             #Neg = sim_neg_exp.sum(dim=-1)
             
             loss_cont += (1 / self.num_channels) * torch.mean(-torch.log((sim_pos_exp) / (sim_pos_exp + Neg)))
-            #loss_cont += (1 / self.num_channels) * torch.mean(-torch.log((sim_pos_exp) / (sim_neg_exp.mean())) * (1 - is_empty_k))
-            #print(k, (1 / self.num_channels) * torch.mean(-torch.log((sim_pos_exp) / (sim_pos_exp + Neg))))
             
         return loss_cont
     
@@ -752,7 +775,7 @@ class Megan(AbstractGraphModel):
             axis=1).float()
             
             # values_pred: (B, K)
-            values_pred = torch.sigmoid(3 * (pooled_importance - self.importance_offset))
+            values_pred = torch.sigmoid(5 * (pooled_importance - self.importance_offset))
             
             loss_expl = F.binary_cross_entropy(values_pred, values_true)
             
@@ -765,7 +788,7 @@ class Megan(AbstractGraphModel):
             # values_true: (B, K)
             values_true = out_true
             # values_pred: (B, K)
-            values_pred = torch.sigmoid(3 * (pooled_importance - self.importance_offset))
+            values_pred = torch.sigmoid(5 * (pooled_importance - self.importance_offset))
             
             loss_expl = F.binary_cross_entropy(values_pred, values_true)
                         

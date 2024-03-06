@@ -148,6 +148,13 @@ class AbstractGraphModel(pl.LightningModule):
         predictions = [result['graph_output'] for result in results]
         return np.stack(predictions, axis=0)
     
+    def save(self, path: str) -> None:
+        torch.save({
+            'state_dict': self.state_dict(),
+            'hyper_parameters': self.hparams,
+            'pytorch-lightning_version': pl.__version__,
+        }, path)
+    
     def _loader_from_graphs(self,
                             graphs: t.List[tv.GraphDict], 
                             batch_size: int
