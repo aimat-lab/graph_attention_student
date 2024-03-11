@@ -6,12 +6,14 @@ import typing as t
 
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.cm as cm
 from pycomex.functional.experiment import Experiment
 from pycomex.utils import file_namespace, folder_path
 from visual_graph_datasets.config import Config
 from visual_graph_datasets.web import ensure_dataset
 from visual_graph_datasets.data import VisualGraphDatasetReader
 from visual_graph_datasets.visualization.importances import create_importances_pdf
+from visual_graph_datasets.visualization.importances import create_combined_importances_pdf
 from visual_graph_datasets.visualization.importances import plot_node_importances_background
 from visual_graph_datasets.visualization.importances import plot_edge_importances_background
 
@@ -32,6 +34,9 @@ VISUAL_GRAPH_DATASET: str = 'rb_dual_motifs'
 #       indices of the dataset elements to be used for the plotting of the explanations. If this is not 
 #       given, the indices will be sampled from the dataset randomly with the given number of indices.
 INDICES_PATH: t.Optional[str] = None
+# :param ELEMENTS:
+#       There is a list of elements here that is the model where there is a 
+ELEMENTS: t.Optional[list[str]] = None
 # :param NUM_ELEMENTS:
 #       This integer number defines how many elements of the dataset are supposed to be sampled for the
 #       plotting of the explanations. This parameter will be ignored if a indices file path is given.
@@ -186,6 +191,15 @@ def experiment(e: Experiment):
         labels_list=labels,
         output_path=pdf_path,
         logger=e.logger,
+    )
+    
+    # :hook additional_explanations:
+    #       This hook can be called to generate additional visualizations.
+    e.apply_hook(
+        'additional_explanation',
+        index_data_map=index_data_map,
+        indices=indices,
+        graphs=graphs,
     )
     
     

@@ -319,6 +319,40 @@ def binary_threshold_k(array: np.array,
 
     return binary
 
+
+def fidelity_from_deviation(dev: np.ndarray,
+                            dataset_type: t.Literal['classification', 'regression']
+                            ) -> np.ndarray:
+    """
+    Given the leave-one-out deviation array ``dev`` and the string identifier for the ``dataset_type``, this 
+    function returns the fidelity array.
+    
+    :param dev: The leave-one-out deviation array with the shape (num_outputs, num_channels)
+    :param dataset_type: The string identifier for the dataset type. This can be either "classification" or
+        "regression".
+    :returns: The fidelity array with the shape (num_channels, )
+    """
+    
+    # For classification tasks, the number of channels has to be equal to the number of possible classes 
+    # (== number of outputs). And in this case the fidelity depends on the deviation that a channel causes 
+    # to the logits of it's own class (the output of the same index), which is the diagonal of the deviation
+    # matrix.
+    if dataset_type == 'classification':
+        fidelity = np.diag(dev)
+        
+    # For regression tasks, the number of channels is usually 2, where the first channel is the negative 
+    # and the second channel is the positive channel. Also the number of outputs can only be 1 in this case.
+    # The fidelity just indicates the absolute influence we need to invert the sign of the negative channel's 
+    # deviation value.
+    elif dataset_type == 'regression':
+        fidelity = np.array([-dev[0, 0], dev[0, 1]])    
+
+    else:
+        raise ValueError(f'Unknown dataset type: {dataset_type} - only "classification" and "regression" are allowed.')
+
+    return fidelity
+
+
 # == NATURAL LANGUAGE PROCESSING ============================================================================
 
 
