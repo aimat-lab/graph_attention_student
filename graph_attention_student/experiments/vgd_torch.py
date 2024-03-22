@@ -216,6 +216,41 @@ def load_model(e: Experiment,
     return Megan.load_from_checkpoint(path)
 
 
+def train_test_split(e: Experiment,
+                     rep: int,
+                     indices: list[int],
+                     index_data_map: dict[int, dict]
+                     ) -> tuple[list, list]:
+    """
+    This hook is supposed to determine the split of the indices into the training and testing set. 
+    The function is supposed to return a tuple (train_indices, test_indices) where both are the lists 
+    of integer indices for the train and test set respectively.
+    
+    This default implementation will first check whether a TEST_INDICES_PATH is defined for the 
+    dataset. In case a file exists it will load that file as a JSON list and use the integer elements 
+    of that list as the test indices. Otherwise it will sample random test elements from the indices
+    list (using NUM_TEST elements) and use the rest for training.
+    """
+    if e.TEST_INDICES_PATH is not None:
+        assert os.path.exists(e.TEST_INDICES_PATH), 'test_indices path not valid / does not exist!'
+        assert e.TEST_INDICES_PATH.endswith('.json'), 'test_indices must be JSON file!'
+
+        e.log('found existing test_indices file...')
+        with open(e.TEST_INDICES_PATH) as file:
+            content = file.read()
+            test_indices = json.loads(content)
+            
+    else:
+        e.log('sampling random test elements...')
+        test_indices = random.sample(indices, k=e.NUM_TEST)
+        
+    # The train indices can very simply be derived as all those indices which are not already part of 
+    # the test set!
+    train_indices = list(set(indices).difference(set(test_indices)))
+        
+    return train_indices, test_indices
+
+
 @experiment.hook('train_model', default=True)
 def train_model(e: Experiment,
                 rep: int,
@@ -566,18 +601,17 @@ def experiment(e: Experiment):
         # as many random test elements as defined in NUM_TEST parameter and use the rest for training.
         
         e.log('determining train-test split...')
-        if e.TEST_INDICES_PATH is not None:
-            assert os.path.exists(e.TEST_INDICES_PATH), 'test_indices path not valid / does not exist!'
-            assert e.TEST_INDICES_PATH.endswith('.json'), 'test_indices must be JSON file!'
-
-            e.log('found existing test_indices file...')
-            with open(e.TEST_INDICES_PATH) as file:
-                content = file.read()
-                test_indices = json.loads(content)
-                
-        else:
-            e.log('sampling random test elements...')
-            test_indices = random.sample(indices, k=e.NUM_TEST)
+        
+        # :hook train_test_split:
+        #       This hook receives the repetition index, the full list of indices of the dataset and the
+        #       index_data_map of the dataset. The hook is supposed to return a tuple (train_indices, test_indices)
+        #       where both are lists of integer indices for the train and test set respectively.
+        train_indices, test_indices = e.apply_hook(
+            'train_test_split',
+            rep=rep,
+            indices=indices,
+            index_data_map=index_data_map,
+        )
             
         # the training indices is just all the rest of the elements that were NOT chosen as the
         # Despite the conversion from list to set and back, this implementation is still the fastest when 
@@ -588,6 +622,11 @@ def experiment(e: Experiment):
         example_indices = random.sample(test_indices, k=num_examples)
         e.log(f'using {len(test_indices)} test elements and {len(train_indices)} train_elements')
         
+        # Bootstrapping is a method to introduce diversity in the input data distribution between different
+        # trained models even though they have the same train-test split. This can be useful to estimate the
+        # variance of the model performance.
+        # When bootstrapping is enabled, we simply sample the training indices with replacement which 
+        # introduces duplicates in the training set.
         if e.USE_BOOTSTRAPPING:
             e.log('sub-sampling the training elements for bootstrapping...')    
             train_indices = random.choices(train_indices, k=len(train_indices))

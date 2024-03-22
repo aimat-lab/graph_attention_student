@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name = "graph_attention_student"
-version = "0.15.0"
+version = "0.15.1"
 description = "MEGAN: Multi Explanation Graph Attention Network"
 license = "MIT"
 authors = ["Jonas Teufel <jonseb1998@gmail.com>"]
@@ -29,7 +29,7 @@ exclude = [
 graph_attention_student = 'graph_attention_student.cli:cli'
 
 [tool.poetry.dependencies]
-python = ">=3.10.0,<3.13"
+python = ">=3.10.0,<3.16"
 pycomex = ">=0.9.2"
 click = ">=7.1.2"
 jinja2 = ">=3.0.3"

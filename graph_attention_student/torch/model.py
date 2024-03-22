@@ -148,6 +148,29 @@ class AbstractGraphModel(pl.LightningModule):
         predictions = [result['graph_output'] for result in results]
         return np.stack(predictions, axis=0)
     
+    def predict_graph(self,
+                      graph: tv.GraphDict
+                      ) -> np.ndarray:
+        """
+        Given a single graph representation, this method will return the network's output prediction for 
+        that graph.
+        
+        If there is more than one graph to be predicted, this method is NOT recommended. Instead, the 
+        predict_graphs method should be used - which is able to use the performance gain of properly batching 
+        the input graphs for the model inference
+        
+        :param graph: The graph for which to generate the prediction.
+        
+        :returns: numpy array of shape (output_dim, )
+        """
+        info = self.forward_graphs(
+            graphs=[graph],
+            batch_size=1,
+        )[0]
+
+        prediction: np.ndarray = info['graph_output']
+        return prediction
+    
     def save(self, path: str) -> None:
         torch.save({
             'state_dict': self.state_dict(),
