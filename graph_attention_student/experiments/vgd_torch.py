@@ -91,6 +91,13 @@ NUM_EXAMPLES: int = 25
 #       of the targets in the order as they appear in the dataset. The values are string which will be 
 #       used as the names of these targets within the evaluation visualizations and log messages etc.
 TARGET_NAMES: t.Dict[int, str] = defaultdict(str)
+# :param CLASS_OVERSAMPLING:
+#       This flag determines whether to oversample the training elements of the minority classes to 
+#       counter class imbalance in the training dataset. Only set this flag to True if dealing with a 
+#       classification dataset!
+#       The class label-based oversampling will only be applied to the training set after the train test 
+#       split has been determined and therefore does not affect the test dataset.
+CLASS_OVERSAMPLING: bool = False
 
 # == MODEL PARAMETERS ==
 # The following parameters configure the model architecture.
@@ -216,6 +223,7 @@ def load_model(e: Experiment,
     return Megan.load_from_checkpoint(path)
 
 
+@experiment.hook('train_test_split', default=False, replace=False)
 def train_test_split(e: Experiment,
                      rep: int,
                      indices: list[int],
@@ -249,6 +257,60 @@ def train_test_split(e: Experiment,
     train_indices = list(set(indices).difference(set(test_indices)))
         
     return train_indices, test_indices
+
+
+@experiment.hook('filter_train_indices', default=False, replace=False)
+def filter_train_indices(e: Experiment,
+                         rep: int,
+                         train_indices: list[int],
+                         index_data_map: dict[int, dict]
+                         ) -> list[int]:
+    """
+    This hook is called after the train-test split has been determined and is supposed to filter the 
+    training indices list. This can be useful to remove certain elements from the training set that 
+    should not be part of the training process. This hook returns the modified train indices list.
+    
+    This default implementation optionally applies bootstrapping to the training indices, which does 
+    the thing where there is a method that does the thing.
+    """
+    e.log(f'filtering {len(train_indices)} training elements...')
+    
+    # Bootstrapping is a method to introduce diversity in the input data distribution between different
+    # trained models even though they have the same train-test split. This can be useful to estimate the
+    # variance of the model performance.
+    # When bootstrapping is enabled, we simply sample the training indices with replacement which 
+    # introduces duplicates in the training set.
+    if e.USE_BOOTSTRAPPING:
+        e.log('sub-sampling the training elements for bootstrapping...')    
+        train_indices = random.choices(train_indices, k=len(train_indices))
+        
+    # Exspecially for classification tasks it is possible that the training set is imbalance in terms of
+    # the class distribution. In this case it can be useful to oversample the training elements of the
+    # minority class to counter the class imbalance.
+    if e.CLASS_OVERSAMPLING:
+        e.log('oversampling the training elements to counter class imbalance...')
+
+        # First of all we want to determine the class label for every index of the train set. For this we 
+        # construct a dict structure, whose keys are the integer index of the possible classes and the 
+        # corresponding values are list of indices that belong to that class.
+        class_indices_map = defaultdict(list)
+        for index in train_indices:
+            graph_labels = index_data_map[index]['metadata']['graph']['graph_labels']
+            label = np.argmax(graph_labels)
+            class_indices_map[label].append(index)
+            
+        # Then we determine the largest list here (the class with the most training elements) and subsequently 
+        # we sample exactly that number of elements from all of the other classes as well (allowing duplicates)
+        # to equalize the training set!
+        num_max = max([len(indices) for indices in class_indices_map.values()])
+        train_indices_sampled = []
+        for label, indices in class_indices_map.items():
+            indices_ = random.choices(indices, k=num_max)
+            train_indices_sampled += indices_
+            
+        train_indices = train_indices_sampled
+        
+    return train_indices
 
 
 @experiment.hook('train_model', default=True)
@@ -622,14 +684,18 @@ def experiment(e: Experiment):
         example_indices = random.sample(test_indices, k=num_examples)
         e.log(f'using {len(test_indices)} test elements and {len(train_indices)} train_elements')
         
-        # Bootstrapping is a method to introduce diversity in the input data distribution between different
-        # trained models even though they have the same train-test split. This can be useful to estimate the
-        # variance of the model performance.
-        # When bootstrapping is enabled, we simply sample the training indices with replacement which 
-        # introduces duplicates in the training set.
-        if e.USE_BOOTSTRAPPING:
-            e.log('sub-sampling the training elements for bootstrapping...')    
-            train_indices = random.choices(train_indices, k=len(train_indices))
+        # :hook filter_train_indices:
+        #       This hook receives the repetition index, the train_indices list and the index_data_map of the dataset.
+        #       The hook is supposed to return the modified train_indices list. This can be useful to remove certain
+        #       elements from the training set that should not be part of the training process. Otherwise this hook 
+        #       can also apply bootstrapping to the training indices or to oversample in case of class imbalance.
+        train_indices = e.apply_hook(
+            'filter_train_indices',
+            rep=rep,
+            train_indices=train_indices,
+            index_data_map=index_data_map,
+            default=train_indices
+        )
         
         e[f'test_indices/{rep}'] = test_indices
         e[f'train_indices/{rep}'] = train_indices
