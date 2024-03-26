@@ -84,7 +84,6 @@ Specifically, this experiment inheritance can be used to extend the already exis
 model training and only overwriting specific parameters and functionality that is required for each specific 
 use case.
 
-====================================================================
 ⚗️ Converting SMILES based Datasets for Molecular Property Prediction
 ====================================================================
 
@@ -114,8 +113,10 @@ visual graph dataset format.
 
 .. code-block:: python
 
+    import os
     from pycomex.functional.experiment import Experiment
     from pycomex.utils import folder_path, file_namespace
+    from visual_graph_datasets.util import EXPERIMENTS_PATH
 
     # == CUSTOMIZE PARAMETERS ==
 
@@ -127,11 +128,13 @@ visual graph dataset format.
     TARGET_COLUMN_NAMES: t.List[str] = ['class_0', 'class_1']
     # Define the type of the dataset / task
     TARGET_TYPE: str = 'classification' # or 'regression'
+    # The name of the dataset in the artifacts folder  
+    DATASET_NAME: str = 'dataset'
 
     # == INHERIT EXPERIMENT ==
 
     experiment = Experiment.extend(
-        'base_experiment.py',
+        os.path.join(EXPERIMENTS_PATH, 'generate_molecule_dataset_from_csv.py'),
         base_path=folder_path(__file__),
         namespace=file_namespace(__file__),
         glob=globals()
@@ -145,22 +148,58 @@ visual graph dataset format.
     The corresponding values in these columns should be 0/1 values indicating if a molecule belongs to that class 
     or not. For regression problems, the single target column should contain the raw float property values.
 
+After executing this sub-experiment, a new visual graph dataset will be created in the artifacts subfolder of the 
+``results`` folder. The absolute path to this dataset folder will be required in the training step.
 
-===========================
+
 🤖 Training the MEGAN Model
 ===========================
 
-Assuming that a new visual graph dataset was successfully generated in the previous step, this method will 
+Assuming that a new visual graph dataset was successfully generated in the previous step, this section elaborates 
+how to train a new MEGAN model based on this dataset.
+
+To train, one has to create a new sub-experiment module that inherits from the ``vgd_torch__megan.py`` base experiment
+like this:
+
+.. code-block:: python
+
+    import os
+    from pycomex.functional.experiment import Experiment
+    from pycomex.utils import folder_path, file_namespace
+    from graph_attention_student.util import EXPERIMENTS_PATH
+
+    # == CUSTOMIZE PARAMETERS ==
+
+    # Insert absolute path to the recently created visual graph dataset folder
+    VISUAL_GRAPH_DATASET: str = 'path/to/visual/graph/dataset/folder'
+    # Insert name of the column that contains the SMILES representation
+    SMILES_COLUMN_NAME: str = 'smiles'
+    # Insert name of the columns that contain the target values
+    TARGET_COLUMN_NAMES: t.List[str] = ['class_0', 'class_1']
+    # Define the type of the dataset / task
+    TARGET_TYPE: str = 'classification' # or 'regression'
+    # The name of the dataset in the artifacts folder  
+    DATASET_NAME: str = 'dataset'
+
+    # == INHERIT EXPERIMENT ==
+
+    experiment = Experiment.extend(
+        os.path.join(EXPERIMENTS_PATH, 'vgd_torch__megan.py'),
+        base_path=folder_path(__file__),
+        namespace=file_namespace(__file__),
+        glob=globals()
+    )
+    experiment.run_if_main()
 
 
-=======
 ❓ FAQs
 =======
 
 This section will answer some common questions that may arise during the process of training a custom MEGAN model.
 
+
 Where is the actual code?
-=========================
+-------------------------
 
 Pass
 
