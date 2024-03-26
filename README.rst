@@ -89,21 +89,6 @@ This package provides some functionality to load a pre-trained MEGAN model from 
 this for the example of predicting a molecular graph's water solubility using the default MEGAN model that is included in the 
 package for this task.
 
-.. code-block:: 
-
-    import os
-    import typing as t
-
-.. code-block:: Python-3
-
-    import os
-    import typing as t
-
-.. code-block:: python
-
-    import os
-    import typing as t
-
 .. code-block:: python
 
     import os
