@@ -76,6 +76,15 @@ experiment = Experiment(
 
 @experiment.hook('load_dataset')
 def load_dataset(e: Experiment):
+    """
+    This hook is called to load the dataset from the disk. The dataset location is not given as 
+    an argument of the hook but as the global parameter VISUAL_GRAPH_DATASET.
+    
+    This default implementation will first try to resolve the given dataset string as an absolute 
+    path on the local system and if it does not find a valid dataset folder locally, will try 
+    to interpret the string as a unique identifier of a dataset which can be downloaded from the
+    main remote file share location.
+    """
     
     if os.path.exists(e.VISUAL_GRAPH_DATASET):
         dataset_path = e.VISUAL_GRAPH_DATASET
@@ -104,7 +113,15 @@ def create_explanations(e: Experiment,
                         indices: list[int],
                         graphs: list[dict],
                         ) -> tuple[list[np.ndarray], list[np.ndarray]]:
+    """
+    This hook is called to create the explanations for the given graphs. The graphs to be 
+    explained are given in the form of the ``indices`` and the ``graphs`` list. This hook 
+    is not supposed to return anything but rather to directly save the explanations as 
+    experiment artifacts.
     
+    This default implementation will use the ``create_explanations_pdf`` function to create 
+    create a PDF file containing the explanations of all the given graphs.
+    """
     e.log('creating random explanations...')
 
     node_importances_list = []
@@ -126,9 +143,14 @@ def create_labels(e: Experiment,
                   indices: list[int],
                   graphs: list[dict],
                   ) -> list[str]:
+    """
+    This is hook is supposed to create a list of string labels which will be printed as the headers
+    of each of the figures during the visualization.
     
+    This default implementation returns empty strings for the labels. 
+    """
     e.log('creating labels...')
-    labels = ['random' for index in indices]
+    labels = ['---' for index in indices]
     return labels
 
 
@@ -145,6 +167,8 @@ def experiment(e: Experiment):
     )
     processing: ProcessingBase
     
+    # If the ELEMENTS parameter is given then this indicates that we want to create the explanations 
+    # for this given list of graph elements and not for the dataset.
     if e.ELEMENTS:
         
         cache_path = os.path.join(e.path, 'cache')
@@ -172,6 +196,8 @@ def experiment(e: Experiment):
         index_data_map = reader.read()
         indices = list(index_data_map.keys())
 
+    # Only if the ELEMENTS list is not defined, we consider the other options based on the dataset
+    # which is to either visualize elements from the test set or sample randomly for it.
     else:
         e.log('visualizing samples from the dataset...')
 
