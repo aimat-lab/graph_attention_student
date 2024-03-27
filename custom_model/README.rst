@@ -85,8 +85,8 @@ model training and only overwriting specific parameters and functionality that i
 use case.
 
 
-⚗️ Converting SMILES based Datasets for Molecular Property Prediction
-====================================================================
+Converting SMILES based Datasets for Molecular Property Prediction
+==================================================================
 
 Since the application of MEGAN for molecular property prediction for a SMILES-based dataset is the most common use case, the 
 following elaborations will use this as an example to demonstrate the required steps to train a custom MEGAN model.
@@ -142,9 +142,11 @@ visual graph dataset format.
     )
     experiment.run_if_main()
 
-> **NOTE.** For a classification dataset, there should be as many target columns as there are classes in the dataset. 
-> The corresponding values in these columns should be 0/1 values indicating if a molecule belongs to that class 
-> or not. For regression problems, the single target column should contain the raw float property values.
+
+**NOTE.** For a classification dataset, there should be as many target columns as there are classes in the dataset. 
+The corresponding values in these columns should be 0/1 values indicating if a molecule belongs to that class 
+or not. For regression problems, the single target column should contain the raw float property values.
+
 
 After executing this sub-experiment, a new visual graph dataset will be created in the artifacts subfolder of the 
 ``results`` folder. The absolute path to this dataset folder will be required in the training step.
