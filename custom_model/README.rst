@@ -85,8 +85,8 @@ model training and only overwriting specific parameters and functionality that i
 use case.
 
 
-Converting SMILES based Datasets for Molecular Property Prediction
-==================================================================
+📝 Converting SMILES-based Datasets
+===================================
 
 Since the application of MEGAN for molecular property prediction for a SMILES-based dataset is the most common use case, the 
 following elaborations will use this as an example to demonstrate the required steps to train a custom MEGAN model.
@@ -191,6 +191,10 @@ like this:
     # For regression tasks, this value should be set to the median target value of the 
     # dataset (defines the reference point of what is considered "negative" and "positive")
     REGRESSION_REFERENCE: t.Optional[float] = None
+    # Number of graphs to use for one batch
+    BATCH_SIZE: int = 64
+    # Number of full epochs to train the model for
+    EPOCHS: int = 100
 
     # == INHERIT EXPERIMENT ==
 
@@ -201,6 +205,13 @@ like this:
         glob=globals()
     )
     experiment.run_if_main()
+
+
+Executing this experiment will initiate the training of a new MEGAN model - depending on the dataset size and the chosen 
+number of training epochs, this may take a while. Once finished, the results of the training and the evaluation on the test 
+set are saved as artifacts in the corresponding subfolder of the ``results`` folder. 
+
+The artifacts also include a ``model.ckpt`` which can be loaded to perform new predictions without having to retrain the model.
 
 
 ❓ FAQs
