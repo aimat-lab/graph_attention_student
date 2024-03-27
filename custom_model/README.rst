@@ -12,7 +12,7 @@ Overall, the process can be summerized into the following two steps:
    from which the model can be easily trained.
 2. Configure the model hyperparameters and train the model on the visual graph dataset created in the previous step. 
 
-======================================
+
 🧪 PyComex - Computational Experiments
 ======================================
 
@@ -164,6 +164,7 @@ like this:
 .. code-block:: python
 
     import os
+    import typing as t
     from pycomex.functional.experiment import Experiment
     from pycomex.utils import folder_path, file_namespace
     from graph_attention_student.util import EXPERIMENTS_PATH
@@ -172,14 +173,24 @@ like this:
 
     # Insert absolute path to the recently created visual graph dataset folder
     VISUAL_GRAPH_DATASET: str = 'path/to/visual/graph/dataset/folder'
-    # Insert name of the column that contains the SMILES representation
-    SMILES_COLUMN_NAME: str = 'smiles'
-    # Insert name of the columns that contain the target values
-    TARGET_COLUMN_NAMES: t.List[str] = ['class_0', 'class_1']
     # Define the type of the dataset / task
-    TARGET_TYPE: str = 'classification' # or 'regression'
-    # The name of the dataset in the artifacts folder  
-    DATASET_NAME: str = 'dataset'
+    DATASET_TYPE: str = 'classification' # or 'regression'
+    # The number of randomly chosen elements from the dataset to act as the test set
+    NUM_TEST: int = 1000
+
+    # The number of hidden units in the message passing layers of the network
+    UNITS: t.List[int] = [64, 64, 64]
+    # The numbers of hidden units in the dense projection networks
+    PROJECTION_UNITS: t.List[int] = [64, 128, 258]
+    # The number of hidden units in the final prediction network
+    # NOTE: The last value must be equal to the number of target values in the dataset!
+    FINAL_UNITS: t.List[int] = [32, 1]
+    # The number of explanation channels.
+    # regression: always 2 (positive and negative) - classification: number of classes
+    NUM_CHANNELS: int = 2
+    # For regression tasks, this value should be set to the median target value of the 
+    # dataset (defines the reference point of what is considered "negative" and "positive")
+    REGRESSION_REFERENCE: t.Optional[float] = None
 
     # == INHERIT EXPERIMENT ==
 
@@ -197,11 +208,24 @@ like this:
 
 This section will answer some common questions that may arise during the process of training a custom MEGAN model.
 
+What if I need to customize additional aspects not listed here?
+---------------------------------------------------------------
 
-Where is the actual code?
--------------------------
+In this case, a good first step is to read the read through the base experiment files that are used as the basis of 
+of the specific sub-experiments:
 
-Pass
+- https://github.com/aimat-lab/graph_attention_student/blob/master/graph_attention_student/experiments/vgd_torch__megan.py
+- https://github.com/aimat-lab/graph_attention_student/blob/master/graph_attention_student/experiments/vgd_torch.py
+- https://github.com/aimat-lab/visual_graph_datasets/blob/master/visual_graph_datasets/experiments/generate_molecule_dataset_from_csv.py
 
+These files define a lot more parameters than the ones that are presented in this guide. Chances are, that you'll already 
+find a parameter for the customization you have in mind. If not, the next best option would be to look at what kinds of *hooks* are 
+used in these base experiments. As a first measure, it'd make sense to overwrite one of the hooks to achieve the desired 
+functionality.
+
+Only if None of these options are possible, you can modify the base experiment files directly to implement the desired functionality.
+This measure is discouraged, however, because these custom modifications will conflict with future updates to the base experiment files. 
+If the changes are implemented purely by overwriting parameters or hooks in a sub-experiment, the chances are high that these will maintain 
+compatible even if the base experiments are upaded in future version of the ``graph_attention_student`` or ``visual_graph_datasets`` packages.
 
 .. _Pycomex: https://github.com/the16thpythonist/pycomex/tree/master
