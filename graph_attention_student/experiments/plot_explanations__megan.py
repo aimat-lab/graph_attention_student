@@ -12,6 +12,7 @@ from visual_graph_datasets.visualization.importances import create_combined_impo
 
 from graph_attention_student.torch.megan import Megan
 from graph_attention_student.utils import fidelity_from_deviation
+from graph_attention_student.visualization import truncate_colormap
 
 # == DATASET PARAMETERS ==
 # This section contains the parameters which determine the dataset and how to handle said dataset.
@@ -62,8 +63,8 @@ MODEL_PATH: str = 'rb_dual_motifs__2021-09-14_17-01-05__model__best.pth'
 #       appear in the model. The values are matplotlib color maps which will be used to color the explanation
 #       masks in the visualization.
 CHANNEL_COLORS_MAP: dict[int, mcolors.Colormap] = {
-    0: cm.get_cmap('Blues'),
-    1: cm.get_cmap('Reds'),
+    0: truncate_colormap(cm.get_cmap('Blues'), 0.0, 0.7),
+    1: truncate_colormap(cm.get_cmap('Reds'), 0.0, 0.7),
 }
 # :param IMPORTANCE_THRESHOLD:
 #       This float value determines the threshold for the binarization of the importance values. This binarization 

@@ -12,6 +12,8 @@ from pycomex.utils import file_namespace, folder_path
 from visual_graph_datasets.config import Config
 from visual_graph_datasets.web import ensure_dataset
 from visual_graph_datasets.data import VisualGraphDatasetReader
+from visual_graph_datasets.data import VisualGraphDatasetWriter
+from visual_graph_datasets.processing.base import ProcessingBase
 from visual_graph_datasets.visualization.importances import create_importances_pdf
 from visual_graph_datasets.visualization.importances import create_combined_importances_pdf
 from visual_graph_datasets.visualization.importances import plot_node_importances_background
@@ -35,7 +37,11 @@ VISUAL_GRAPH_DATASET: str = 'rb_dual_motifs'
 #       given, the indices will be sampled from the dataset randomly with the given number of indices.
 INDICES_PATH: t.Optional[str] = None
 # :param ELEMENTS:
-#       There is a list of elements here that is the model where there is a 
+#       This is optionally a list of elements that should be visualized. This list should consist of 
+#       the string domain representations of the corresponding graph elements to be used for the prediction
+#       and explanation. In the case of molecular graphs the string domain representation for example is 
+#       the SMILES string. If this parameter is given (not None) then only the elements from this list 
+#       will be used for the explanations and the dataset elements will NOT be used.
 ELEMENTS: t.Optional[list[str]] = None
 # :param NUM_ELEMENTS:
 #       This integer number defines how many elements of the dataset are supposed to be sampled for the
@@ -85,7 +91,11 @@ def load_dataset(e: Experiment):
         log_step=1000,
     )
     index_data_map = reader.read()
-    return index_data_map
+    
+    module = reader.read_process()
+    processing = module.processing
+    
+    return index_data_map, processing
 
 
 @experiment.hook('create_explanations', default=False, replace=False)
@@ -130,16 +140,48 @@ def experiment(e: Experiment):
     # :hook load_dataset:
     #       This hook is called to load the dataset from the given path or identifier and return the
     #       index_data_map which is a dictionary of the dataset elements with their corresponding indices.
-    index_data_map = e.apply_hook(
+    index_data_map, processing = e.apply_hook(
         'load_dataset',
     )
+    processing: ProcessingBase
     
-    e.log('choosing the samples to be visualized...')
-    if e.INDICES_PATH:
-        with open(e.INDICES_PATH, 'r') as f:
-            indices = json.load(f)
-    else:
+    if e.ELEMENTS:
+        
+        cache_path = os.path.join(e.path, 'cache')
+        os.mkdir(cache_path)
+        
+        # In the first step we need to create a new mini visual graph dataset from the given element 
+        # string representations.
+        writer = VisualGraphDatasetWriter(path=cache_path)
+        
+        for index, value in enumerate(e.ELEMENTS):
+            processing.create(
+                value=value,
+                index=index,
+                width=1000,
+                height=1000,
+                writer=writer,
+            )
+            
+        # Then we need to load that dataset into memory
+        reader = VisualGraphDatasetReader(
+            cache_path,
+            logger=e.logger,
+            log_step=1000,
+        )
+        index_data_map = reader.read()
         indices = list(index_data_map.keys())
+
+    else:
+        e.log('visualizing samples from the dataset...')
+
+        if e.INDICES_PATH:
+            e.log(f'indices path found @ {e.INDICES_PATH}')
+            with open(e.INDICES_PATH, 'r') as f:
+                indices = json.load(f)
+        
+        else:
+            indices = list(index_data_map.keys())
     
     num_elements = min(len(indices), e.NUM_ELEMENTS)
     indices = random.sample(
@@ -194,7 +236,9 @@ def experiment(e: Experiment):
     )
     
     # :hook additional_explanations:
-    #       This hook can be called to generate additional visualizations.
+    #       This hook can be called to generate additional visualizations. It receives the index_data_map, 
+    #       the indices and the graphs as parameters. Internally, these can be used to generate alternative 
+    #       visualizations for the same explanations.
     e.apply_hook(
         'additional_explanation',
         index_data_map=index_data_map,

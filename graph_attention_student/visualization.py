@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import matplotlib.patches as mpatches
 from matplotlib.backends.backend_pdf import PdfPages
+from matplotlib.colors import LinearSegmentedColormap
 from imageio.v2 import imread
 from umap import AlignedUMAP
 
@@ -31,6 +32,29 @@ reds_cmap: mcolors.Colormap = mcolors.LinearSegmentedColormap.from_list(
         '#8E0000'
     ]
 )
+
+def truncate_colormap(original_cmap, minval=0.0, maxval=1.0, n=100):
+    """
+    Given an original matplotlib Colormap instance, this function will truncate that colormap so 
+    that the resulting colormap only covers a fraction of the original one defined by the ``minval``
+    and ``maxval`` relative ratios.
+    
+    :param original_cmap: The original matplotlib Colormap instance to be truncated
+    :param minval: The float value between 0 and 1 which defines the lower bound of the new colormap
+    :param maxval: The float value between 0 and 1 which defines the upper bound of the new colormap
+    :param n: The integer number of colors to be used in the new colormap
+    
+    :returns: A new matplotlib Colormap instance which is a truncated version of the original one
+    """
+    new_colors = original_cmap(np.linspace(minval, maxval, n))
+    return LinearSegmentedColormap.from_list(
+        'trunc({n},{a:.2f},{b:.2f})'.format(
+            n=original_cmap.name, 
+            a=minval, 
+            b=maxval), 
+        new_colors
+    )
+
 
 def generate_contrastive_colors(num: int) -> t.List[str]:
     """

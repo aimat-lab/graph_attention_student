@@ -48,18 +48,6 @@ MODEL_PATH: str = os.path.join(PATH, 'assets', 'models', 'fia_49k.ckpt')
 # == VISUALIZATION PARAMETERS ==
 # This section contains the parameters which configure the visualization of the explanations.
 
-# :param CHANNEL_COLORS_MAP:
-#       This dictionary structure can be used to define the color maps for the various explanation channels.
-#       For the "combined" visualization, all the explanation masks are drawn into the same image. These 
-#       color maps define how to color each of the different explanation channels to differentiate them.
-#       It is color maps and not flat colors because the color will be scaled with the explanation channel's 
-#       fidelity value. The keys of this dict have to be integer indices of the channels in the order as they
-#       appear in the model. The values are matplotlib color maps which will be used to color the explanation
-#       masks in the visualization.
-CHANNEL_COLORS_MAP: dict[int, mcolors.Colormap] = {
-    0: cm.get_cmap('Blues'),
-    1: cm.get_cmap('Reds'),
-}
 # :param IMPORTANCE_THRESHOLD:
 #       This float value determines the threshold for the binarization of the importance values. This binarization 
 #       is only applied for the "combined" visualization type. Every importance value above the threshold will be
@@ -83,7 +71,13 @@ def create_labels(e: Experiment,
                   indices: list[int],
                   graphs: list[dict],
                   ) -> str:
+    """
+    This hook is supposed to create a list of labels that can be used as the figure titles in the visualization PDF
+    file. The returned label list has to have the same order as the given graphs list.
     
+    This implementation will print the index, the SMILES representation of the molecular graph as the title. Additionally 
+    the numeric values for the true and predicted target values will be printed as part of the title as well.
+    """
     e.log('creating labels with the SMILES and the true and predicted labels...')
     
     labels = []
