@@ -68,7 +68,7 @@ TARGET_NAMES: t.Dict[int, str] = {
 #       This list determines the layer structure of the model's graph encoder part. Each element in 
 #       this list represents one layer, where the integer value determines the number of hidden units 
 #       in that layer of the encoder network.
-UNITS: t.List[int] = [64, 64, 64]
+UNITS: t.List[int] = [64, 64, 64, 64]
 # :param IMPORTANCE_UNITS:
 #       This list determines the layer structure of the importance MLP which determines the node importance 
 #       weights from the node embeddings of the graph. 
@@ -77,15 +77,15 @@ IMPORTANCE_UNITS: t.List[int] = [ ]
 #       This list determines the layer structure of the MLP's that act as the channel-specific projections.
 #       Each element in this list represents one layer where the integer value determines the number of hidden
 #       units in that layer.
-#PROJECTION_UNITS: t.List[int] = [64, 128, 256]
-PROJECTION_UNITS = []
+PROJECTION_UNITS: t.List[int] = [64, 128]
+#PROJECTION_UNITS = []
 # :param FINAL_UNITS:
 #       This list determines the layer structure of the model's final prediction MLP. Each element in 
 #       this list represents one layer, where the integer value determines the number of hidden units 
 #       in that layer of the prediction network.
 #       Note that the last value of this list determines the output shape of the entire network and 
 #       therefore has to match the number of target values given in the dataset.
-FINAL_UNITS: t.List[int] = [32, 1]
+FINAL_UNITS: t.List[int] = [64, 32, 1]
 # :param NUM_CHANNELS:
 #       The number of explanation channels for the model.
 NUM_CHANNELS: int = 2
@@ -97,12 +97,12 @@ IMPORTANCE_FACTOR: float = 1.0
 #       This parameter more or less controls how expansive the explanations are - how much of the graph they
 #       tend to cover. Higher values tend to lead to more expansive explanations while lower values tend to 
 #       lead to sparser explanations. Typical value range 0.5 - 1.5
-IMPORTANCE_OFFSET: float = 0.5
+IMPORTANCE_OFFSET: float = 5.0
 # :param SPARSITY_FACTOR:
 #       This is the coefficient that is used to scale the explanation sparsity loss during training.
 #       The higher this value the more explanation sparsity (less and more discrete explanation masks)
 #       is promoted.
-SPARSITY_FACTOR: float = 1.0
+SPARSITY_FACTOR: float = 0.1
 # :param REGRESSION_REFERENCE:
 #       When dealing with regression tasks, an important hyperparameter to set is this reference value in the 
 #       range of possible target values, which will determine what part of the dataset is to be considered as 
@@ -120,7 +120,12 @@ REGRESSION_MARGIN: t.Optional[float] = 0.5
 #       This boolean value determines whether the graph embeddings are normalized to a unit length or not.
 #       If this is true, the embedding of each individual explanation channel will be L2 normalized such that 
 #       it is projected onto the unit sphere.
-NORMALIZE_EMBEDDING: bool = False
+NORMALIZE_EMBEDDING: bool = True
+# :param ATTENTION_AGGREGATION:
+#       This string literal determines the strategy which is used to aggregate the edge attention logits over 
+#       the various message passing layers in the graph encoder part of the network. This may be one of the 
+#       following values: 'sum', 'max', 'min'.
+ATTENTION_AGGREGATION: str = 'sum'
 # :param CONTRASTIVE_FACTOR:
 #       This is the factor of the contrastive representation learning loss of the network. If this value is 0 
 #       the contrastive repr. learning is completely disabled (increases computational efficiency). The higher 
@@ -153,7 +158,7 @@ PREDICTION_FACTOR: float = 1.0
 
 EPOCHS = 250
 BATCH_SIZE = 200
-REPETITIONS = 5
+REPETITIONS = 1
 
 __DEBUG__ = True
 __TESTING__ = False

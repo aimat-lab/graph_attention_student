@@ -126,6 +126,11 @@ REGRESSION_MARGIN: t.Optional[float] = 0.0
 #       If this is true, the embedding of each individual explanation channel will be L2 normalized such that 
 #       it is projected onto the unit sphere.
 NORMALIZE_EMBEDDING: bool = True
+# :param ATTENTION_AGGREGATION:
+#       This string literal determines the strategy which is used to aggregate the edge attention logits over 
+#       the various message passing layers in the graph encoder part of the network. This may be one of the 
+#       following values: 'sum', 'max', 'min'.
+ATTENTION_AGGREGATION: str = 'min'
 # :param CONTRASTIVE_FACTOR:
 #       This is the factor of the contrastive representation learning loss of the network. If this value is 0 
 #       the contrastive repr. learning is completely disabled (increases computational efficiency). The higher 
@@ -214,6 +219,7 @@ def train_model(e: Experiment,
             prediction_mode=e.DATASET_TYPE,
             prediction_factor=e.PREDICTION_FACTOR,
             normalize_embedding=e.NORMALIZE_EMBEDDING,
+            attention_aggregation=e.ATTENTION_AGGREGATION,
             contrastive_factor=e.CONTRASTIVE_FACTOR,
             contrastive_temp=e.CONTRASTIVE_TEMP,
             contrastive_noise=e.CONTRASTIVE_NOISE,
@@ -290,6 +296,9 @@ def evaluate_model(e: Experiment,
         plot_node_importances_cb=plot_node_importances_background,
         plot_edge_importances_cb=plot_edge_importances_background,
     )
+    for info in example_infos:
+        print(f'{np.mean(info["node_importance"][:, 0])} ({np.max(info["node_importance"][:, 0])}) - ', 
+              f'{np.mean(info["node_importance"][:, 1])} ({np.max(info["node_importance"][:, 1])})')
     
     # ~ explanation fidelity analysis
     # Explanation fidelity is a metric that essentially tells how much a given attributional explanation mask 

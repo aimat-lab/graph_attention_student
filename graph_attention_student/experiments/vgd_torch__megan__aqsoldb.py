@@ -8,6 +8,7 @@ experimentally measured values for the water solubility of compounds.
 import os
 import typing as t
 
+import numpy as np
 from pycomex.functional.experiment import Experiment
 from pycomex.utils import file_namespace, folder_path
 
@@ -43,7 +44,7 @@ USE_BOOTSTRAPPING: bool = False
 #       This integer determines how many elements to sample from the test set elements to act as 
 #       examples for the evaluation process. These examples will be visualized together with their
 #       predictions.
-NUM_EXAMPLES: int = 25
+NUM_EXAMPLES: int = 100
 # :param TARGET_NAMES:
 #       This dictionary structure can be used to define the human readable names for the various 
 #       target values that are part of the dataset. The keys of this dict have to be integer indices 
@@ -88,19 +89,29 @@ IMPORTANCE_FACTOR: float = 1.0
 #       This parameter more or less controls how expansive the explanations are - how much of the graph they
 #       tend to cover. Higher values tend to lead to more expansive explanations while lower values tend to 
 #       lead to sparser explanations. Typical value range 0.5 - 1.5
-IMPORTANCE_OFFSET: float = 1.0
+IMPORTANCE_OFFSET: float = 5.0
 # :param SPARSITY_FACTOR:
 #       This is the coefficient that is used to scale the explanation sparsity loss during training.
 #       The higher this value the more explanation sparsity (less and more discrete explanation masks)
 #       is promoted.
-SPARSITY_FACTOR: float = 1.0
+SPARSITY_FACTOR: float = 0.1
 # :param REGRESSION_REFERENCE:
 #       When dealing with regression tasks, an important hyperparameter to set is this reference value in the 
 #       range of possible target values, which will determine what part of the dataset is to be considered as 
 #       negative / positive in regard to the negative and the positive explanation channel. A good first choice 
 #       for this parameter is the average target value of the training dataset. Depending on the results for 
 #       that choice it is possible to adjust the value to adjust the explanations.
-REGRESSION_REFERENCE: t.Optional[float] = -3.0
+REGRESSION_REFERENCE: t.Optional[float] = -2.0
+# :param NORMALIZE_EMBEDDING:
+#       This boolean value determines whether the graph embeddings are normalized to a unit length or not.
+#       If this is true, the embedding of each individual explanation channel will be L2 normalized such that 
+#       it is projected onto the unit sphere.
+NORMALIZE_EMBEDDING: bool = True
+# :param ATTENTION_AGGREGATION:
+#       This string literal determines the strategy which is used to aggregate the edge attention logits over 
+#       the various message passing layers in the graph encoder part of the network. This may be one of the 
+#       following values: 'sum', 'max', 'min'.
+ATTENTION_AGGREGATION: str = 'sum'
 # :param REGRESSION_MARGIN:
 #       When converting the regression problem into the negative/positive classification problem for the 
 #       explanation co-training, this determines the margin for the thresholding. Instead of using the regression
@@ -111,7 +122,7 @@ REGRESSION_MARGIN: t.Optional[float] = 0.0
 #       This is the factor of the contrastive representation learning loss of the network. If this value is 0 
 #       the contrastive repr. learning is completely disabled (increases computational efficiency). The higher 
 #       this value the more the contrastive learning will influence the network during training.
-CONTRASTIVE_FACTOR: float = 1.0
+CONTRASTIVE_FACTOR: float = 0.01
 # :param CONTRASTIVE_NOISE:
 #       This float value determines the noise level that is applied when generating the positive augmentations 
 #       during the contrastive learning process.
@@ -132,7 +143,7 @@ CONTRASTIVE_TEMP: float = 1.0
 #       parameter. It determines how much the contrastive loss is focused on the hardest negative samples.
 CONTRASTIVE_BETA: float = 1.0
 
-EPOCHS: int = 250
+EPOCHS: int = 200
 BATCH_SIZE: int = 200
 
 __DEBUG__ = True
@@ -144,6 +155,20 @@ experiment = Experiment.extend(
     namespace=file_namespace(__file__),
     glob=globals(),
 )
+
+@experiment.hook('target_from_metadata', default=True, replace=False)
+def target_from_metadata(e: Experiment,
+                            index: int,
+                            metadata: dict,
+                            **kwargs,
+                            ) -> np.ndarray:
+    """
+    This hooks is called during the loading of the dataset. It receives the metadata dict for a given element 
+    from the dataset's index_data_map and returns the numpy array for the ground truth target value vector. 
+    
+    This default implementation simply returns the "graph_labels" property of the graph dict representation.
+    """
+    return metadata['graph']['graph_labels']
 
 @experiment.testing
 def testing(e: Experiment):

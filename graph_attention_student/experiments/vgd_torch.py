@@ -641,6 +641,11 @@ def experiment(e: Experiment):
     e['edge_dim'] = example_graph['edge_attributes'].shape[1]
     e['output_dim'] = example_graph['graph_labels'].shape[0]
     
+    e.apply_hook(
+        'after_dataset',
+        index_data_map=index_data_map,
+    )
+    
     # ~ setting up default hooks
     # In the following section all the default hook implementations are defined which will be needed 
     # in the main training loop later on.

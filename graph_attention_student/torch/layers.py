@@ -59,7 +59,8 @@ class MultiHeadAttention(nn.Module):
     AGGREGATION_MAP: t.Dict[str, t.Callable] = {
         'sum':      torch.sum,
         'mean':     torch.mean,
-        'max':      torch.amax,   
+        'max':      torch.amax,
+        'min':      torch.amin,   
     }
     
     """

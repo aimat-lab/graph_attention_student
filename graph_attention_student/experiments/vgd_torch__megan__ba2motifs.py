@@ -100,7 +100,7 @@ PROJECTION_UNITS: t.List[int] = [64, 128]
 #       in that layer of the prediction network.
 #       Note that the last value of this list determines the output shape of the entire network and 
 #       therefore has to match the number of target values given in the dataset.
-FINAL_UNITS: t.List[int] = [32, 2]
+FINAL_UNITS: t.List[int] = [64, 32, 2]
 # :param NUM_CHANNELS:
 #       The number of explanation channels for the model.
 NUM_CHANNELS: int = 2
@@ -117,7 +117,7 @@ IMPORTANCE_OFFSET: float = 1.0
 #       This is the coefficient that is used to scale the explanation sparsity loss during training.
 #       The higher this value the more explanation sparsity (less and more discrete explanation masks)
 #       is promoted.
-SPARSITY_FACTOR: float = 1.0
+SPARSITY_FACTOR: float = 0.01
 # :param REGRESSION_REFERENCE:
 #       When dealing with regression tasks, an important hyperparameter to set is this reference value in the 
 #       range of possible target values, which will determine what part of the dataset is to be considered as 
@@ -125,11 +125,21 @@ SPARSITY_FACTOR: float = 1.0
 #       for this parameter is the average target value of the training dataset. Depending on the results for 
 #       that choice it is possible to adjust the value to adjust the explanations.
 REGRESSION_REFERENCE: t.Optional[float] = None
+# :param NORMALIZE_EMBEDDING:
+#       This boolean value determines whether the graph embeddings are normalized to a unit length or not.
+#       If this is true, the embedding of each individual explanation channel will be L2 normalized such that 
+#       it is projected onto the unit sphere.
+NORMALIZE_EMBEDDING: bool = True
+# :param ATTENTION_AGGREGATION:
+#       This string literal determines the strategy which is used to aggregate the edge attention logits over 
+#       the various message passing layers in the graph encoder part of the network. This may be one of the 
+#       following values: 'sum', 'max', 'min'.
+ATTENTION_AGGREGATION: str = 'mean'
 # :param CONTRASTIVE_FACTOR:
 #       This is the factor of the contrastive representation learning loss of the network. If this value is 0 
 #       the contrastive repr. learning is completely disabled (increases computational efficiency). The higher 
 #       this value the more the contrastive learning will influence the network during training.
-CONTRASTIVE_FACTOR: float = 1.0
+CONTRASTIVE_FACTOR: float = 0.0
 # :param CONTRASTIVE_NOISE:
 #       This float value determines the noise level that is applied when generating the positive augmentations 
 #       during the contrastive learning process.
@@ -158,7 +168,7 @@ EPOCHS: int = 250
 #       The batch size to use while training. This is the number of elements from the dataset that are 
 #       presented to the model at the same time to estimate the gradient direction for the stochastic gradient 
 #       descent optimization.
-BATCH_SIZE: int = 16
+BATCH_SIZE: int = 32
 # :param LEARNING_RATE:
 #       This float determines the learning rate of the optimizer.
 LEARNING_RATE: float = 1e-3
