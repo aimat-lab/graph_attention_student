@@ -67,7 +67,9 @@ VISUAL_GRAPH_DATASET: str = 'rb_dual_motifs'
 #       is trained (loss function) and ultimately how it is evaluated.
 DATASET_TYPE: str = 'regression' # 'classification'
 # :param TEST_INDICES_PATH:
-#       Optionally, this may be an absolute string path to a 
+#       Optionally, this may be an absolute string path to a JSON file containing the specific indices 
+#       to be used for the test set instead of the random test split. The file should be a single list 
+#       of integers in the JSON format (e.g. [1, 3, 32, 50]).
 TEST_INDICES_PATH: t.Optional[str] = None
 # :param NUM_TEST:
 #       This integer number defines how many elements of the dataset are supposed to be sampled 

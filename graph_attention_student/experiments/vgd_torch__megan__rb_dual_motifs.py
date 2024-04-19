@@ -130,7 +130,7 @@ ATTENTION_AGGREGATION: str = 'sum'
 #       This is the factor of the contrastive representation learning loss of the network. If this value is 0 
 #       the contrastive repr. learning is completely disabled (increases computational efficiency). The higher 
 #       this value the more the contrastive learning will influence the network during training.
-CONTRASTIVE_FACTOR: float = 0.0
+CONTRASTIVE_FACTOR: float = 0.01
 # :param CONTRASTIVE_NOISE:
 #       This float value determines the noise level that is applied when generating the positive augmentations 
 #       during the contrastive learning process.

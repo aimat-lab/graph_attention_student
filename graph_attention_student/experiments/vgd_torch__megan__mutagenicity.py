@@ -33,6 +33,11 @@ TEST_INDICES_PATH: t.Optional[str] = None
 #       for the unseen test set on which the model will be evaluated. This parameter will be ignored 
 #       if a test_indices file path is given.
 NUM_TEST: int = 650
+# :param TEST_INDICES_PATH:
+#       Optionally, this may be an absolute string path to a JSON file containing the specific indices 
+#       to be used for the test set instead of the random test split. The file should be a single list 
+#       of integers in the JSON format (e.g. [1, 3, 32, 50]).
+TEST_INDICES_PATH: t.Optional[str] = None
 # :param USE_BOOTSTRAPPING:
 #       This flag determines whether to use bootstrapping with the training elements of the dataset.
 #       If enabled, the training samples will be subsampled with the possibility of duplicates. This 
@@ -43,7 +48,7 @@ USE_BOOTSTRAPPING: bool = False
 #       This integer determines how many elements to sample from the test set elements to act as 
 #       examples for the evaluation process. These examples will be visualized together with their
 #       predictions.
-NUM_EXAMPLES: int = 100
+NUM_EXAMPLES: int = 20
 # :param TARGET_NAMES:
 #       This dictionary structure can be used to define the human readable names for the various 
 #       target values that are part of the dataset. The keys of this dict have to be integer indices 
@@ -61,7 +66,7 @@ TARGET_NAMES: t.Dict[int, str] = {
 #       This list determines the layer structure of the model's graph encoder part. Each element in 
 #       this list represents one layer, where the integer value determines the number of hidden units 
 #       in that layer of the encoder network.
-UNITS: t.List[int] = [64, 64, 64]
+UNITS: t.List[int] = [64, 64, 64, 64, 64]
 # :param IMPORTANCE_UNITS:
 #       This list determines the layer structure of the importance MLP which determines the node importance 
 #       weights from the node embeddings of the graph. 
@@ -95,14 +100,26 @@ PROJECTION_UNITS: t.List[int] = [64, 128]
 #       in that layer of the prediction network.
 #       Note that the last value of this list determines the output shape of the entire network and 
 #       therefore has to match the number of target values given in the dataset.
-FINAL_UNITS: t.List[int] = [64, 32, 2]
+FINAL_UNITS: t.List[int] = [2]
+# :param OUTPUT_NORM:
+#       Optionally, for a classification logits, this parameter can be set to a float value and in that 
+#       case the output logits vector of the model will be projected onto a unit sphere with that given 
+#       radius. This is a method to tackle the overconfidence problem in classification tasks. 
+#       By constraining the norm of the logit vector, the model has a maximum confidence level that it
+#       can assign to a prediction.
+OUTPUT_NORM: t.Optional[float] = 3
+# :param LABEL_SMOOTHING:
+#       This is the label smoothing parameter that is used for the cross entropy loss of the model.
+#       If this value is set to 0.0, no label smoothing is applied. If this value is set to a value
+#       between 0.0 and 1.0, the label smoothing will be applied to the cross entropy loss.
+LABEL_SMOOTHING: t.Optional[float] = 0.0
 # :param NUM_CHANNELS:
 #       The number of explanation channels for the model.
 NUM_CHANNELS: int = 2
 # :param IMPORTANCE_FACTOR:
 #       This is the coefficient that is used to scale the explanation co-training loss during training.
 #       Roughly, the higher this value, the more the model will prioritize the explanations during training.
-IMPORTANCE_FACTOR: float = 1.0
+IMPORTANCE_FACTOR: float = 0.5
 # :param IMPORTANCE_OFFSET:
 #       This parameter more or less controls how expansive the explanations are - how much of the graph they
 #       tend to cover. Higher values tend to lead to more expansive explanations while lower values tend to 
@@ -112,7 +129,14 @@ IMPORTANCE_OFFSET: float = 5.0
 #       This is the coefficient that is used to scale the explanation sparsity loss during training.
 #       The higher this value the more explanation sparsity (less and more discrete explanation masks)
 #       is promoted.
-SPARSITY_FACTOR: float = 0.1
+SPARSITY_FACTOR: float = 0.01
+# :param FIDELITY_FACTOR:
+#       This parameter controls the coefficient of the explanation fidelity loss during training. The higher
+#       this value, the more the model will be trained to create explanations that actually influence the
+#       model's behavior with a positive fidelity (according to their pre-defined interpretation).
+#       If this value is set to 0.0, the explanation fidelity loss is completely disabled (==higher computational
+#       efficiency).
+FIDELITY_FACTOR: float = 0.0
 # :param REGRESSION_REFERENCE:
 #       When dealing with regression tasks, an important hyperparameter to set is this reference value in the 
 #       range of possible target values, which will determine what part of the dataset is to be considered as 
@@ -129,7 +153,7 @@ NORMALIZE_EMBEDDING: bool = True
 #       This string literal determines the strategy which is used to aggregate the edge attention logits over 
 #       the various message passing layers in the graph encoder part of the network. This may be one of the 
 #       following values: 'sum', 'max', 'min'.
-ATTENTION_AGGREGATION: str = 'sum'
+ATTENTION_AGGREGATION: str = 'min'
 # :param CONTRASTIVE_FACTOR:
 #       This is the factor of the contrastive representation learning loss of the network. If this value is 0 
 #       the contrastive repr. learning is completely disabled (increases computational efficiency). The higher 

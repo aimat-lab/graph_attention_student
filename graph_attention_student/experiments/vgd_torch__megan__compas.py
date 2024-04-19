@@ -62,7 +62,7 @@ TARGET_NAMES: t.Dict[int, str] = {
 #       This list determines the layer structure of the model's graph encoder part. Each element in 
 #       this list represents one layer, where the integer value determines the number of hidden units 
 #       in that layer of the encoder network.
-UNITS: t.List[int] = [128, 96, 64, 64]
+UNITS: t.List[int] = [128, 128, 64, 64]
 # :param IMPORTANCE_UNITS:
 #       This list determines the layer structure of the importance MLP which determines the node importance 
 #       weights from the node embeddings of the graph. 
@@ -71,21 +71,21 @@ IMPORTANCE_UNITS: t.List[int] = [ ]
 #       This list determines the layer structure of the MLP's that act as the channel-specific projections.
 #       Each element in this list represents one layer where the integer value determines the number of hidden
 #       units in that layer.
-PROJECTION_UNITS: t.List[int] = [64, 128]
+PROJECTION_UNITS: t.List[int] = [64, 128, 256]
 # :param FINAL_UNITS:
 #       This list determines the layer structure of the model's final prediction MLP. Each element in 
 #       this list represents one layer, where the integer value determines the number of hidden units 
 #       in that layer of the prediction network.
 #       Note that the last value of this list determines the output shape of the entire network and 
 #       therefore has to match the number of target values given in the dataset.
-FINAL_UNITS: t.List[int] = [64, 32, 1]
+FINAL_UNITS: t.List[int] = [1]
 # :param NUM_CHANNELS:
 #       The number of explanation channels for the model.
 NUM_CHANNELS: int = 2
 # :param IMPORTANCE_FACTOR:
 #       This is the coefficient that is used to scale the explanation co-training loss during training.
 #       Roughly, the higher this value, the more the model will prioritize the explanations during training.
-IMPORTANCE_FACTOR: float = 1.0
+IMPORTANCE_FACTOR: float = 0.1
 # :param IMPORTANCE_OFFSET:
 #       This parameter more or less controls how expansive the explanations are - how much of the graph they
 #       tend to cover. Higher values tend to lead to more expansive explanations while lower values tend to 
@@ -95,14 +95,21 @@ IMPORTANCE_OFFSET: float = 5.0
 #       This is the coefficient that is used to scale the explanation sparsity loss during training.
 #       The higher this value the more explanation sparsity (less and more discrete explanation masks)
 #       is promoted.
-SPARSITY_FACTOR: float = 0.1
+SPARSITY_FACTOR: float = 0.01
+# :param FIDELITY_FACTOR:
+#       This parameter controls the coefficient of the explanation fidelity loss during training. The higher
+#       this value, the more the model will be trained to create explanations that actually influence the
+#       model's behavior with a positive fidelity (according to their pre-defined interpretation).
+#       If this value is set to 0.0, the explanation fidelity loss is completely disabled (==higher computational
+#       efficiency).
+FIDELITY_FACTOR: float = 0.01
 # :param REGRESSION_REFERENCE:
 #       When dealing with regression tasks, an important hyperparameter to set is this reference value in the 
 #       range of possible target values, which will determine what part of the dataset is to be considered as 
 #       negative / positive in regard to the negative and the positive explanation channel. A good first choice 
 #       for this parameter is the average target value of the training dataset. Depending on the results for 
 #       that choice it is possible to adjust the value to adjust the explanations.
-REGRESSION_REFERENCE: t.Optional[float] = +0.1
+REGRESSION_REFERENCE: t.Optional[float] = +3.2
 # :param NORMALIZE_EMBEDDING:
 #       This boolean value determines whether the graph embeddings are normalized to a unit length or not.
 #       If this is true, the embedding of each individual explanation channel will be L2 normalized such that 
@@ -112,7 +119,7 @@ NORMALIZE_EMBEDDING: bool = True
 #       This string literal determines the strategy which is used to aggregate the edge attention logits over 
 #       the various message passing layers in the graph encoder part of the network. This may be one of the 
 #       following values: 'sum', 'max', 'min'.
-ATTENTION_AGGREGATION: str = 'sum'
+ATTENTION_AGGREGATION: str = 'min'
 # :param REGRESSION_MARGIN:
 #       When converting the regression problem into the negative/positive classification problem for the 
 #       explanation co-training, this determines the margin for the thresholding. Instead of using the regression
@@ -186,13 +193,13 @@ def after_dataset(e:Experiment,
           f' - min: {np.min(values):.3f}'
           f' - max: {np.max(values):.3f}')
     
-    e.log('fitting linear model on graph size...')
-    reg = LinearRegression()
-    reg.fit(graph_sizes, values)
+    # e.log('fitting linear model on graph size...')
+    # reg = LinearRegression()
+    # reg.fit(graph_sizes, values)
     
-    values_predicted = reg.predict(graph_sizes)
-    for graph, value, value_pred in zip(graphs, values, values_predicted):
-        graph['graph_labels'][0] = value - value_pred
+    # values_predicted = reg.predict(graph_sizes)
+    # for graph, value, value_pred in zip(graphs, values, values_predicted):
+    #     graph['graph_labels'][0] = value - value_pred
 
     values = [graph['graph_labels'][0] for graph in graphs]
     e.log(f'dataset' 

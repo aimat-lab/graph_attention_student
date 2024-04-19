@@ -94,6 +94,18 @@ PROJECTION_UNITS: t.List[int] = []
 #       Note that the last value of this list determines the output shape of the entire network and 
 #       therefore has to match the number of target values given in the dataset.
 FINAL_UNITS: t.List[int] = [32, 1]
+# :param OUTPUT_NORM:
+#       Optionally, for a classification logits, this parameter can be set to a float value and in that 
+#       case the output logits vector of the model will be projected onto a unit sphere with that given 
+#       radius. This is a method to tackle the overconfidence problem in classification tasks. 
+#       By constraining the norm of the logit vector, the model has a maximum confidence level that it
+#       can assign to a prediction.
+OUTPUT_NORM: t.Optional[float] = None
+# :param LABEL_SMOOTHING:
+#       This is the label smoothing parameter that is used for the cross entropy loss of the model.
+#       If this value is set to 0.0, no label smoothing is applied. If this value is set to a value
+#       between 0.0 and 1.0, the label smoothing will be applied to the cross entropy loss.
+LABEL_SMOOTHING: t.Optional[float] = 0.0
 # :param IMPORTANCE_FACTOR:
 #       This is the coefficient that is used to scale the explanation co-training loss during training.
 #       Roughly, the higher this value, the more the model will prioritize the explanations during training.
@@ -108,6 +120,13 @@ IMPORTANCE_OFFSET: float = 0.8
 #       The higher this value the more explanation sparsity (less and more discrete explanation masks)
 #       is promoted.
 SPARSITY_FACTOR: float = 1.0
+# :param FIDELITY_FACTOR:
+#       This parameter controls the coefficient of the explanation fidelity loss during training. The higher
+#       this value, the more the model will be trained to create explanations that actually influence the
+#       model's behavior with a positive fidelity (according to their pre-defined interpretation).
+#       If this value is set to 0.0, the explanation fidelity loss is completely disabled (==higher computational
+#       efficiency).
+FIDELITY_FACTOR: float = 0.0
 # :param REGRESSION_REFERENCE:
 #       When dealing with regression tasks, an important hyperparameter to set is this reference value in the 
 #       range of possible target values, which will determine what part of the dataset is to be considered as 
@@ -210,10 +229,13 @@ def train_model(e: Experiment,
             projection_units=e.PROJECTION_UNITS,
             importance_mode=e.DATASET_TYPE,
             final_units=e.FINAL_UNITS,
+            output_norm=e.OUTPUT_NORM,
+            label_smoothing=e.LABEL_SMOOTHING,
             num_channels=e.NUM_CHANNELS,
             importance_factor=e.IMPORTANCE_FACTOR,
             importance_offset=e.IMPORTANCE_OFFSET,
             sparsity_factor=e.SPARSITY_FACTOR,
+            fidelity_factor=e.FIDELITY_FACTOR,
             regression_reference=e.REGRESSION_REFERENCE,
             regression_margin=e.REGRESSION_MARGIN,
             prediction_mode=e.DATASET_TYPE,

@@ -6,6 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import matplotlib.colors as mcolors
+from graph_attention_student.visualization import truncate_colormap
 from pycomex.functional.experiment import Experiment
 from pycomex.utils import file_namespace, folder_path
 from visual_graph_datasets.visualization.importances import create_combined_importances_pdf
@@ -149,6 +150,7 @@ def additional_visualization(e: Experiment,
         importance_threshold=e.IMPORTANCE_THRESHOLD,
         output_path=pdf_path,
         logger=e.logger,
+        base_fig_size=12,
         log_step=100,
     )
 

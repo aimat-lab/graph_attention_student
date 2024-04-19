@@ -90,6 +90,7 @@ class Megan(AbstractGraphModel):
                  node_dim: int = 3,
                  edge_dim: int = 1,
                  units: t.List[int] = [16, 16, 16],
+                 encoder_dropout_rate: float = 0.0,
                  # explanation-related
                  importance_units: t.List[int] = [16, ],
                  projection_units: t.List[int] = [],
@@ -102,6 +103,7 @@ class Megan(AbstractGraphModel):
                  sparsity_factor: float = 0.0,
                  attention_aggregation: t.Literal['sum', 'min', 'max'] = 'sum',
                  normalize_embedding: bool = True,
+                 fidelity_factor: float = 0.0,
                  # contrastive representation related
                  contrastive_factor: float = 0.0,
                  contrastive_noise: float = 0.1,
@@ -111,9 +113,14 @@ class Megan(AbstractGraphModel):
                  contrastive_units: int = 2048,
                  # prediction-related
                  final_units: t.List[int] = [16, 1],
+                 final_dropout_rate: float = 0.0,
                  prediction_mode: str = 'regression',
                  prediction_factor: float = 1.0,
                  use_bias: bool = True,
+                 # classification only
+                 class_weights: t.Optional[list] = None,
+                 output_norm: t.Optional[float] = None,
+                 label_smoothing: float = 0.0,
                  # training-related
                  learning_rate: float = 1e-3,
                  ):
@@ -150,6 +157,7 @@ class Megan(AbstractGraphModel):
         self.sparsity_factor = sparsity_factor
         self.normalize_embedding = normalize_embedding
         self.attention_aggregation = attention_aggregation
+        self.fidelity_factor = fidelity_factor
         
         self.contrastive_factor = contrastive_factor
         self.contrastive_noise = contrastive_noise
@@ -161,6 +169,8 @@ class Megan(AbstractGraphModel):
         self.prediction_mode = prediction_mode
         self.prediction_factor = prediction_factor
         self.final_untis = final_units
+        self.output_norm = output_norm
+        self.label_smoothing = label_smoothing
         
         self.learning_rate = learning_rate
 
@@ -173,11 +183,13 @@ class Megan(AbstractGraphModel):
             'node_dim':                 node_dim,
             'edge_dim':                 edge_dim,
             'units':                    units,
+            'encoder_dropout_rate':     encoder_dropout_rate,
             'importance_units':         importance_units,
             'importance_offset':        importance_offset,
             'projection_units':         projection_units,
             'normalize_embedding':      normalize_embedding,
             'attention_aggregation':    attention_aggregation,
+            'fidelity_factor':          fidelity_factor,
             'contrastive_factor':       contrastive_factor,
             'contrastive_noise':        contrastive_noise,
             'contrastive_temp':         contrastive_temp,
@@ -185,8 +197,12 @@ class Megan(AbstractGraphModel):
             'contrastive_tau':          contrastive_tau,
             'contrastive_units':        contrastive_units,
             'final_units':              final_units,  
+            'final_dropout_rate':       final_dropout_rate,
             'num_channels':             num_channels,
             'prediction_mode':          prediction_mode,
+            'label_smoothing':          label_smoothing,
+            'class_weights':            class_weights,
+            'output_norm':              output_norm,
         })
 
         # ~ Graph encoder layers
@@ -239,6 +255,13 @@ class Megan(AbstractGraphModel):
             
         # The last number of units in the graph encoder part determines the embedding dimension
         self.embedding_dim = prev_features
+        
+        # 13.04.24
+        # Added the option to apply dropout to the message passing part of the encoder. This dropout will be 
+        # applied to the node embeddings after each layer of the encoder (only during training). This dropout
+        # will mask certain elements of these node embeddings from being propagated further through the network 
+        # therefore promoting the network to learn more robust representations.
+        self.lay_dropout_encoder = nn.Dropout(p=encoder_dropout_rate)
             
         # At the end of the graph encoder, the node embeddings for all the nodes are aggregated into one final 
         # graph embedding vector by doing an attention-weighted sum.
@@ -311,6 +334,12 @@ class Megan(AbstractGraphModel):
             prev_features = num_features
             self.dense_layers.append(lay)
             
+        # 17.04.2024
+        # In this variable we store the dimension of the target vector which is ultimately predicted 
+        # as the main output of the model. For a classification task, for example, this is the number 
+        # of possible classes.
+        self.target_dim: int = final_units[-1]
+            
         self.lay_act = nn.ReLU()
         
         self.lay_mask_expansion = MaskExpansionLayer()
@@ -323,13 +352,38 @@ class Megan(AbstractGraphModel):
                 #out_features=1024,
             )
             self.projection_layers.append(lay)
+            
+        self.lay_final_dropout = nn.Dropout(p=final_dropout_rate)
         
+        # Note that the the final activation (aka output activation) does NOT change depending on the 
+        # prediction mode being regression or classification - the output activation will be the identify 
+        # (aka linear) function in either case. This is intuitively correct for the regression case, but
+        # for the multi-class classification case one would expect the softmax function. However, the model 
+        # will output the classification LOGITS and the loss function will apply the softmax function 
+        # internally.
+        # This is important to keep in mind because a forward pass of the model will return the classification
+        # logits and not the class probabilities. If the class probabilities are needed, the softmax function
+        # has to be applied manually after the forward pass.
         self.lay_act_final = nn.Identity()
+        
+        # ~ Training Loss
+        # Since this model supports both regression and classification, the loss function will have to be 
+        # setup accordingly.
+        # For a regression task, we use the mean squared error (MSE) loss function.
+        # For a classification task, we use the cross entropy loss function.
+        
         if self.prediction_mode == 'regression':
             self.loss_pred = nn.MSELoss()
             
         elif self.prediction_mode == 'classification':
-            self.loss_pred = nn.CrossEntropyLoss(label_smoothing=0.0)
+            # 13.04.24
+            # Added the "class_weights" parameter as an additional argument during the construction of the 
+            # cross entropy loss. This parameter can be used to assign different weights to the different 
+            # classes that may appear during training.
+            self.loss_pred = nn.CrossEntropyLoss(
+                # label_smoothing=label_smoothing,
+                weight=torch.tensor(class_weights) if class_weights is not None else None,
+            )
             
     def forward(self, 
                 data: Data, 
@@ -366,6 +420,9 @@ class Megan(AbstractGraphModel):
                 edge_attr=edge_input, 
                 return_attention_weights=True
             )
+            # applying the dropout to the node embedding after each layer
+            # this will NOT change the shape of the embedding.
+            node_embedding = self.lay_dropout_encoder(node_embedding)
             
             node_embeddings.append(node_embedding)
             alphas.append(alpha)
@@ -451,6 +508,8 @@ class Megan(AbstractGraphModel):
                 for lay in layers[:-1]:
                     graph_embedding_ = lay(graph_embedding_)
                     graph_embedding_ = self.lay_act(graph_embedding_)
+                    
+                    graph_embedding_ = self.lay_dropout_encoder(graph_embedding_)
             
                 graph_embedding_ = layers[-1](graph_embedding_)
             
@@ -472,6 +531,8 @@ class Megan(AbstractGraphModel):
             output = lay(output)    
             output = self.lay_act(output)
             
+            output = self.lay_final_dropout(output)
+            
         # output: (B, O)
         output = self.dense_layers[-1](output)
         
@@ -479,6 +540,18 @@ class Megan(AbstractGraphModel):
         # bias of the prediction.
         if self.prediction_mode == 'regression':
             output += self.regression_reference
+            
+        # 16.04.24
+        # For classification models there is the option to define an output normalization. In this 
+        # case the output logits will be l2 normalized aka projected onto a unit sphere with the 
+        # radius defined by "self.output_norm"
+        # This type of logits normalization is supposed to address the problem of model overconfidence
+        # by using this output norm, a model can (a) only reach a certain maxium confidence level and 
+        # (b) the confidence level will be distributed more evenly across the classes since the class 
+        # is now only determined by the angle of the logit vector and no longer by it's length.
+        if self.output_norm:
+            output = self.output_norm * F.normalize(output, dim=-1)
+            # print(output)
             
         return {
             'graph_output': output,
@@ -508,7 +581,15 @@ class Megan(AbstractGraphModel):
         # stay like that, but for the loss calculation we need the class proabilities which is 
         # why we apply the softmax function here.
         if self.prediction_mode == 'classification':
-            out_pred = F.softmax(out_pred, dim=-1)
+            
+            # 17.04.24
+            # If the label smoothing parameter is set, we will apply the label smoothing to the
+            # target values. This will make the target values more robust against overfitting and
+            # will promote the model to learn more generalizable features.
+            # The idea is to use soft targets instead of the hard one-hot target vectors.
+            # so a target of [1, 0] for example would become [0.9, 0.1] for a label smoothing.
+            if self.label_smoothing:
+                out_true = (1 - self.label_smoothing) * out_true + self.label_smoothing / self.target_dim
         
         # ~ prediction loss
         loss_pred = self.loss_pred(out_pred, out_true)
@@ -590,6 +671,25 @@ class Megan(AbstractGraphModel):
             batch_size=batch_size,
         )
         
+        # ~ fidelity loss
+        
+        loss_fid = 0.0
+        if self.fidelity_factor != 0:
+            loss_fid = self.training_fidelity(
+                data=data,
+                info=info,
+                batch_size=batch_size,
+            )
+            
+        self.log(
+            'loss_fid', loss_fid,
+            prog_bar=True,
+            on_epoch=True,
+            on_step=False,
+            batch_size=batch_size,
+        )
+        
+        
         # ~ adding the various loss terms
         # In this section we are simply accumulating the overall loss term as a combination of all the individual loss 
         # terms that were previously constructed.
@@ -603,6 +703,8 @@ class Megan(AbstractGraphModel):
             + self.sparsity_factor * loss_spar
             # contrastive loss to encourage the formation of semantic embeddings
             + self.contrastive_factor * loss_cont
+            # fidelity loss to encourage positive fidelity values
+            + self.fidelity_factor * loss_fid
         )
         
         return loss
@@ -772,6 +874,83 @@ class Megan(AbstractGraphModel):
             
         return loss_cont
     
+    def training_fidelity(self,
+                          data: Data,
+                          info: dict,
+                          batch_size: int,
+                          ) -> float:
+        """
+        This method implements the fidelity training step. Based on the current Data instance ``data`` and the 
+        ``info`` dictionary that was generated by the forward pass of the model. This method will calculate the 
+        fidelity based loss and return it as a float value.
+        
+        The fidelity loss defines a loss values that promotes each channel's associated fidelity value to be 
+        generally positive. A positive fidelity value indicates that a channel's explanation actually affects the 
+        final prediction outcome in the same manner as the channel's intended interpretation. For example, for the 
+        "positive" explanation channel, it should also actually have a positive contribution towards the predicted 
+        regression value.
+    
+        This is done by running an additional forward pass for each channel where that channel's explanation is 
+        masked from the prediction by setting all the attention values to zero. These modified forward results 
+        are used to calculate the leave-one-out deviation difference regarding the original model output. 
+        Depending on the task (regression or classification) the fidelity value is then calculated from those 
+        deviation values and a loss is defined to promote positive fidelity values.
+        
+        :param data: The original torch Data instance with the input data for the model 
+        :param info: The dict structure containing the model output for the original forward pass
+        :param batch_size: The integer number of elements in the current batch.
+        
+        :returns: The float fidelity value
+        """
+        
+        # Here we construct the leave-one-out deviation matrix. Essentially for every explanation channel 
+        # of the model we mask out that explanation channel by setting all of its attention values to zero
+        # and then do another forward pass with this modified input. The deviation between the original 
+        # prediction and that modified prediction gives us an indication of how much that explanation channel 
+        # contributes to the overall prediction. Specifically we can determine that effect for each of the 
+        # output values (in the case of classification there will be multiple outputs).
+        # We do this in the face of the thing.
+        deviations = []
+        for k in range(self.num_channels):
+            mask_out = torch.ones_like(info['node_importance'], dtype=torch.float32)
+            mask_out[:, k] = 0.0
+            
+            info_out = self.forward(
+                data,
+                node_mask=mask_out,
+            )    
+            deviations.append(info['graph_output'] - info_out['graph_output'])
+            
+        # deviations: (B, C, K)
+        deviations = torch.stack(deviations, dim=-1)
+            
+        # fidelity: (B, K)
+        # Unlike the raw deviations, which is a matrix for the outputs and the channels, the fidelity is a single 
+        # value that is associated with each channel. The larger each channel's fidelity value, the higher the 
+        # contribution of that channel towards the outcome of the prediction.
+        # Most importantly, the fidelity is supposed to be a positive value. A positive fidelity value indicates
+        # that the explanation highlighted by a channel actually acts in the same direction as that channel's
+        # pre-determined interpretation.
+        
+        # For regression problems the fidelity is simple since the positive channel's contribution is already a 
+        # positive values. Consequently we only need to invert the negative channels (channel 0) value to 
+        # promote that to be canonically negative.
+        if self.prediction_mode == 'regression':
+            fidelity = deviations.squeeze()
+            fidelity[:, 0] *= -1.0
+            
+        # For classification the fidelity is mainly defined through the diagonal elements of the deviation matrix.
+        # Each channel corresponds to one output class. Therefore, each channel should positively influence it's 
+        # corresponding class. The explanation depicted in that channel should generally increase the class logits
+        # while decreasing (off-diagonal) all the other logits.
+        elif self.prediction_mode == 'classification':
+            # diagonal
+            fidelity = torch.diagonal(deviations, dim1=-2, dim2=-1) 
+            # off-diagonal
+            fidelity -= - torch.sum((1.0 - torch.eye(self.num_channels)).to(self.device).unsqueeze(0) * deviations, dim=-2)
+    
+        return torch.mean(F.relu(-fidelity))
+    
     def training_explanation(self, 
                              data: Data,
                              info: dict,
@@ -836,7 +1015,7 @@ class Megan(AbstractGraphModel):
             # values_pred: (B, K)
             values_pred = torch.sigmoid(scaling * (pooled_importance - self.importance_offset))
             
-            loss_expl = F.binary_cross_entropy(values_pred, values_true)
+            loss_expl = F.binary_cross_entropy(values_pred, values_true, )
             
         elif self.importance_mode == 'classification':
             
