@@ -534,7 +534,7 @@ def evaluate_model(e: Experiment,
         e.log('reading the training logs and plotting the loss...')
         df = pd.read_csv(logs_path)
         
-        keys = [name for name in df.columns.tolist() if name != 'epoch' and name.endswith('epoch')]
+        keys = [name for name in df.columns.tolist() if name not in ['epoch', 'step']]
         e.log(f'plotting the following metrics: {keys}')
         
         fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(5, 5))

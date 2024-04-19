@@ -189,3 +189,18 @@ python during the forward pass and the training step implementation)
   more customizable in the future
 - Added the ``predict_graph`` function to the torch model base class which predicts a single graph output to be consistent 
   with the tensorflow version
+
+0.16.0 - 19.03.2024
+-------------------
+
+MODEL BACKWARDS INCOMPATIBLE
+
+- Made several changes to the torch version of the Megan base model
+  - Fixed a crucial bug in the classification implementation of the model, where a softmax operation was applied to the 
+    classification logits twice which lead to an explosion of the logit values.
+  - Implemented the fidelity training loss as a seperate loss term
+  - Slightly changed how the explanation approximation loss is computed: Instead of simply summing up the attention values 
+    themselves. The sum is now computed over learned values based on the initial node features, where the attention values 
+    are used as weights. This should make it a bit more generic and for example less dependent on the graph / motif size.
+  - Added optional labels smoothing for the classification loss to tackle overconfident models
+  - Added optional logit normalization for the classification logits to tackle overconfident models
