@@ -947,7 +947,7 @@ class Megan(AbstractGraphModel):
             # diagonal
             fidelity = torch.diagonal(deviations, dim1=-2, dim2=-1) 
             # off-diagonal
-            #fidelity -= - torch.sum((1.0 - torch.eye(self.num_channels)).to(self.device).unsqueeze(0) * deviations, dim=-2)
+            fidelity -= torch.sum((1.0 - torch.eye(self.num_channels)).to(self.device).unsqueeze(0) * deviations, dim=-2)
     
         return torch.mean(F.relu(-fidelity))
     

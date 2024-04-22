@@ -193,6 +193,8 @@ python during the forward pass and the training step implementation)
 0.16.0 - 19.03.2024
 -------------------
 
+- Added an additional experiment module for training a model on the COMPAS dataset.
+
 MODEL BACKWARDS INCOMPATIBLE
 
 - Made several changes to the torch version of the Megan base model
