@@ -89,7 +89,6 @@ The package is also published as a library on PyPi and can be installed like thi
 
     pip3 install graph_attention_student
 
-=============
 🚀 Quickstart
 =============
 
@@ -129,7 +128,6 @@ package for this task.
 .. _examples/solubility_regression.py: https://github.com/aimat-lab/graph_attention_student/tree/master/graph_attention_student/examples/solubility_regression.py
 .. _`GATv2`: https://github.com/tech-srl/how_attentive_are_gats
 
-================================
 🤖 Training a Custom MEGAN Model
 ================================
 
@@ -261,7 +259,6 @@ the purpose of these parameters it is recommended to read the `paper`_
   parameters ``IMPORTANCE_FACTOR``, ``FIDELITY_FACTOR`` and ``SPARSITY_FACTOR``. It is generally recommended to leave them at 
   their default value, but depending on the circumstances it might be necessary to adjust them.
 
-===========
 🔍 Examples
 ===========
 
@@ -326,7 +323,6 @@ Example for a negative review:
 Examples show the explanation channel for the "negative" class left and the "positive" class right.
 Sentences with negative / positive adjectives are appropriately attributed to the corresponding channels.
 
-==============
 📖 Referencing
 ==============
 
@@ -341,7 +337,6 @@ If you use, extend or otherwise mention or work, please cite the `paper`_ as fol
         year={2023}
     }
 
-==========
 🫱🏻‍🫲🏾 Credits
 ==========
 
