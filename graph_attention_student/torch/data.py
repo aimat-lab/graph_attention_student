@@ -47,10 +47,17 @@ def data_from_graph(graph: tv.GraphDict,
     # attributes to it. So in the case that there are canonical node and edge explanations 
     # attached to the graph, these are also being added.
     if 'node_importances' in graph:
-        data.node_importances = graph['node_importances']
+        data.node_importances = torch.tensor(graph['node_importances'], dtype=dtype)
     
     if 'edge_importances' in graph:
-        data.edge_importances = graph['edge_importances']
+        data.edge_importances = torch.tensor(graph['edge_importances'], dtype=dtype)
+        
+    # 02.05.24
+    # If the graph representation contains node coordinates, we can also attach those to the
+    # data object. This is going to be especially important for the equivariance extension for the 
+    # networks.
+    if 'node_coordinates' in graph:
+        data.coords = torch.tensor(graph['node_coordinates'], dtype=dtype)
     
     return data
 

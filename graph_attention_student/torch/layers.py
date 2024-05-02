@@ -224,6 +224,7 @@ class GraphAttentionLayer(AbstractAttentionLayer):
         self._attention = F.sigmoid(self._attention_logits)
         
         return self._attention * self.lay_linear(x_j)
+
     
     
 class AttentiveFpLayer(AbstractAttentionLayer):
