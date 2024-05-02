@@ -70,8 +70,10 @@ Then in the main folder run a ``pip install``:
     cd graph_attention_student
     pip3 install -e .
 
+
+
 ⚠️ Warning For Windows Users
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The required library ``cairosvg`` is known to cause problems on Windows systems. If you are on Windows, there might 
 be additional steps required to properly install the project dependencies.
@@ -339,7 +341,7 @@ If you use, extend or otherwise mention or work, please cite the `paper`_ as fol
     }
 
 
-🫱🏻‍🫲🏾 Credits
+Credits
 ------------
 
 * PyComex_ is a micro framework which simplifies the setup, processing and management of computational
