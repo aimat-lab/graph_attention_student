@@ -16,7 +16,7 @@
     :width: 800
     :alt: Architecture Overview
 
- 
+<br/>
 
 👩‍🏫 MEGAN: Multi Explanation Graph Attention Student
 ===================================================
@@ -340,7 +340,7 @@ If you use, extend or otherwise mention or work, please cite the `paper`_ as fol
         url="\url{https://link.springer.com/chapter/10.1007/978-3-031-44067-0_18\}",
     }
 
- 
+a
 
 🫱🏻‍🫲🏾 Credits
 ----------
