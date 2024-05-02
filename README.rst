@@ -16,10 +16,8 @@
     :width: 800
     :alt: Architecture Overview
 
-<br/>
-
 👩‍🏫 MEGAN: Multi Explanation Graph Attention Student
-===================================================
+====================================================
 
 **Abstract.** Explainable artificial intelligence (XAI) methods are expected to improve trust during human-AI interactions,
 provide tools for model analysis and extend human understanding of complex problems. Attention-based models
@@ -343,7 +341,7 @@ If you use, extend or otherwise mention or work, please cite the `paper`_ as fol
 a
 
 🫱🏻‍🫲🏾 Credits
-----------
+---
 
 * PyComex_ is a micro framework which simplifies the setup, processing and management of computational
   experiments. It is also used to auto-generate the command line interface that can be used to interact
