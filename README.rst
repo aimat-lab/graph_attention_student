@@ -16,7 +16,6 @@
     :width: 800
     :alt: Architecture Overview
 
-===================================================
 👩‍🏫 MEGAN: Multi Explanation Graph Attention Student
 ===================================================
 
@@ -33,7 +32,7 @@ sentiment classification of movie reviews. We find that our model produces expla
 with human intuition, opening the way to learning from our model in less well-understood tasks.
 
 🔔 News
-=======
+-------
 
 - **March 2023** - The `paper`_ was accepted at the `1st xAI world conference <https://xaiworldconference.com/2023/>`_
 - **June 2023** - Check out the `MeganExplains`_ web interface @ https://megan.aimat.science/. The interface allows to query MEGAN models trained on 
@@ -42,7 +41,7 @@ with human intuition, opening the way to learning from our model in less well-un
 - **April 2024** - The follow-up paper about *global concept explanations using an extension of MEGAN* is now available on arxiv: https://arxiv.org/abs/2404.16532 
 
 📦 Package Dependencies
-=======================
+-----------------------
 
 - The package is designed to run in an environment ``3.10 <= python <= 3.11``. 
 - A graphics card with CUDA support (cuDNN) is recommended for model training.
@@ -50,7 +49,7 @@ with human intuition, opening the way to learning from our model in less well-un
   actively tested and might run into additional issues during project setup.
  
 📦 Installation from Source
-===========================
+---------------------------
 
 Clone the repository from github:
 
@@ -72,7 +71,7 @@ Then in the main folder run a ``pip install``:
     pip3 install -e .
 
 ⚠️ Warning For Windows Users
----------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The required library ``cairosvg`` is known to cause problems on Windows systems. If you are on Windows, there might 
 be additional steps required to properly install the project dependencies.
@@ -81,7 +80,7 @@ See this `issue <https://github.com/aimat-lab/graph_attention_student/issues/2>`
 
 
 📦 Installation by Package
-==========================
+--------------------------
 
 The package is also published as a library on PyPi and can be installed like this:
 
@@ -90,7 +89,7 @@ The package is also published as a library on PyPi and can be installed like thi
     pip3 install graph_attention_student
 
 🚀 Quickstart
-=============
+-------------
 
 This package provides some functionality to load a pre-trained MEGAN model from the disk. The following code will illustrate 
 this for the example of predicting a molecular graph's water solubility using the default MEGAN model that is included in the 
@@ -129,7 +128,7 @@ package for this task.
 .. _`GATv2`: https://github.com/tech-srl/how_attentive_are_gats
 
 🤖 Training a Custom MEGAN Model
-================================
+--------------------------------
 
 If you are interested in training a custom MEGAN model for your own graph dataset, then you can do that as well. The easiest way to do this 
 generally consists of the following two steps:
@@ -138,7 +137,7 @@ generally consists of the following two steps:
 2. Create a new sub-experiment module which then uses that VGD to train the model for you.
 
 Converting the Dataset
-======================
+----------------------
 
 The existing MEGAN training implementations are based on the `visual graph dataset`_ (VGD) format. In this format a dataset of graph elements is given as a 
 folder that represents each element as one JSON file containing all the canonical graph structure, and a PNG file showing the canonical graph visualization.
@@ -149,7 +148,7 @@ option to directly convert a dataset of molecular graphs given as *a CSV of SMIL
 to the following documentation: https://github.com/aimat-lab/visual_graph_datasets#-converting-datasets
 
 Sub Experiment for Training
-===========================
+---------------------------
 
 All of the computational experiments in this repository are implemented with the PyComex_ microframework. This framework enforces a common structure to all the 
 experiment modules, but offers some convenient features in return. One of those features is *experiment inheritance* which allows to define a sub-experiment in 
@@ -260,13 +259,13 @@ the purpose of these parameters it is recommended to read the `paper`_
   their default value, but depending on the circumstances it might be necessary to adjust them.
 
 🔍 Examples
-===========
+-----------
 
 The following examples show some of the *cherry picked* examples that show the explanatory capabilities of
 the model.
 
 RB-Motifs Dataset
-=================
+~~~~~~~~~~~~~~~~~
 
 This is a synthetic dataset, which basically consists of randomly generated graphs with nodes of different
 colors. Some of the graphs contain special sub-graph motifs, which are either blue-heavy or red-heavy
@@ -286,7 +285,7 @@ basic GCN network. While the baseline MEGAN and GNNExplainer focus only on one o
 the explanation-supervised MEGAN model correctly finds both.
 
 Water Solubility Dataset
-========================
+~~~~~~~~~~~~~~~~~~~~~~~~
 
 This is the `AqSolDB`_ dataset, which consists of ~10000 molecules and measured values for the solubility in
 water (logS value).
@@ -300,7 +299,7 @@ The network was trained to predict the solubility value for each molecule.
 .. _`AqSolDB`: https://www.nature.com/articles/s41597-019-0151-1
 
 Movie Reviews
-=============
+~~~~~~~~~~~~~
 
 Originally the *MovieReviews* dataset is a natural language processing dataset from the `ERASER`_ benchmark.
 The task is to classify the sentiment of ~2000 movie reviews collected from the IMDB database into the
@@ -324,7 +323,7 @@ Examples show the explanation channel for the "negative" class left and the "pos
 Sentences with negative / positive adjectives are appropriately attributed to the corresponding channels.
 
 📖 Referencing
-==============
+--------------
 
 If you use, extend or otherwise mention or work, please cite the `paper`_ as follows:
 
@@ -334,11 +333,14 @@ If you use, extend or otherwise mention or work, please cite the `paper`_ as fol
         title={MEGAN: Multi-Explanation Graph Attention Network},
         author={Teufel, Jonas and Torresi, Luca and Reiser, Patrick and Friederich, Pascal},
         journal={xAI 2023},
-        year={2023}
+        year={2023},
+        doi={10.1007/978-3-031-44067-0_18},
+        url="\url{https://link.springer.com/chapter/10.1007/978-3-031-44067-0_18\}",
     }
 
+
 🫱🏻‍🫲🏾 Credits
-==========
+----------
 
 * PyComex_ is a micro framework which simplifies the setup, processing and management of computational
   experiments. It is also used to auto-generate the command line interface that can be used to interact
