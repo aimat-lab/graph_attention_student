@@ -16,9 +16,9 @@
     :width: 800
     :alt: Architecture Overview
 
-================================================
-MEGAN: Multi Explanation Graph Attention Student
-================================================
+===================================================
+👩‍🏫 MEGAN: Multi Explanation Graph Attention Student
+===================================================
 
 **Abstract.** Explainable artificial intelligence (XAI) methods are expected to improve trust during human-AI interactions,
 provide tools for model analysis and extend human understanding of complex problems. Attention-based models
@@ -32,7 +32,6 @@ synthetic and two real-world datasets: The prediction of water solubility of mol
 sentiment classification of movie reviews. We find that our model produces explanations consistent
 with human intuition, opening the way to learning from our model in less well-understood tasks.
 
-=======
 🔔 News
 =======
 
@@ -40,8 +39,16 @@ with human intuition, opening the way to learning from our model in less well-un
 - **June 2023** - Check out the `MeganExplains`_ web interface @ https://megan.aimat.science/. The interface allows to query MEGAN models trained on 
   different graph prediction tasks and to visualize the corresponding explanations provided by the model.
 - **October 2023** - The `paper`_ is published with Springer in the xAI conference proceedings: https://link.springer.com/chapter/10.1007/978-3-031-44067-0_18
+- **April 2024** - The follow-up paper about *global concept explanations using an extension of MEGAN* is now available on arxiv: https://arxiv.org/abs/2404.16532 
+
+📦 Package Dependencies
+=======================
+
+- The package is designed to run in an environment ``3.10 <= python <= 3.11``. 
+- A graphics card with CUDA support (cuDNN) is recommended for model training.
+- A **Linux** operating system is recommended for development. Development on Windows works, but isn't 
+  actively tested and might run into additional issues during project setup.
  
-===========================
 📦 Installation from Source
 ===========================
 
@@ -64,14 +71,15 @@ Then in the main folder run a ``pip install``:
     cd graph_attention_student
     pip3 install -e .
 
-Alternatively, you can also use the `poetry`_ package manager for the installation:
+⚠️ Warning For Windows Users
+---------------------------
 
-.. code-block:: shell
+The required library ``cairosvg`` is known to cause problems on Windows systems. If you are on Windows, there might 
+be additional steps required to properly install the project dependencies.
 
-    cd graph_attention_student
-    poetry install
+See this `issue <https://github.com/aimat-lab/graph_attention_student/issues/2>`_ for additional information.
 
-==========================
+
 📦 Installation by Package
 ==========================
 
@@ -96,7 +104,7 @@ package for this task.
 
     import tensorflow as tf
     import tensorflow.keras as ks
-    from visual_graph_datasets.utils import dynamic_import
+    from visual_graph_datasets.util import dynamic_import
     from graph_attention_student.utils import ASSETS_PATH
     from graph_attention_student.models import load_model
 
@@ -114,7 +122,7 @@ package for this task.
     
     # THe model outputs the node and edge explanation masks directly alongside the main target value prediction
     out_pred, ni_pred, ei_pred = model.predict_graphs([graph])[0]
-    print(f'Solubility: {out_pred:.2f}')
+    print(f'Solubility: {out_pred[0]:.2f}')
 
 
 .. _kgcnn: https://github.com/aimat-lab/gcnn_keras

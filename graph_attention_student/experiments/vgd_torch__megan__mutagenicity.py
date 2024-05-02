@@ -93,7 +93,7 @@ CHANNEL_INFOS: dict = {
 #       This list determines the layer structure of the MLP's that act as the channel-specific projections.
 #       Each element in this list represents one layer where the integer value determines the number of hidden
 #       units in that layer.
-PROJECTION_UNITS: t.List[int] = [32, 64]
+PROJECTION_UNITS: t.List[int] = [32, 64, 128]
 # :param FINAL_UNITS:
 #       This list determines the layer structure of the model's final prediction MLP. Each element in 
 #       this list represents one layer, where the integer value determines the number of hidden units 
@@ -112,14 +112,14 @@ OUTPUT_NORM: t.Optional[float] = None
 #       This is the label smoothing parameter that is used for the cross entropy loss of the model.
 #       If this value is set to 0.0, no label smoothing is applied. If this value is set to a value
 #       between 0.0 and 1.0, the label smoothing will be applied to the cross entropy loss.
-LABEL_SMOOTHING: t.Optional[float] = 0.05
+LABEL_SMOOTHING: t.Optional[float] = 0.01
 # :param NUM_CHANNELS:
 #       The number of explanation channels for the model.
 NUM_CHANNELS: int = 2
 # :param IMPORTANCE_FACTOR:
 #       This is the coefficient that is used to scale the explanation co-training loss during training.
 #       Roughly, the higher this value, the more the model will prioritize the explanations during training.
-IMPORTANCE_FACTOR: float = 1.0
+IMPORTANCE_FACTOR: float = 0.5
 # :param IMPORTANCE_OFFSET:
 #       This parameter more or less controls how expansive the explanations are - how much of the graph they
 #       tend to cover. Higher values tend to lead to more expansive explanations while lower values tend to 
@@ -129,14 +129,14 @@ IMPORTANCE_OFFSET: float = 5.0
 #       This is the coefficient that is used to scale the explanation sparsity loss during training.
 #       The higher this value the more explanation sparsity (less and more discrete explanation masks)
 #       is promoted.
-SPARSITY_FACTOR: float = 0.01
+SPARSITY_FACTOR: float = 0.5
 # :param FIDELITY_FACTOR:
 #       This parameter controls the coefficient of the explanation fidelity loss during training. The higher
 #       this value, the more the model will be trained to create explanations that actually influence the
 #       model's behavior with a positive fidelity (according to their pre-defined interpretation).
 #       If this value is set to 0.0, the explanation fidelity loss is completely disabled (==higher computational
 #       efficiency).
-FIDELITY_FACTOR: float = 0.01
+FIDELITY_FACTOR: float = 0.1
 # :param REGRESSION_REFERENCE:
 #       When dealing with regression tasks, an important hyperparameter to set is this reference value in the 
 #       range of possible target values, which will determine what part of the dataset is to be considered as 
@@ -191,7 +191,7 @@ PREDICTION_FACTOR: float = 1.0
 # :param EPOCHS:
 #       The integer number of epochs to train the dataset for. Each epoch means that the model is trained 
 #       once on the entire training dataset.
-EPOCHS: int = 200
+EPOCHS: int = 250
 # :param BATCH_SIZE:
 #       The batch size to use while training. This is the number of elements from the dataset that are 
 #       presented to the model at the same time to estimate the gradient direction for the stochastic gradient 

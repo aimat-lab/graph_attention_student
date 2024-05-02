@@ -200,6 +200,8 @@ class Megan(AbstractGraphModel):
             'final_dropout_rate':       final_dropout_rate,
             'num_channels':             num_channels,
             'prediction_mode':          prediction_mode,
+            'regression_reference':     regression_reference,
+            'regression_margin':        regression_margin,
             'label_smoothing':          label_smoothing,
             'class_weights':            class_weights,
             'output_norm':              output_norm,
@@ -949,7 +951,7 @@ class Megan(AbstractGraphModel):
             # off-diagonal
             fidelity -= torch.sum((1.0 - torch.eye(self.num_channels)).to(self.device).unsqueeze(0) * deviations, dim=-2)
     
-        return torch.mean(F.relu(-fidelity))
+        return torch.mean(F.relu(-fidelity)) + 0.1 * torch.mean(torch.square(fidelity))
     
     def training_explanation(self, 
                              data: Data,

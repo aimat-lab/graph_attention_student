@@ -102,7 +102,7 @@ SPARSITY_FACTOR: float = 0.01
 #       model's behavior with a positive fidelity (according to their pre-defined interpretation).
 #       If this value is set to 0.0, the explanation fidelity loss is completely disabled (==higher computational
 #       efficiency).
-FIDELITY_FACTOR: float = 0.01
+FIDELITY_FACTOR: float = 0.1
 # :param REGRESSION_REFERENCE:
 #       When dealing with regression tasks, an important hyperparameter to set is this reference value in the 
 #       range of possible target values, which will determine what part of the dataset is to be considered as 
@@ -119,7 +119,7 @@ NORMALIZE_EMBEDDING: bool = True
 #       This string literal determines the strategy which is used to aggregate the edge attention logits over 
 #       the various message passing layers in the graph encoder part of the network. This may be one of the 
 #       following values: 'sum', 'max', 'min'.
-ATTENTION_AGGREGATION: str = 'min'
+ATTENTION_AGGREGATION: str = 'sum'
 # :param REGRESSION_MARGIN:
 #       When converting the regression problem into the negative/positive classification problem for the 
 #       explanation co-training, this determines the margin for the thresholding. Instead of using the regression
@@ -151,7 +151,7 @@ CONTRASTIVE_TEMP: float = 1.0
 #       parameter. It determines how much the contrastive loss is focused on the hardest negative samples.
 CONTRASTIVE_BETA: float = 1.0
 
-EPOCHS: int = 200
+EPOCHS: int = 100
 BATCH_SIZE: int = 200
 LEARNING_RATE = 1e-3
 

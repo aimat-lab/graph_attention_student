@@ -11,6 +11,7 @@ import os
 import pathlib
 import typing as t
 
+import numpy as np
 from pycomex.functional.experiment import Experiment
 from pycomex.utils import file_namespace, folder_path
 
@@ -157,7 +158,7 @@ CONTRASTIVE_BETA: float = 1.0
 PREDICTION_FACTOR: float = 1.0
 
 EPOCHS = 250
-BATCH_SIZE = 200
+BATCH_SIZE = 100
 REPETITIONS = 1
 
 __DEBUG__ = True

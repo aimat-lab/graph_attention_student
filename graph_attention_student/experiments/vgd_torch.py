@@ -643,6 +643,11 @@ def experiment(e: Experiment):
     e['edge_dim'] = example_graph['edge_attributes'].shape[1]
     e['output_dim'] = example_graph['graph_labels'].shape[0]
     
+    # 24.04.24
+    # :hook after_dataset:
+    #       This hook is called after the dataset has been loaded and the index_data_map is available. The hook 
+    #       is not supposed to return anything, but may apply modifications to the index_data_map or to the
+    #       experiment storage.
     e.apply_hook(
         'after_dataset',
         index_data_map=index_data_map,
