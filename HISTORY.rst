@@ -206,3 +206,11 @@ MODEL BACKWARDS INCOMPATIBLE
     are used as weights. This should make it a bit more generic and for example less dependent on the graph / motif size.
   - Added optional labels smoothing for the classification loss to tackle overconfident models
   - Added optional logit normalization for the classification logits to tackle overconfident models
+
+0.16.2 - 20.03.2024
+-------------------
+
+- Added the new experiment module ``vgd_torch__megan__tadf.py`` which trains the MEGAN model on the TADF dataset 
+  for predicting the singlet-triplet energy gap of molecules.
+- The ``torch.data.data_from_graph`` function now also attaches the ``node_coordinates`` to the resulting Data object 
+  as the ``data.coords`` attribibute - if it exists in the given graph dict.
