@@ -338,10 +338,9 @@ If you use, extend or otherwise mention or work, please cite the `paper`_ as fol
         url="\url{https://link.springer.com/chapter/10.1007/978-3-031-44067-0_18\}",
     }
 
-a
 
 🫱🏻‍🫲🏾 Credits
----
+------------
 
 * PyComex_ is a micro framework which simplifies the setup, processing and management of computational
   experiments. It is also used to auto-generate the command line interface that can be used to interact
