@@ -66,7 +66,7 @@ TARGET_NAMES: t.Dict[int, str] = {
 #       This list determines the layer structure of the model's graph encoder part. Each element in 
 #       this list represents one layer, where the integer value determines the number of hidden units 
 #       in that layer of the encoder network.
-UNITS: t.List[int] = [32, 32, 32, 32]
+UNITS: t.List[int] = [64, 64, 64, 64, 64]
 # :param IMPORTANCE_UNITS:
 #       This list determines the layer structure of the importance MLP which determines the node importance 
 #       weights from the node embeddings of the graph. 
@@ -93,7 +93,7 @@ CHANNEL_INFOS: dict = {
 #       This list determines the layer structure of the MLP's that act as the channel-specific projections.
 #       Each element in this list represents one layer where the integer value determines the number of hidden
 #       units in that layer.
-PROJECTION_UNITS: t.List[int] = [32, 64, 128]
+PROJECTION_UNITS: t.List[int] = [64, 128]
 # :param FINAL_UNITS:
 #       This list determines the layer structure of the model's final prediction MLP. Each element in 
 #       this list represents one layer, where the integer value determines the number of hidden units 
@@ -119,7 +119,7 @@ NUM_CHANNELS: int = 2
 # :param IMPORTANCE_FACTOR:
 #       This is the coefficient that is used to scale the explanation co-training loss during training.
 #       Roughly, the higher this value, the more the model will prioritize the explanations during training.
-IMPORTANCE_FACTOR: float = 0.5
+IMPORTANCE_FACTOR: float = 1.0
 # :param IMPORTANCE_OFFSET:
 #       This parameter more or less controls how expansive the explanations are - how much of the graph they
 #       tend to cover. Higher values tend to lead to more expansive explanations while lower values tend to 
@@ -129,7 +129,7 @@ IMPORTANCE_OFFSET: float = 5.0
 #       This is the coefficient that is used to scale the explanation sparsity loss during training.
 #       The higher this value the more explanation sparsity (less and more discrete explanation masks)
 #       is promoted.
-SPARSITY_FACTOR: float = 0.5
+SPARSITY_FACTOR: float = 0.1
 # :param FIDELITY_FACTOR:
 #       This parameter controls the coefficient of the explanation fidelity loss during training. The higher
 #       this value, the more the model will be trained to create explanations that actually influence the
@@ -191,12 +191,12 @@ PREDICTION_FACTOR: float = 1.0
 # :param EPOCHS:
 #       The integer number of epochs to train the dataset for. Each epoch means that the model is trained 
 #       once on the entire training dataset.
-EPOCHS: int = 250
+EPOCHS: int = 200
 # :param BATCH_SIZE:
 #       The batch size to use while training. This is the number of elements from the dataset that are 
 #       presented to the model at the same time to estimate the gradient direction for the stochastic gradient 
 #       descent optimization.
-BATCH_SIZE: int = 180
+BATCH_SIZE: int = 200
 # :param LEARNING_RATE:
 #       This float determines the learning rate of the optimizer.
 LEARNING_RATE: float = 1e-3

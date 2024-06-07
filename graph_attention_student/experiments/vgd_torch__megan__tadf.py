@@ -52,7 +52,7 @@ NUM_EXAMPLES: int = 100
 #       of the targets in the order as they appear in the dataset. The values are string which will be 
 #       used as the names of these targets within the evaluation visualizations and log messages etc.
 TARGET_NAMES: t.Dict[int, str] = {
-    0: 'logS'
+    0: 'singlet-triplet splitting energy'
 }
 
 # == MODEL PARAMETERS ==
@@ -71,7 +71,7 @@ IMPORTANCE_UNITS: t.List[int] = [ ]
 #       This list determines the layer structure of the MLP's that act as the channel-specific projections.
 #       Each element in this list represents one layer where the integer value determines the number of hidden
 #       units in that layer.
-PROJECTION_UNITS: t.List[int] = [64, 128]
+PROJECTION_UNITS: t.List[int] = [64, 64, 128]
 # :param FINAL_UNITS:
 #       This list determines the layer structure of the model's final prediction MLP. Each element in 
 #       this list represents one layer, where the integer value determines the number of hidden units 
@@ -85,7 +85,7 @@ NUM_CHANNELS: int = 2
 # :param IMPORTANCE_FACTOR:
 #       This is the coefficient that is used to scale the explanation co-training loss during training.
 #       Roughly, the higher this value, the more the model will prioritize the explanations during training.
-IMPORTANCE_FACTOR: float = 0.5
+IMPORTANCE_FACTOR: float = 1.0
 # :param IMPORTANCE_OFFSET:
 #       This parameter more or less controls how expansive the explanations are - how much of the graph they
 #       tend to cover. Higher values tend to lead to more expansive explanations while lower values tend to 
@@ -95,7 +95,7 @@ IMPORTANCE_OFFSET: float = 5.0
 #       This is the coefficient that is used to scale the explanation sparsity loss during training.
 #       The higher this value the more explanation sparsity (less and more discrete explanation masks)
 #       is promoted.
-SPARSITY_FACTOR: float = 0.001
+SPARSITY_FACTOR: float = 0.1
 # :param FIDELITY_FACTOR:
 #       This parameter controls the coefficient of the explanation fidelity loss during training. The higher
 #       this value, the more the model will be trained to create explanations that actually influence the
@@ -125,7 +125,7 @@ ATTENTION_AGGREGATION: str = 'sum'
 #       explanation co-training, this determines the margin for the thresholding. Instead of using the regression
 #       reference as a hard threshold, values have to be at least this margin value lower/higher than the 
 #       regression reference to be considered a class sample.
-REGRESSION_MARGIN: t.Optional[float] = 0.0
+REGRESSION_MARGIN: t.Optional[float] = 0.05
 # :param CONTRASTIVE_FACTOR:
 #       This is the factor of the contrastive representation learning loss of the network. If this value is 0 
 #       the contrastive repr. learning is completely disabled (increases computational efficiency). The higher 
@@ -151,7 +151,16 @@ CONTRASTIVE_TEMP: float = 1.0
 #       parameter. It determines how much the contrastive loss is focused on the hardest negative samples.
 CONTRASTIVE_BETA: float = 1.0
 
-EPOCHS: int = 50
+# == VISUALIZATION PARAMETERS ==
+# The following parameters configure the visualization of the model and the dataset.
+
+# :param DO_CLUSTERING:
+#       A boolean parameter which determines whether the clustering during the analysis of the experiment will 
+#       be performed or not. If this is set to False, the clustering analysis will be skipped. When setting this 
+#       to True, be aware that the clustering analysis will take a lot of time and memory for large datasets!
+DO_CLUSTERING: bool = False
+
+EPOCHS: int = 15
 BATCH_SIZE: int = 100
 
 __DEBUG__ = True
@@ -178,7 +187,6 @@ def target_from_metadata(e: Experiment,
     """
     # This selects the first target value as the actual value to train on
     target = metadata['graph']['graph_labels'][0:1]
-    print(target, target.shape)
     return target
 
 
@@ -187,7 +195,12 @@ def after_dataset(e: Experiment,
                   index_data_map: dict,
                   ) -> None:
     """
+    This hook is being called right after the dataset has been loaded into the memory. 
+    It receives the index_data_map representation of the entire graph dataset as a parameter.
     
+    This implementation will simply analyze some statistical properties of the target values 
+    of the dataset since those might be necessary to set the "REGRESSION_REFERENCE" parameter 
+    correctly.
     """
     
     target_values: list[float] = []

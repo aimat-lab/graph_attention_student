@@ -214,3 +214,12 @@ MODEL BACKWARDS INCOMPATIBLE
   for predicting the singlet-triplet energy gap of molecules.
 - The ``torch.data.data_from_graph`` function now also attaches the ``node_coordinates`` to the resulting Data object 
   as the ``data.coords`` attribibute - if it exists in the given graph dict.
+
+0.16.3 - 07.06.2024
+-------------------
+
+- Added the new parameter ``regression_target`` to the default ``Megan`` class. Possible values are the the string 
+  literals 'node' and 'edge'. The node-case is the default backwards compatible case where the explanation approximation 
+  loss is calculated on the basis of the nodes alone. With the new edge-case, the explanation approximation loss is 
+  based on the edges. Specifically, the edge features as well as the features of the two adjoined nodes. This is a more 
+  general case as it also considers tasks which are primarily influenced by the edge features and not the node features.

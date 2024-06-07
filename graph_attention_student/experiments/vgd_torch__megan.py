@@ -180,6 +180,15 @@ CONTRASTIVE_TAU: float = 0.1
 #       tasks with a vastly different target value scale.
 PREDICTION_FACTOR: float = 1.0
 
+# == VISUALIZATION PARAMETERS ==
+# The following parameters configure the visualization of the model and the dataset.
+
+# :param DO_CLUSTERING:
+#       A boolean parameter which determines whether the clustering during the analysis of the experiment will 
+#       be performed or not. If this is set to False, the clustering analysis will be skipped. When setting this 
+#       to True, be aware that the clustering analysis will take a lot of time and memory for large datasets!
+DO_CLUSTERING: bool = True
+
 
 __DEBUG__ = True
 
@@ -234,6 +243,7 @@ def train_model(e: Experiment,
             num_channels=e.NUM_CHANNELS,
             importance_factor=e.IMPORTANCE_FACTOR,
             importance_offset=e.IMPORTANCE_OFFSET,
+            importance_target='edge',
             sparsity_factor=e.SPARSITY_FACTOR,
             fidelity_factor=e.FIDELITY_FACTOR,
             regression_reference=e.REGRESSION_REFERENCE,
@@ -466,6 +476,13 @@ def analysis(e: Experiment):
     index_data_map = e['_index_data_map']
     graphs = [data['metadata']['graph'] for data in index_data_map.values()]
     indices = np.array(list(index_data_map.keys()))
+    
+    # 04.06.24
+    # There needed to be a way to skip the clustering because the runtime of this scales very badly 
+    # for larger datasets.
+    if not e.DO_CLUSTERING:
+        e.log('skipping clustering analysis...')
+        return
     
     e.log('Clustering the latent space...')
     min_samples = 5

@@ -86,7 +86,7 @@ PROJECTION_UNITS: t.List[int] = [64, 128]
 #       in that layer of the prediction network.
 #       Note that the last value of this list determines the output shape of the entire network and 
 #       therefore has to match the number of target values given in the dataset.
-FINAL_UNITS: t.List[int] = [64, 32, 1]
+FINAL_UNITS: t.List[int] = [1]
 # :param NUM_CHANNELS:
 #       The number of explanation channels for the model.
 NUM_CHANNELS: int = 2
@@ -131,7 +131,7 @@ ATTENTION_AGGREGATION: str = 'sum'
 #       This is the factor of the contrastive representation learning loss of the network. If this value is 0 
 #       the contrastive repr. learning is completely disabled (increases computational efficiency). The higher 
 #       this value the more the contrastive learning will influence the network during training.
-CONTRASTIVE_FACTOR: float = 0.01
+CONTRASTIVE_FACTOR: float = 0.0
 # :param CONTRASTIVE_NOISE:
 #       This float value determines the noise level that is applied when generating the positive augmentations 
 #       during the contrastive learning process.
@@ -157,8 +157,8 @@ CONTRASTIVE_BETA: float = 1.0
 #       tasks with a vastly different target value scale.
 PREDICTION_FACTOR: float = 1.0
 
-EPOCHS = 250
-BATCH_SIZE = 100
+EPOCHS = 200
+BATCH_SIZE = 200
 REPETITIONS = 1
 
 __DEBUG__ = True

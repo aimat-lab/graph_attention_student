@@ -98,6 +98,7 @@ class Megan(AbstractGraphModel):
                  importance_mode: t.Optional[str] = None,
                  importance_factor: float = 0.0,
                  importance_offset: float = 0.8,
+                 importance_target: t.Literal['node', 'edge'] = 'node',
                  regression_reference: float = 0.0,
                  regression_margin: float = 0.0,
                  sparsity_factor: float = 0.0,
@@ -152,6 +153,7 @@ class Megan(AbstractGraphModel):
         self.num_channels = num_channels
         self.importance_factor = importance_factor
         self.importance_offset = importance_offset
+        self.importance_target = importance_target
         self.regression_reference = regression_reference
         self.regression_margin = regression_margin
         self.sparsity_factor = sparsity_factor
@@ -186,6 +188,7 @@ class Megan(AbstractGraphModel):
             'encoder_dropout_rate':     encoder_dropout_rate,
             'importance_units':         importance_units,
             'importance_offset':        importance_offset,
+            'importance_target':        importance_target,
             'projection_units':         projection_units,
             'normalize_embedding':      normalize_embedding,
             'attention_aggregation':    attention_aggregation,
@@ -220,13 +223,20 @@ class Megan(AbstractGraphModel):
             out_features=units[0]
         )
         
+        # ~ explanation approximation layers
+        
+        if self.importance_target == 'node':
+            in_features_ = node_dim
+        elif self.importance_target == 'edge':
+            in_features_ = 2 * node_dim + edge_dim
+            
         self.lay_transform_1 = nn.Linear(
-            in_features=node_dim,
-            out_features=64,
+            in_features=in_features_,
+            out_features=16,
             bias=True,
         )
         self.lay_transform_2 = nn.Linear(
-            in_features=64,
+            in_features=16,
             out_features=1,
             bias=False,
         )
@@ -969,25 +979,40 @@ class Megan(AbstractGraphModel):
         
         loss_expl = 0.0
         
-        # ~ aggregating the explanation masks as predicted values
+        if self.importance_target == 'node':
+            
+            # -- node-level explanation approximation --
+            
+            # node_importance: (B * V, K)
+            # for each *node* these are attention values in the range [0, 1]
+            node_importance = info['node_importance']
+            
+            # node_importance_norm: (B * V, K)
+            # max_values = torch_scatter.scatter_max(node_importance, data.batch, dim=0)[0] + 1e-8
+            # node_importance = node_importance / max_values[data.batch]
+            
+            # node_transformed: (B * V, K)
+            node_transformed = (F.relu(self.lay_transform_2(F.relu(self.lay_transform_1(data.x)))) + 0.0) * node_importance
+            pooled_importance = self.lay_pool_importance(node_transformed, data.batch)
         
-        # node_importance: (B * V, K)
-        # for each *node* these are attention values in the range [0, 1]
-        node_importance = info['node_importance']
+        elif self.importance_target == 'edge':
         
-        # node_importance_norm: (B * V, K)
-        max_values = torch_scatter.scatter_max(node_importance, data.batch, dim=0)[0] + 1e-8
-        node_importance_norm = node_importance / max_values[data.batch]
-        # mean_values = torch_scatter.scatter_mean(node_importance, data.batch, dim=0)
-        # node_importance_norm = node_importance / mean_values[data.batch]
-        
-        # node_transformed: (B * V, K)
-        node_transformed = (F.relu(self.lay_transform_2(F.relu(self.lay_transform_1(data.x)))) + 0.01) * node_importance
-        pooled_importance = self.lay_pool_importance(node_transformed, data.batch)
-        
-        # pooled_importance: (B, K)
-        # for each *graph* this is a value in the range [0, V] because sum over the [0, 1] node importances
-        #pooled_importance = self.lay_pool_importance(node_importance, data.batch)
+            # -- edge-level explanation approximation --
+            
+            # edge_importance: (B * E, K)
+            edge_importance = info['edge_importance']
+            
+            # edge_input: (B * E, M + 2N)
+            edge_input = torch.cat([data.edge_attr, data.x[data.edge_index[0]], data.x[data.edge_index[1]]], dim=-1)
+            
+            # max_values = torch_scatter.scatter_max(edge_importance, data.batch[data.edge_index[0]], dim=0)[0] + 1e-8
+            # edge_importance = edge_importance / max_values[data.batch[data.edge_index[0]]]
+            
+            # edge_transformed: (B * E, K)
+            edge_transformed = self.lay_transform_2(self.lay_transform_1(edge_input).relu()).relu() + 0.0
+            edge_transformed = edge_transformed * edge_importance
+            
+            pooled_importance = self.lay_pool_importance(edge_transformed, data.batch[data.edge_index[0]])
         
         # ~ constructing the approximation
         
@@ -996,8 +1021,8 @@ class Megan(AbstractGraphModel):
         # out_pred: (B, O)
         out_true = data.y.view(out_pred.shape)
         
-        scaling = 1
-        self.importance_offset = 3
+        scaling = 1.0
+        self.importance_offset = 5.0
         if self.importance_mode == 'regression':
             
             # Here we actually deviate from the original MEGAN implementation a little bit. In the original 

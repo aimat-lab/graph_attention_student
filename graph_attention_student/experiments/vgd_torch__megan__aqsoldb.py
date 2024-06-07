@@ -84,7 +84,7 @@ NUM_CHANNELS: int = 2
 # :param IMPORTANCE_FACTOR:
 #       This is the coefficient that is used to scale the explanation co-training loss during training.
 #       Roughly, the higher this value, the more the model will prioritize the explanations during training.
-IMPORTANCE_FACTOR: float = 0.5
+IMPORTANCE_FACTOR: float = 1.0
 # :param IMPORTANCE_OFFSET:
 #       This parameter more or less controls how expansive the explanations are - how much of the graph they
 #       tend to cover. Higher values tend to lead to more expansive explanations while lower values tend to 
@@ -94,21 +94,21 @@ IMPORTANCE_OFFSET: float = 5.0
 #       This is the coefficient that is used to scale the explanation sparsity loss during training.
 #       The higher this value the more explanation sparsity (less and more discrete explanation masks)
 #       is promoted.
-SPARSITY_FACTOR: float = 0.01
+SPARSITY_FACTOR: float = 0.1
 # :param FIDELITY_FACTOR:
 #       This parameter controls the coefficient of the explanation fidelity loss during training. The higher
 #       this value, the more the model will be trained to create explanations that actually influence the
 #       model's behavior with a positive fidelity (according to their pre-defined interpretation).
 #       If this value is set to 0.0, the explanation fidelity loss is completely disabled (==higher computational
 #       efficiency).
-FIDELITY_FACTOR: float = 0.5
+FIDELITY_FACTOR: float = 0.1
 # :param REGRESSION_REFERENCE:
 #       When dealing with regression tasks, an important hyperparameter to set is this reference value in the 
 #       range of possible target values, which will determine what part of the dataset is to be considered as 
 #       negative / positive in regard to the negative and the positive explanation channel. A good first choice 
 #       for this parameter is the average target value of the training dataset. Depending on the results for 
 #       that choice it is possible to adjust the value to adjust the explanations.
-REGRESSION_REFERENCE: t.Optional[float] = -2.0
+REGRESSION_REFERENCE: t.Optional[float] = -3.0
 # :param NORMALIZE_EMBEDDING:
 #       This boolean value determines whether the graph embeddings are normalized to a unit length or not.
 #       If this is true, the embedding of each individual explanation channel will be L2 normalized such that 
@@ -124,12 +124,12 @@ ATTENTION_AGGREGATION: str = 'sum'
 #       explanation co-training, this determines the margin for the thresholding. Instead of using the regression
 #       reference as a hard threshold, values have to be at least this margin value lower/higher than the 
 #       regression reference to be considered a class sample.
-REGRESSION_MARGIN: t.Optional[float] = 0.0
+REGRESSION_MARGIN: t.Optional[float] = 2.0
 # :param CONTRASTIVE_FACTOR:
 #       This is the factor of the contrastive representation learning loss of the network. If this value is 0 
 #       the contrastive repr. learning is completely disabled (increases computational efficiency). The higher 
 #       this value the more the contrastive learning will influence the network during training.
-CONTRASTIVE_FACTOR: float = 0.1
+CONTRASTIVE_FACTOR: float = 0.0
 # :param CONTRASTIVE_NOISE:
 #       This float value determines the noise level that is applied when generating the positive augmentations 
 #       during the contrastive learning process.
@@ -150,8 +150,8 @@ CONTRASTIVE_TEMP: float = 1.0
 #       parameter. It determines how much the contrastive loss is focused on the hardest negative samples.
 CONTRASTIVE_BETA: float = 1.0
 
-EPOCHS: int = 250
-BATCH_SIZE: int = 200
+EPOCHS: int = 100
+BATCH_SIZE: int = 25
 
 __DEBUG__ = True
 __TESTING__ = False

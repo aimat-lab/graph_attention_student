@@ -95,7 +95,7 @@ IMPORTANCE_OFFSET: float = 5.0
 #       This is the coefficient that is used to scale the explanation sparsity loss during training.
 #       The higher this value the more explanation sparsity (less and more discrete explanation masks)
 #       is promoted.
-SPARSITY_FACTOR: float = 0.01
+SPARSITY_FACTOR: float = 0.1
 # :param FIDELITY_FACTOR:
 #       This parameter controls the coefficient of the explanation fidelity loss during training. The higher
 #       this value, the more the model will be trained to create explanations that actually influence the
@@ -151,7 +151,7 @@ CONTRASTIVE_TEMP: float = 1.0
 #       parameter. It determines how much the contrastive loss is focused on the hardest negative samples.
 CONTRASTIVE_BETA: float = 1.0
 
-EPOCHS: int = 100
+EPOCHS: int = 50
 BATCH_SIZE: int = 200
 LEARNING_RATE = 1e-3
 
