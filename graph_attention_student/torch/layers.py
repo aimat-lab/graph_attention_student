@@ -86,6 +86,7 @@ class MultiHeadAttention(nn.Module):
                  layers: t.List[AbstractAttentionLayer],
                  activation: str = 'leaky_relu',
                  aggregation: str = 'sum',
+                 residual: bool = True,
                  ):
         super().__init__()
         
@@ -100,6 +101,8 @@ class MultiHeadAttention(nn.Module):
         
         self.aggregation = aggregation
         self.aggregate = self.AGGREGATION_MAP[aggregation]
+        
+        self.residual = residual
         
     def forward(self,
                 x: torch.Tensor,
@@ -143,6 +146,9 @@ class MultiHeadAttention(nn.Module):
         # node_embeddings: (B * V, out)
         node_embeddings = self.aggregate(node_embeddings, dim=-1)
         
+        if self.residual:
+            node_embeddings = 0.5 * (node_embeddings + x)
+        
         # alphas: (B * E, K)
         alphas = torch.cat(alphas, dim=-1)
     
@@ -155,7 +161,7 @@ class GraphAttentionLayer(AbstractAttentionLayer):
                  in_dim: int,
                  out_dim: int,
                  edge_dim: int,
-                 ):
+        ):
         super().__init__(
             in_dim=in_dim,
             out_dim=out_dim,
@@ -174,6 +180,7 @@ class GraphAttentionLayer(AbstractAttentionLayer):
         )
         
         self.lay_act = nn.LeakyReLU()
+        
         self.lay_transform = nn.Linear(
             in_features=out_dim+in_dim,
             out_features=out_dim,
@@ -206,7 +213,6 @@ class GraphAttentionLayer(AbstractAttentionLayer):
         )
         
         node_embedding = self.lay_act(node_embedding)
-        #node_embedding = self.lay_transform(node_embedding)
         node_embedding = self.lay_transform(torch.cat([node_embedding, x], axis=-1))
         
         return node_embedding, self._attention_logits
@@ -219,13 +225,111 @@ class GraphAttentionLayer(AbstractAttentionLayer):
         # message: (B * E, 2*out + edge)
         message = torch.cat([x_i, x_j, edge_attr], dim=-1)
         
+        
         # _attention: (B * E, 1)
         self._attention_logits = self.lay_attention(message)
         self._attention = F.sigmoid(self._attention_logits)
         
+        #return self._attention * self.lay_message(message)
         return self._attention * self.lay_linear(x_j)
 
+
+class GraphAttentionLayerV2(AbstractAttentionLayer):
     
+    def __init__(self,
+                 in_dim: int,
+                 out_dim: int,
+                 edge_dim: int,
+                 hidden_dim: int = 128,
+                 ):
+        super().__init__(
+            in_dim=in_dim,
+            out_dim=out_dim,
+            edge_dim=edge_dim,
+            aggr='sum',
+        )
+        
+        self.lay_message = nn.Sequential(
+            nn.Linear(in_features=(2 * in_dim) + edge_dim, 
+                      out_features=hidden_dim),
+            nn.BatchNorm1d(hidden_dim),
+            nn.SiLU(),
+            nn.Linear(in_features=hidden_dim,
+                      out_features=out_dim),
+            nn.BatchNorm1d(out_dim),
+        )
+        
+        
+        self.lay_attention = nn.Sequential(
+            nn.Linear(in_features=(2 * in_dim) + edge_dim, 
+                      out_features=hidden_dim),
+            nn.BatchNorm1d(hidden_dim),
+            nn.SiLU(),
+            nn.Linear(in_features=hidden_dim,
+                      out_features=1),
+        )
+        
+        self.lay_act = nn.LeakyReLU()
+        
+        # self.lay_transform = nn.Linear(
+        #     in_features=out_dim+in_dim,
+        #     out_features=out_dim,
+        # )
+        self.lay_transform = nn.Sequential(
+            nn.Linear(in_features=out_dim+in_dim,
+                      out_features=hidden_dim),
+            nn.SiLU(),
+            nn.Linear(in_features=hidden_dim,
+                      out_features=out_dim),   
+        )
+        
+        # We will use this instance property to transport the attention weights from the class' 
+        # "message" method to the "forward" method. So during the "message" method we will actually
+        # assign a tensor value to this attribute.
+        self._attention: t.Optional[torch.Tensor] = None
+        self._attention_logits: t.Optional[torch.Tensor] = None
+    
+    def forward(self,
+                x: torch.Tensor,
+                edge_attr: torch.Tensor,
+                edge_index: torch.Tensor,
+                **kwargs):
+        
+        # At first we apply a linear transformation on the input node features themselves so that they 
+        # have the dimension which will later also be the output dimension.
+        # node_embedding: (B * V, out)
+        # node_embedding = self.lay_linear(x)
+        
+        self._attention = None
+        self._attention_logits = None
+        # node_embedding: (B * V, out)
+        node_embedding = self.propagate(
+            edge_index,
+            x=x, 
+            edge_attr=edge_attr
+        )
+        
+        #node_embedding = self.lay_act(node_embedding)
+        #node_embedding = self.lay_transform(torch.cat([node_embedding, x], axis=-1))
+        
+        return node_embedding, self._attention_logits
+    
+    def message(self,
+                x_i, x_j,
+                edge_attr,
+                ) -> torch.Tensor:
+        
+        # message: (B * E, 2*out + edge)
+        message = torch.cat([x_i, x_j, edge_attr], dim=-1)
+        
+        
+        # _attention: (B * E, 1)
+        self._attention_logits = self.lay_attention(message)
+        self._attention = F.sigmoid(self._attention_logits)
+        
+        return self._attention * self.lay_message(message)
+
+# == DEPRECATED ==    
     
 class AttentiveFpLayer(AbstractAttentionLayer):
     

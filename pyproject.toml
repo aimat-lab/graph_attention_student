@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name = "graph_attention_student"
-version = "0.16.3"
+version = "0.17.0"
 description = "MEGAN: Multi Explanation Graph Attention Network"
 license = "MIT"
 authors = ["Jonas Teufel <jonseb1998@gmail.com>"]

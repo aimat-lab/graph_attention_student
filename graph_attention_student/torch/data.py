@@ -57,7 +57,15 @@ def data_from_graph(graph: tv.GraphDict,
     # data object. This is going to be especially important for the equivariance extension for the 
     # networks.
     if 'node_coordinates' in graph:
+        data.pos = torch.tensor(graph['node_coordinates'], dtype=dtype)
         data.coords = torch.tensor(graph['node_coordinates'], dtype=dtype)
+        
+    # 28.06.24
+    # We optionally also want to support the case where the graph representation contains a
+    # weight for the graph. This is going to be used for the weighted loss function during the 
+    # model training.
+    if 'graph_weight' in graph:
+        data.train_weight = torch.tensor(graph['graph_weight'], dtype=dtype)
     
     return data
 

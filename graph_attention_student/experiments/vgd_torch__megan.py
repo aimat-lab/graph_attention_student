@@ -300,8 +300,14 @@ def evaluate_model(e: Experiment,
     individual channels will be visualized as well. These latent space visualizations will include the 
     density and a potential hdbscan clustering.
     """
+    
+    model.eval()
+    last_layer = model.dense_layers[-1]
+    e.log(f'final layer info:')
+    e.log(f' * final layer bias value: {last_layer.bias.detach().numpy()}')
+    e.log(f' * regression reference: {e.REGRESSION_REFERENCE}')
+    
     e.log('evaluating Megan explanations...')
-
     graphs = [data['metadata']['graph'] for data in index_data_map.values()]
     graphs_test = [index_data_map[i]['metadata']['graph'] for i in test_indices]
         

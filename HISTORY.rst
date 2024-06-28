@@ -223,3 +223,12 @@ MODEL BACKWARDS INCOMPATIBLE
   loss is calculated on the basis of the nodes alone. With the new edge-case, the explanation approximation loss is 
   based on the edges. Specifically, the edge features as well as the features of the two adjoined nodes. This is a more 
   general case as it also considers tasks which are primarily influenced by the edge features and not the node features.
+
+0.17.0 - 28.06.2024
+-------------------
+
+- Added the ``GraphAttentionLayerV2`` layer which is an extension of the original ``GraphAttentionLayer`` layer. The 
+  new layer now also considers the edge features for the message update and uses MLPs instead of single dense layers.
+  These mlps also use batch norm intermediates. This has shown improved convergence speed for almost all datasets.
+- Tweaked the value for the importance offset in the "edge" computation of the importance loss so that it produces 
+  more meaningful results.

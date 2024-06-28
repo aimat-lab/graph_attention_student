@@ -20,6 +20,7 @@ from graph_attention_student.torch.utils import torch_uniform, torch_gauss
 from graph_attention_student.torch.model import AbstractGraphModel
 from graph_attention_student.torch.layers import MultiHeadAttention
 from graph_attention_student.torch.layers import GraphAttentionLayer
+from graph_attention_student.torch.layers import GraphAttentionLayerV2
 from graph_attention_student.torch.layers import AttentiveFpLayer
 from graph_attention_student.torch.layers import MaskExpansionLayer
 
@@ -83,7 +84,7 @@ class Megan(AbstractGraphModel):
     # :attr PREDICTION_MODES:
     #       This attribute defines the possible values for the "prediction_mode" parameter of the model
     #       that determines whether the model is supposed to solve a regression or a classification task
-    PREDICTION_MODES = ['regression', 'classification']
+    PREDICTION_MODES = ['regression', 'classification', 'bce']
     
     def __init__(self,
                  # encoder-related
@@ -115,7 +116,7 @@ class Megan(AbstractGraphModel):
                  # prediction-related
                  final_units: t.List[int] = [16, 1],
                  final_dropout_rate: float = 0.0,
-                 prediction_mode: str = 'regression',
+                 prediction_mode: t.Literal['regression', 'classification', 'bce'] = 'regression',
                  prediction_factor: float = 1.0,
                  use_bias: bool = True,
                  # classification only
@@ -254,7 +255,7 @@ class Megan(AbstractGraphModel):
             # different explanations - according to their pre-defined behavior.
 
             lay = MultiHeadAttention([
-                GraphAttentionLayer(
+                GraphAttentionLayerV2(
                     in_dim=prev_features,
                     out_dim=num_features,
                     edge_dim=edge_dim,
@@ -397,6 +398,16 @@ class Megan(AbstractGraphModel):
                 weight=torch.tensor(class_weights) if class_weights is not None else None,
             )
             
+        elif self.prediction_mode == 'bce':
+            # 14.06.24
+            # In some edge cases we don't actually want / cant use a multi-class classification interpretion 
+            # of the prediction task, but actually want to predict mutliple binary classification tasks at 
+            # the same time (allow two outputs to be active).
+            # In this case we can do BCE loss on every output independently.
+            self.loss_pred = nn.BCEWithLogitsLoss(
+                pos_weight=torch.tensor(class_weights) if class_weights is not None else None
+            )
+            
     def forward(self, 
                 data: Data, 
                 node_mask: t.Optional[torch.Tensor] = None,
@@ -407,8 +418,11 @@ class Megan(AbstractGraphModel):
     
         node_input, edge_input, edge_index = data.x, data.edge_attr, data.edge_index
         
+        node_input = torch.where(torch.isinf(node_input), torch.zeros_like(node_input), node_input) # workaround for infinity values
+        
         # node_embedding: (B * V, N_0)
         node_embedding = self.lay_embedd(node_input)
+        node_embedding_prev = node_embedding
         
         node_embeddings = []
         
@@ -435,6 +449,10 @@ class Megan(AbstractGraphModel):
             # applying the dropout to the node embedding after each layer
             # this will NOT change the shape of the embedding.
             node_embedding = self.lay_dropout_encoder(node_embedding)
+            
+            # node_embedding = self.lay_dropout_encoder(node_embedding)
+            # node_embedding = node_embedding_prev + node_embedding
+            # node_embedding_prev = node_embedding
             
             node_embeddings.append(node_embedding)
             alphas.append(alpha)
@@ -472,6 +490,7 @@ class Megan(AbstractGraphModel):
             self.lay_pool_edge(edge_importance, edge_index[0]) + 
             self.lay_pool_edge(edge_importance, edge_index[1])   
         )
+        # edge_importance_pooled = self.lay_pool_edge(edge_importance, edge_index[1])
             
         # ~ importance masks / explanations
         node_importance = node_embedding
@@ -586,6 +605,7 @@ class Megan(AbstractGraphModel):
         out_pred = info['graph_output']
         # out_pred: (B, O)
         out_true = data.y.view(out_pred.shape)
+        
         # graph_embedding: (B, D)
         graph_embedding = info['graph_embedding']
         
@@ -602,6 +622,11 @@ class Megan(AbstractGraphModel):
             # so a target of [1, 0] for example would become [0.9, 0.1] for a label smoothing.
             if self.label_smoothing:
                 out_true = (1 - self.label_smoothing) * out_true + self.label_smoothing / self.target_dim
+                
+        if self.prediction_mode == 'bce':
+            
+            if self.label_smoothing:
+                out_true = (1 - self.label_smoothing) * out_true + self.label_smoothing
         
         # ~ prediction loss
         loss_pred = self.loss_pred(out_pred, out_true)
@@ -955,7 +980,7 @@ class Megan(AbstractGraphModel):
         # Each channel corresponds to one output class. Therefore, each channel should positively influence it's 
         # corresponding class. The explanation depicted in that channel should generally increase the class logits
         # while decreasing (off-diagonal) all the other logits.
-        elif self.prediction_mode == 'classification':
+        elif self.prediction_mode == 'classification' or self.prediction_mode == 'bce':
             # diagonal
             fidelity = torch.diagonal(deviations, dim1=-2, dim2=-1) 
             # off-diagonal
@@ -1009,7 +1034,8 @@ class Megan(AbstractGraphModel):
             # edge_importance = edge_importance / max_values[data.batch[data.edge_index[0]]]
             
             # edge_transformed: (B * E, K)
-            edge_transformed = self.lay_transform_2(self.lay_transform_1(edge_input).relu()).relu() + 0.0
+            edge_transformed = F.sigmoid(self.lay_transform_2(self.lay_transform_1(edge_input).relu())) + 0.1
+            edge_transformed = torch.ones_like(edge_transformed, device=self.device)
             edge_transformed = edge_transformed * edge_importance
             
             pooled_importance = self.lay_pool_importance(edge_transformed, data.batch[data.edge_index[0]])
@@ -1022,7 +1048,7 @@ class Megan(AbstractGraphModel):
         out_true = data.y.view(out_pred.shape)
         
         scaling = 1.0
-        self.importance_offset = 5.0
+        self.importance_offset = 1.0
         if self.importance_mode == 'regression':
             
             # Here we actually deviate from the original MEGAN implementation a little bit. In the original 
@@ -1066,6 +1092,7 @@ class Megan(AbstractGraphModel):
         :returns: A ``torch.optim.Optimizer`` instance
         """
         optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate)
+        #optimizer = torch.optim.NAdam(self.parameters(), lr=self.learning_rate)
         return optimizer
     
     def leave_one_out_deviations(self,

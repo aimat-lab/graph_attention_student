@@ -35,7 +35,7 @@ VISUAL_GRAPH_DATASET: str = 'rb_dual_motifs'
 DATASET_TYPE: str = 'regression' # 'classification'
 # :param TEST_INDICES_PATH:
 #       Optionally, this may be an absolute string path to a 
-TEST_INDICES_PATH: t.Optional[str] = os.path.join(EXPERIMENTS_PATH, 'assets', 'splits', 'rb_dual_motifs__test_indices.json')
+TEST_INDICES_PATH: t.Optional[str] = None # os.path.join(EXPERIMENTS_PATH, 'assets', 'splits', 'rb_dual_motifs__test_indices.json')
 #TEST_INDICES_PATH: t.Optional[str] = None
 # :param NUM_TEST:
 #       This integer number defines how many elements of the dataset are supposed to be sampled 
@@ -69,7 +69,7 @@ TARGET_NAMES: t.Dict[int, str] = {
 #       This list determines the layer structure of the model's graph encoder part. Each element in 
 #       this list represents one layer, where the integer value determines the number of hidden units 
 #       in that layer of the encoder network.
-UNITS: t.List[int] = [64, 64, 64, 64]
+UNITS: t.List[int] = [128, 128, 128, 128, 128, 128]
 # :param IMPORTANCE_UNITS:
 #       This list determines the layer structure of the importance MLP which determines the node importance 
 #       weights from the node embeddings of the graph. 
@@ -78,7 +78,7 @@ IMPORTANCE_UNITS: t.List[int] = [ ]
 #       This list determines the layer structure of the MLP's that act as the channel-specific projections.
 #       Each element in this list represents one layer where the integer value determines the number of hidden
 #       units in that layer.
-PROJECTION_UNITS: t.List[int] = [64, 128]
+PROJECTION_UNITS: t.List[int] = [128]
 #PROJECTION_UNITS = []
 # :param FINAL_UNITS:
 #       This list determines the layer structure of the model's final prediction MLP. Each element in 
@@ -103,7 +103,14 @@ IMPORTANCE_OFFSET: float = 5.0
 #       This is the coefficient that is used to scale the explanation sparsity loss during training.
 #       The higher this value the more explanation sparsity (less and more discrete explanation masks)
 #       is promoted.
-SPARSITY_FACTOR: float = 0.1
+SPARSITY_FACTOR: float = 1.0
+# :param FIDELITY_FACTOR:
+#       This parameter controls the coefficient of the explanation fidelity loss during training. The higher
+#       this value, the more the model will be trained to create explanations that actually influence the
+#       model's behavior with a positive fidelity (according to their pre-defined interpretation).
+#       If this value is set to 0.0, the explanation fidelity loss is completely disabled (==higher computational
+#       efficiency).
+FIDELITY_FACTOR: float = 0.1
 # :param REGRESSION_REFERENCE:
 #       When dealing with regression tasks, an important hyperparameter to set is this reference value in the 
 #       range of possible target values, which will determine what part of the dataset is to be considered as 
@@ -116,7 +123,7 @@ REGRESSION_REFERENCE: t.Optional[float] = 0.0
 #       explanation co-training, this determines the margin for the thresholding. Instead of using the regression
 #       reference as a hard threshold, values have to be at least this margin value lower/higher than the 
 #       regression reference to be considered a class sample.
-REGRESSION_MARGIN: t.Optional[float] = 0.5
+REGRESSION_MARGIN: t.Optional[float] = 0.1
 # :param NORMALIZE_EMBEDDING:
 #       This boolean value determines whether the graph embeddings are normalized to a unit length or not.
 #       If this is true, the embedding of each individual explanation channel will be L2 normalized such that 
@@ -126,7 +133,7 @@ NORMALIZE_EMBEDDING: bool = True
 #       This string literal determines the strategy which is used to aggregate the edge attention logits over 
 #       the various message passing layers in the graph encoder part of the network. This may be one of the 
 #       following values: 'sum', 'max', 'min'.
-ATTENTION_AGGREGATION: str = 'sum'
+ATTENTION_AGGREGATION: str = 'max'
 # :param CONTRASTIVE_FACTOR:
 #       This is the factor of the contrastive representation learning loss of the network. If this value is 0 
 #       the contrastive repr. learning is completely disabled (increases computational efficiency). The higher 
@@ -157,8 +164,8 @@ CONTRASTIVE_BETA: float = 1.0
 #       tasks with a vastly different target value scale.
 PREDICTION_FACTOR: float = 1.0
 
-EPOCHS = 200
-BATCH_SIZE = 200
+EPOCHS = 100
+BATCH_SIZE = 100
 REPETITIONS = 1
 
 __DEBUG__ = True
