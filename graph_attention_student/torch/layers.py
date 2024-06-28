@@ -240,7 +240,7 @@ class GraphAttentionLayerV2(AbstractAttentionLayer):
                  in_dim: int,
                  out_dim: int,
                  edge_dim: int,
-                 hidden_dim: int = 128,
+                 hidden_dim: int = 256,
                  ):
         super().__init__(
             in_dim=in_dim,

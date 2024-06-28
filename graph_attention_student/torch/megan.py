@@ -91,6 +91,7 @@ class Megan(AbstractGraphModel):
                  node_dim: int = 3,
                  edge_dim: int = 1,
                  units: t.List[int] = [16, 16, 16],
+                 hidden_units: int = 128,
                  encoder_dropout_rate: float = 0.0,
                  # explanation-related
                  importance_units: t.List[int] = [16, ],
@@ -146,6 +147,7 @@ class Megan(AbstractGraphModel):
         self.node_dim = node_dim
         self.edge_dim = edge_dim
         self.units = units
+        self.hidden_units = hidden_units 
         self.use_bias = use_bias
         
         self.importance_units = importance_units
@@ -186,6 +188,7 @@ class Megan(AbstractGraphModel):
             'node_dim':                 node_dim,
             'edge_dim':                 edge_dim,
             'units':                    units,
+            'hidden_units':             hidden_units,
             'encoder_dropout_rate':     encoder_dropout_rate,
             'importance_units':         importance_units,
             'importance_offset':        importance_offset,
