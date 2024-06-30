@@ -253,7 +253,7 @@ class GraphAttentionLayerV2(AbstractAttentionLayer):
             nn.Linear(in_features=(2 * in_dim) + edge_dim, 
                       out_features=hidden_dim),
             nn.BatchNorm1d(hidden_dim),
-            nn.SiLU(),
+            nn.LeakyReLU(),
             nn.Linear(in_features=hidden_dim,
                       out_features=out_dim),
             nn.BatchNorm1d(out_dim),
@@ -264,7 +264,7 @@ class GraphAttentionLayerV2(AbstractAttentionLayer):
             nn.Linear(in_features=(2 * in_dim) + edge_dim, 
                       out_features=hidden_dim),
             nn.BatchNorm1d(hidden_dim),
-            nn.SiLU(),
+            nn.LeakyReLU(),
             nn.Linear(in_features=hidden_dim,
                       out_features=1),
         )
@@ -278,9 +278,11 @@ class GraphAttentionLayerV2(AbstractAttentionLayer):
         self.lay_transform = nn.Sequential(
             nn.Linear(in_features=out_dim+in_dim,
                       out_features=hidden_dim),
-            nn.SiLU(),
+            nn.BatchNorm1d(hidden_dim),
+            nn.LeakyReLU(),
             nn.Linear(in_features=hidden_dim,
-                      out_features=out_dim),   
+                      out_features=out_dim),
+            nn.BatchNorm1d(out_dim),  
         )
         
         # We will use this instance property to transport the attention weights from the class' 
@@ -309,8 +311,8 @@ class GraphAttentionLayerV2(AbstractAttentionLayer):
             edge_attr=edge_attr
         )
         
-        #node_embedding = self.lay_act(node_embedding)
-        #node_embedding = self.lay_transform(torch.cat([node_embedding, x], axis=-1))
+        node_embedding = self.lay_act(node_embedding)
+        node_embedding = self.lay_transform(torch.cat([node_embedding, x], axis=-1))
         
         return node_embedding, self._attention_logits
     
