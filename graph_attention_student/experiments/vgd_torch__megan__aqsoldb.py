@@ -61,7 +61,12 @@ TARGET_NAMES: t.Dict[int, str] = {
 #       This list determines the layer structure of the model's graph encoder part. Each element in 
 #       this list represents one layer, where the integer value determines the number of hidden units 
 #       in that layer of the encoder network.
-UNITS: t.List[int] = [128, 128, 128, 128, 128, 128]
+UNITS: t.List[int] = [128, 128, 128, 128]
+# :param HIDDEN_UNITS:
+#       This integer value determines the number of hidden units in the model's graph attention layer's
+#       transformative dense networks that are used for example to perform the message update and to 
+#       derive the attention logits.
+HIDDEN_UNITS: int = 64
 # :param IMPORTANCE_UNITS:
 #       This list determines the layer structure of the importance MLP which determines the node importance 
 #       weights from the node embeddings of the graph. 
@@ -101,7 +106,7 @@ SPARSITY_FACTOR: float = 0.1
 #       model's behavior with a positive fidelity (according to their pre-defined interpretation).
 #       If this value is set to 0.0, the explanation fidelity loss is completely disabled (==higher computational
 #       efficiency).
-FIDELITY_FACTOR: float = 0.1
+FIDELITY_FACTOR: float = 1.0
 # :param REGRESSION_REFERENCE:
 #       When dealing with regression tasks, an important hyperparameter to set is this reference value in the 
 #       range of possible target values, which will determine what part of the dataset is to be considered as 
@@ -118,13 +123,13 @@ NORMALIZE_EMBEDDING: bool = True
 #       This string literal determines the strategy which is used to aggregate the edge attention logits over 
 #       the various message passing layers in the graph encoder part of the network. This may be one of the 
 #       following values: 'sum', 'max', 'min'.
-ATTENTION_AGGREGATION: str = 'max'
+ATTENTION_AGGREGATION: str = 'min'
 # :param REGRESSION_MARGIN:
 #       When converting the regression problem into the negative/positive classification problem for the 
 #       explanation co-training, this determines the margin for the thresholding. Instead of using the regression
 #       reference as a hard threshold, values have to be at least this margin value lower/higher than the 
 #       regression reference to be considered a class sample.
-REGRESSION_MARGIN: t.Optional[float] = 1.0
+REGRESSION_MARGIN: t.Optional[float] = 0.0
 # :param CONTRASTIVE_FACTOR:
 #       This is the factor of the contrastive representation learning loss of the network. If this value is 0 
 #       the contrastive repr. learning is completely disabled (increases computational efficiency). The higher 
@@ -150,8 +155,8 @@ CONTRASTIVE_TEMP: float = 1.0
 #       parameter. It determines how much the contrastive loss is focused on the hardest negative samples.
 CONTRASTIVE_BETA: float = 1.0
 
-EPOCHS: int = 150
-BATCH_SIZE: int = 200
+EPOCHS: int = 200
+BATCH_SIZE: int = 100
 
 __DEBUG__ = True
 __TESTING__ = False

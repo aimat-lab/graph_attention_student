@@ -66,7 +66,12 @@ TARGET_NAMES: t.Dict[int, str] = {
 #       This list determines the layer structure of the model's graph encoder part. Each element in 
 #       this list represents one layer, where the integer value determines the number of hidden units 
 #       in that layer of the encoder network.
-UNITS: t.List[int] = [128, 128, 128, 128, 128, 128]
+UNITS: t.List[int] = [128, 128, 128]
+# :param HIDDEN_UNITS:
+#       This integer value determines the number of hidden units in the model's graph attention layer's
+#       transformative dense networks that are used for example to perform the message update and to 
+#       derive the attention logits.
+HIDDEN_UNITS: int = 64
 # :param IMPORTANCE_UNITS:
 #       This list determines the layer structure of the importance MLP which determines the node importance 
 #       weights from the node embeddings of the graph. 
@@ -93,7 +98,7 @@ CHANNEL_INFOS: dict = {
 #       This list determines the layer structure of the MLP's that act as the channel-specific projections.
 #       Each element in this list represents one layer where the integer value determines the number of hidden
 #       units in that layer.
-PROJECTION_UNITS: t.List[int] = [128, 128, 256]
+PROJECTION_UNITS: t.List[int] = [128, 256]
 # :param FINAL_UNITS:
 #       This list determines the layer structure of the model's final prediction MLP. Each element in 
 #       this list represents one layer, where the integer value determines the number of hidden units 
@@ -153,7 +158,7 @@ NORMALIZE_EMBEDDING: bool = True
 #       This string literal determines the strategy which is used to aggregate the edge attention logits over 
 #       the various message passing layers in the graph encoder part of the network. This may be one of the 
 #       following values: 'sum', 'max', 'min'.
-ATTENTION_AGGREGATION: str = 'max'
+ATTENTION_AGGREGATION: str = 'sum'
 # :param CONTRASTIVE_FACTOR:
 #       This is the factor of the contrastive representation learning loss of the network. If this value is 0 
 #       the contrastive repr. learning is completely disabled (increases computational efficiency). The higher 
@@ -196,7 +201,7 @@ EPOCHS: int = 200
 #       The batch size to use while training. This is the number of elements from the dataset that are 
 #       presented to the model at the same time to estimate the gradient direction for the stochastic gradient 
 #       descent optimization.
-BATCH_SIZE: int = 150
+BATCH_SIZE: int = 100
 # :param LEARNING_RATE:
 #       This float determines the learning rate of the optimizer.
 LEARNING_RATE: float = 1e-3

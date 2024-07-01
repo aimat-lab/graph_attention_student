@@ -76,6 +76,11 @@ CHANNEL_INFOS: dict = {
 #       this list represents one layer, where the integer value determines the number of hidden units 
 #       in that layer of the encoder network.
 UNITS: t.List[int] = [32, 32, 32]
+# :param HIDDEN_UNITS:
+#       This integer value determines the number of hidden units in the model's graph attention layer's
+#       transformative dense networks that are used for example to perform the message update and to 
+#       derive the attention logits.
+HIDDEN_UNITS: int = 128
 # :param IMPORTANCE_UNITS:
 #       This list determines the layer structure of the importance MLP which determines the node importance 
 #       weights from the node embeddings of the graph. 
@@ -228,10 +233,12 @@ def train_model(e: Experiment,
         e.log(f'Instantiating Megan model - with explanation training...')
         e.log(f'explanation mode: {e.DATASET_TYPE}')
         e.log(f' * importance offset: {e.IMPORTANCE_OFFSET}')
+        e.log(f' * hidden units: {e.HIDDEN_UNITS}')
         model = Megan(
             node_dim=e['node_dim'],
             edge_dim=e['edge_dim'],
             units=e.UNITS,
+            hidden_units=e.HIDDEN_UNITS,
             importance_units=e.IMPORTANCE_UNITS,
             # only if this is a not-None value, the explanation co-training of the model is actually
             # enabled. The explanation co-training works differently for regression and classification tasks

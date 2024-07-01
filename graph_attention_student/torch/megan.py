@@ -262,6 +262,7 @@ class Megan(AbstractGraphModel):
                     in_dim=prev_features,
                     out_dim=num_features,
                     edge_dim=edge_dim,
+                    hidden_dim=hidden_units,
                 )
                 for _ in range(num_channels)
             ], activation=act, aggregation='mean')
@@ -1037,7 +1038,7 @@ class Megan(AbstractGraphModel):
             # edge_importance = edge_importance / max_values[data.batch[data.edge_index[0]]]
             
             # edge_transformed: (B * E, K)
-            edge_transformed = F.sigmoid(self.lay_transform_2(self.lay_transform_1(edge_input).relu())) + 0.1
+            edge_transformed = F.sigmoid(self.lay_transform_2(self.lay_transform_1(edge_input).relu())) + 0.25
             edge_transformed = torch.ones_like(edge_transformed, device=self.device)
             edge_transformed = edge_transformed * edge_importance
             
@@ -1051,7 +1052,7 @@ class Megan(AbstractGraphModel):
         out_true = data.y.view(out_pred.shape)
         
         scaling = 1.0
-        self.importance_offset = 1.0
+        self.importance_offset = 3.0
         if self.importance_mode == 'regression':
             
             # Here we actually deviate from the original MEGAN implementation a little bit. In the original 

@@ -147,7 +147,7 @@ class MultiHeadAttention(nn.Module):
         node_embeddings = self.aggregate(node_embeddings, dim=-1)
         
         if self.residual:
-            node_embeddings = 0.5 * (node_embeddings + x)
+            node_embeddings = node_embeddings + x
         
         # alphas: (B * E, K)
         alphas = torch.cat(alphas, dim=-1)
@@ -259,9 +259,24 @@ class GraphAttentionLayerV2(AbstractAttentionLayer):
             nn.BatchNorm1d(out_dim),
         )
         
+        self.lay_conv = GINEConv(
+            nn.Sequential(
+                nn.Linear(in_features=in_dim, out_features=hidden_dim),
+                nn.BatchNorm1d(hidden_dim),
+                nn.LeakyReLU(),
+                nn.Linear(in_features=hidden_dim, out_features=in_dim),
+                nn.BatchNorm1d(in_dim),
+                nn.LeakyReLU(),
+            ),
+            edge_dim=edge_dim,
+        )
         
         self.lay_attention = nn.Sequential(
             nn.Linear(in_features=(2 * in_dim) + edge_dim, 
+                      out_features=hidden_dim),
+            nn.BatchNorm1d(hidden_dim),
+            nn.LeakyReLU(),
+            nn.Linear(in_features=hidden_dim,
                       out_features=hidden_dim),
             nn.BatchNorm1d(hidden_dim),
             nn.LeakyReLU(),
@@ -302,12 +317,15 @@ class GraphAttentionLayerV2(AbstractAttentionLayer):
         # node_embedding: (B * V, out)
         # node_embedding = self.lay_linear(x)
         
+        x_conv = self.lay_conv(x, edge_index, edge_attr)
+        
         self._attention = None
         self._attention_logits = None
         # node_embedding: (B * V, out)
         node_embedding = self.propagate(
             edge_index,
-            x=x, 
+            x=x,
+            x_conv=x_conv,
             edge_attr=edge_attr
         )
         
@@ -318,12 +336,13 @@ class GraphAttentionLayerV2(AbstractAttentionLayer):
     
     def message(self,
                 x_i, x_j,
+                x_conv_i, x_conv_j,
                 edge_attr,
                 ) -> torch.Tensor:
         
         # message: (B * E, 2*out + edge)
+        # message = torch.cat([x_i, x_j, x_conv_i, x_conv_j, edge_attr], dim=-1)
         message = torch.cat([x_i, x_j, edge_attr], dim=-1)
-        
         
         # _attention: (B * E, 1)
         self._attention_logits = self.lay_attention(message)
