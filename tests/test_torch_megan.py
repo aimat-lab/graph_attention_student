@@ -3,6 +3,7 @@ import pytest
 import random
 import typing as t
 
+import torch
 import numpy as np
 import visual_graph_datasets.typing as tv
 import pytorch_lightning as pl
@@ -16,12 +17,63 @@ from graph_attention_student.torch.megan import Megan
 
 from .util import ARTIFACTS_PATH
 
+@pytest.mark.parametrize('num_graphs, node_dim, edge_dim, output_dim', [
+    (100, 10, 4, 2),
+])
+def test_megan_training_sample_weights_work(num_graphs, node_dim, edge_dim, output_dim):
+    """
+    When adding "graph_weight" property to the graph dicts, this should automatically be converted into 
+    the tensor property "train_weight" in the Data instances and this should in turn be recognized by the 
+    megan model which will then apply those sample weights during the training_step method.
+    """
+    # ~ test configuration
+    num_channels = 2
+    embedding_dim = 32
+
+    graphs = get_mock_graphs(
+        num=num_graphs,
+        num_node_attributes=node_dim,
+        num_edge_attributes=edge_dim,
+    )
+    # When the graph dict has the "graph_weight" attribute, this should automatically be detected 
+    # by the "data_list_from_graphs" function which should then add those weights as a tensor 
+    # attribute "train_weight" to the Data instances
+    for graph in graphs:
+        graph['graph_weight'] = random.random()
+    
+    data_list = data_list_from_graphs(graphs)
+    for data in data_list:
+        assert hasattr(data, 'train_weight')
+        assert isinstance(data.train_weight, torch.Tensor)
+    
+    # constructing the megan model
+    loader = DataLoader(data_list, batch_size=32, shuffle=False)
+    model = Megan(
+        node_dim=node_dim,
+        edge_dim=edge_dim,
+        units=[32, 32, embedding_dim],
+        num_channels=num_channels, # for classification co-training must num_channels==num_outputs
+        final_units=[32, output_dim],
+    )
+    assert isinstance(model, Megan)
+    assert isinstance(model, AbstractGraphModel)
+    
+    # performing one train step with the given data and the result from the training step function
+    # should be a valid total loss value.
+    for data in loader:
+        loss = model.training_step(data, 0)
+        assert isinstance(loss, torch.Tensor)
+
 
 @pytest.mark.parametrize('num_graphs, node_dim, edge_dim, output_dim', [
     (100, 10, 4, 3),
 ])
 def test_megan_leave_one_out_deviations(num_graphs, node_dim, edge_dim, output_dim):
-    
+    """
+    The "leave_one_out_deviations" method for the prediction of B graphs, C outputs and K channels
+    should return a numpy array of shape (B, C, K) where the values are the deviations of the
+    predictions when leaving out each channel for the prediction of the network.
+    """
     # ~ test configuration
     num_channels = 2
     embedding_dim = 32
@@ -62,7 +114,11 @@ def test_megan_leave_one_out_deviations(num_graphs, node_dim, edge_dim, output_d
     (100, 10, 4),
 ])
 def test_megan_classification_explanation_training_works(num_graphs, node_dim, edge_dim):
-    
+    """
+    It should be possible to apply the Megan explanation co-training routine for a classification task.
+    This test tries to do a simple mock training for a classification task with 3 classes and 
+    consequently 3 explanations.
+    """
     # ~ test configuration
     num_channels = 2
     embedding_dim = 32
@@ -102,7 +158,11 @@ def test_megan_classification_explanation_training_works(num_graphs, node_dim, e
     (100, 10, 4),
 ])
 def test_megan_regression_explanation_training_works(num_graphs, node_dim, edge_dim):
-    
+    """
+    It should be possible to apply the Megan explanation co-training routine for a regression task.
+    This test tries to do a simple mock training for a regression task and a single target value and
+    consequently 2 explanations (negative and positive).
+    """
     # ~ test configuration
     num_channels = 2
     embedding_dim = 32
@@ -175,7 +235,10 @@ def test_megan_training_works(num_graphs, node_dim, edge_dim, num_channels):
     (100, 10, 4, 2),
 ])
 def test_megan_basically_works(num_graphs, node_dim, edge_dim, num_channels):
-    
+    """
+    This tests constructs a Megan model with some default parameters, executs the forward pass and 
+    tests if that works without errors.
+    """
     graphs = get_mock_graphs(
         num=num_graphs,
         num_node_attributes=node_dim,

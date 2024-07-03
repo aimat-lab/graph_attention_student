@@ -389,8 +389,15 @@ class Megan(AbstractGraphModel):
         # For a regression task, we use the mean squared error (MSE) loss function.
         # For a classification task, we use the cross entropy loss function.
         
+        # 02.07.2024
+        # Changed the "reduction" of all the prediction losses to "none" and then applying the mean reduction
+        # over the individual losses manually in the train_step to optionally support sample weights for 
+        # the individual samples in the batch.
+        
         if self.prediction_mode == 'regression':
-            self.loss_pred = nn.MSELoss()
+            self.loss_pred = nn.MSELoss(
+                reduction='none'
+            )
             
         elif self.prediction_mode == 'classification':
             # 13.04.24
@@ -400,6 +407,7 @@ class Megan(AbstractGraphModel):
             self.loss_pred = nn.CrossEntropyLoss(
                 # label_smoothing=label_smoothing,
                 weight=torch.tensor(class_weights) if class_weights is not None else None,
+                reduction='none',
             )
             
         elif self.prediction_mode == 'bce':
@@ -409,7 +417,8 @@ class Megan(AbstractGraphModel):
             # the same time (allow two outputs to be active).
             # In this case we can do BCE loss on every output independently.
             self.loss_pred = nn.BCEWithLogitsLoss(
-                pos_weight=torch.tensor(class_weights) if class_weights is not None else None
+                pos_weight=torch.tensor(class_weights) if class_weights is not None else None,
+                reduction='none',
             )
             
     def forward(self, 
@@ -634,6 +643,11 @@ class Megan(AbstractGraphModel):
         
         # ~ prediction loss
         loss_pred = self.loss_pred(out_pred, out_true)
+        if hasattr(data, 'train_weight'):
+            loss_pred = (loss_pred * data.train_weight.unsqueeze(-1)).mean()
+        else:
+            loss_pred = loss_pred.mean()
+        
         self.log(
             'loss_pred', self.prediction_factor * loss_pred,
             prog_bar=True,

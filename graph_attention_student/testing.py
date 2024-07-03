@@ -9,6 +9,7 @@ def get_mock_graphs(num: int,
                     num_node_attributes: int = 3,
                     num_edge_attributes: int = 1,
                     num_node_coordinates: int = 3,
+                    num_outputs: int = 2,
                     ):
     """
     This function creates a number ``num`` of mock graphs for testing
@@ -38,7 +39,7 @@ def get_mock_graphs(num: int,
             'node_coordinates': node_coordinates,
             'edge_indices': edge_indices,
             'edge_attributes': edge_attributes,
-            'graph_labels': [1]
+            'graph_labels': np.random.random(num_outputs)
         }
         graphs.append(graph)
 
