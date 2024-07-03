@@ -99,7 +99,7 @@ class Megan(AbstractGraphModel):
                  num_channels: int = 2,
                  importance_mode: t.Optional[str] = None,
                  importance_factor: float = 0.0,
-                 importance_offset: float = 0.8,
+                 importance_offset: float = 0.1,
                  importance_target: t.Literal['node', 'edge'] = 'node',
                  regression_reference: float = 0.0,
                  regression_margin: float = 0.0,
@@ -462,10 +462,6 @@ class Megan(AbstractGraphModel):
             # applying the dropout to the node embedding after each layer
             # this will NOT change the shape of the embedding.
             node_embedding = self.lay_dropout_encoder(node_embedding)
-            
-            # node_embedding = self.lay_dropout_encoder(node_embedding)
-            # node_embedding = node_embedding_prev + node_embedding
-            # node_embedding_prev = node_embedding
             
             node_embeddings.append(node_embedding)
             alphas.append(alpha)
@@ -1035,7 +1031,8 @@ class Megan(AbstractGraphModel):
             # node_importance = node_importance / max_values[data.batch]
             
             # node_transformed: (B * V, K)
-            node_transformed = (F.relu(self.lay_transform_2(F.relu(self.lay_transform_1(data.x)))) + 0.0) * node_importance
+            node_transformed = (F.relu(self.lay_transform_2(F.relu(self.lay_transform_1(data.x))))) + self.importance_offset
+            node_transformed = node_transformed * node_importance
             pooled_importance = self.lay_pool_importance(node_transformed, data.batch)
         
         elif self.importance_target == 'edge':
@@ -1052,7 +1049,7 @@ class Megan(AbstractGraphModel):
             # edge_importance = edge_importance / max_values[data.batch[data.edge_index[0]]]
             
             # edge_transformed: (B * E, K)
-            edge_transformed = F.sigmoid(self.lay_transform_2(self.lay_transform_1(edge_input).relu())) + 0.25
+            edge_transformed = F.sigmoid(self.lay_transform_2(self.lay_transform_1(edge_input).relu())) + self.importance_offset
             edge_transformed = torch.ones_like(edge_transformed, device=self.device)
             edge_transformed = edge_transformed * edge_importance
             
@@ -1066,7 +1063,7 @@ class Megan(AbstractGraphModel):
         out_true = data.y.view(out_pred.shape)
         
         scaling = 1.0
-        self.importance_offset = 3.0
+        offset = 3.0
         if self.importance_mode == 'regression':
             
             # Here we actually deviate from the original MEGAN implementation a little bit. In the original 
@@ -1084,7 +1081,7 @@ class Megan(AbstractGraphModel):
             # print(values_true)
             
             # values_pred: (B, K)
-            values_pred = torch.sigmoid(scaling * (pooled_importance - self.importance_offset))
+            values_pred = torch.sigmoid(scaling * (pooled_importance - offset))
             
             loss_expl = F.binary_cross_entropy(values_pred, values_true, )
             
@@ -1097,7 +1094,7 @@ class Megan(AbstractGraphModel):
             # values_true: (B, K)
             values_true = out_true
             # values_pred: (B, K)
-            values_pred = torch.sigmoid(scaling * (pooled_importance - self.importance_offset))
+            values_pred = torch.sigmoid(scaling * (pooled_importance - offset))
             
             loss_expl = F.binary_cross_entropy(values_pred, values_true)
                         
