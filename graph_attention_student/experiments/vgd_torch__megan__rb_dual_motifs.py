@@ -69,12 +69,12 @@ TARGET_NAMES: t.Dict[int, str] = {
 #       This list determines the layer structure of the model's graph encoder part. Each element in 
 #       this list represents one layer, where the integer value determines the number of hidden units 
 #       in that layer of the encoder network.
-UNITS: t.List[int] = [64, 64, 64]
+UNITS: t.List[int] = [64, 64, 64, 64, 64]
 # :param HIDDEN_UNITS:
 #       This integer value determines the number of hidden units in the model's graph attention layer's
 #       transformative dense networks that are used for example to perform the message update and to 
 #       derive the attention logits.
-HIDDEN_UNITS: int = 64
+HIDDEN_UNITS: int = 128
 # :param IMPORTANCE_UNITS:
 #       This list determines the layer structure of the importance MLP which determines the node importance 
 #       weights from the node embeddings of the graph. 
@@ -103,7 +103,7 @@ IMPORTANCE_FACTOR: float = 1.0
 #       This parameter more or less controls how expansive the explanations are - how much of the graph they
 #       tend to cover. Higher values tend to lead to more expansive explanations while lower values tend to 
 #       lead to sparser explanations. Typical value range 0.5 - 1.5
-IMPORTANCE_OFFSET: float = 5.0
+IMPORTANCE_OFFSET: float = 1.0
 # :param SPARSITY_FACTOR:
 #       This is the coefficient that is used to scale the explanation sparsity loss during training.
 #       The higher this value the more explanation sparsity (less and more discrete explanation masks)
@@ -170,7 +170,7 @@ CONTRASTIVE_BETA: float = 1.0
 PREDICTION_FACTOR: float = 1.0
 
 EPOCHS = 100
-BATCH_SIZE = 100
+BATCH_SIZE = 50
 REPETITIONS = 1
 
 __DEBUG__ = True

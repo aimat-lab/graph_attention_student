@@ -240,6 +240,7 @@ def train_model(e: Experiment,
             units=e.UNITS,
             hidden_units=e.HIDDEN_UNITS,
             importance_units=e.IMPORTANCE_UNITS,
+            layer_version='v3',
             # only if this is a not-None value, the explanation co-training of the model is actually
             # enabled. The explanation co-training works differently for regression and classification tasks
             projection_units=e.PROJECTION_UNITS,

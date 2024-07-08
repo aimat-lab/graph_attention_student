@@ -21,6 +21,7 @@ from graph_attention_student.torch.model import AbstractGraphModel
 from graph_attention_student.torch.layers import MultiHeadAttention
 from graph_attention_student.torch.layers import GraphAttentionLayer
 from graph_attention_student.torch.layers import GraphAttentionLayerV2
+from graph_attention_student.torch.layers import GraphAttentionLayerV3
 from graph_attention_student.torch.layers import AttentiveFpLayer
 from graph_attention_student.torch.layers import MaskExpansionLayer
 
@@ -93,6 +94,7 @@ class Megan(AbstractGraphModel):
                  units: t.List[int] = [16, 16, 16],
                  hidden_units: int = 128,
                  encoder_dropout_rate: float = 0.0,
+                 layer_version: t.Literal['v1', 'v2'] = 'v2',
                  # explanation-related
                  importance_units: t.List[int] = [16, ],
                  projection_units: t.List[int] = [],
@@ -149,6 +151,7 @@ class Megan(AbstractGraphModel):
         self.units = units
         self.hidden_units = hidden_units 
         self.use_bias = use_bias
+        self.layer_version = layer_version
         
         self.importance_units = importance_units
         self.projection_units = projection_units
@@ -190,6 +193,7 @@ class Megan(AbstractGraphModel):
             'units':                    units,
             'hidden_units':             hidden_units,
             'encoder_dropout_rate':     encoder_dropout_rate,
+            'layer_version':            layer_version,
             'importance_units':         importance_units,
             'importance_offset':        importance_offset,
             'importance_target':        importance_target,
@@ -257,15 +261,41 @@ class Megan(AbstractGraphModel):
             # also defined as the number of explanation "channels". The idea is that each of these channels captures 
             # different explanations - according to their pre-defined behavior.
 
-            lay = MultiHeadAttention([
-                GraphAttentionLayerV2(
+            # 04.07.2024
+            # Added the switch condition for the layer version. v2 is currently the newest version which contains 
+            # some improvements over the v1 version, but we still want to keep the option to use the v1 version for 
+            # compatibility.
+
+            if layer_version == 'v1':
+                layer_func = lambda: GraphAttentionLayer(
+                    in_dim=prev_features,
+                    out_dim=num_features,
+                    edge_dim=edge_dim,
+                )
+                
+            elif layer_version == 'v2':
+                layer_func = lambda: GraphAttentionLayerV2(
                     in_dim=prev_features,
                     out_dim=num_features,
                     edge_dim=edge_dim,
                     hidden_dim=hidden_units,
                 )
-                for _ in range(num_channels)
-            ], activation=act, aggregation='mean')
+                
+            elif layer_version == 'v3':
+                layer_func = lambda: GraphAttentionLayerV3(
+                    in_dim=prev_features,
+                    out_dim=num_features,
+                    edge_dim=edge_dim,
+                    hidden_dim=hidden_units,
+                    num_heads=3,
+                )
+
+            lay = MultiHeadAttention(
+                [layer_func() for _ in range(num_channels)], 
+                activation=act, 
+                aggregation='mean',
+                residual=True,
+            )
             
             prev_features = num_features
             self.encoder_layers.append(lay)
