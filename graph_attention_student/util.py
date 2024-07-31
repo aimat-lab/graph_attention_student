@@ -55,7 +55,18 @@ def get_experiment_path(name: str) -> str:
     return os.path.join(EXPERIMENTS_PATH, name)
 
 
-def get_version():
+def get_version() -> str:
+    """
+    Returns the version string of the package by reading it from the VERSION file
+    
+    :returns: the version string
+    """
+    # 31.10.24: If this very specific environment variable exists, we use that as the version string 
+    # instead of the one from the VERSION file. This is only for testing purposes in situations where 
+    # we need to manipulate the version string.
+    if version := os.environ.get('GRAPH_ATTENTION_STUDENT_VERSION_OVERWRITE', False):
+        return version
+    
     with open(VERSION_PATH) as file:
         return file.read().replace(' ', '').replace('\n', '')
 

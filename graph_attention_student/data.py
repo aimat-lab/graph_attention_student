@@ -18,8 +18,6 @@ import networkx as nx
 import matplotlib.pyplot as plt
 import tensorflow as tf
 import visual_graph_datasets.typing as tv
-from kgcnn.data.utils import ragged_tensor_from_nested_numpy
-from kgcnn.data.moleculenet import MoleculeNetDataset
 from rdkit import Chem
 from rdkit.Chem.Draw.rdMolDraw2D import MolDraw2DSVG
 from rdkit.Chem import rdDepictor
@@ -60,6 +58,8 @@ def tensors_from_graphs(graph_list: t.List[tv.GraphDict]
     Given a list of GraphDicts, this function will convert that into a tuple of ragged tensors which can
     directly be used as the input to a MEGAN model.
     """
+    from kgcnn.data.utils import ragged_tensor_from_nested_numpy
+    
     return (
         ragged_tensor_from_nested_numpy([graph['node_attributes'] for graph in graph_list]),
         ragged_tensor_from_nested_numpy([graph['edge_attributes'] for graph in graph_list]),
@@ -69,6 +69,8 @@ def tensors_from_graphs(graph_list: t.List[tv.GraphDict]
 def mock_importances_from_graphs(graphs: t.List[tv.GraphDict],
                                  num_channels: int,
                                  ) -> t.Tuple[tf.RaggedTensor, tf.RaggedTensor]:
+    from kgcnn.data.utils import ragged_tensor_from_nested_numpy
+    
     return (
         ragged_tensor_from_nested_numpy([np.zeros(shape=(len(graph['node_attributes']), num_channels)) for graph in graphs]),
         ragged_tensor_from_nested_numpy([np.zeros(shape=(len(graph['edge_attributes']), num_channels)) for graph in graphs]),
@@ -125,6 +127,8 @@ def process_graph_dataset(dataset: t.List[dict],
     this list of graph objects into the appropriate RaggedTensors which can be used to train a
     tensorflow model.
     """
+    from kgcnn.data.utils import ragged_tensor_from_nested_numpy
+    
     indices = list(range(len(dataset)))
 
     # It has to be possible to determine the dataset by either the train or the test indices because now
@@ -335,297 +339,6 @@ def load_eye_tracking_dataset_dict(dataset_path: str,
         for key in keys:
             if 'metadata' not in dataset_map[key] or 'image_path' not in dataset_map[key]:
                 del dataset_map[key]
-
-    return dataset_map
-
-
-# == CHEMISTRY RELATED ======================================================================================
-
-def create_molecule_eye_tracking_dataset(molecule_infos: Dict[str, dict],
-                                         dest_path: str,
-                                         image_width: int = 900,
-                                         image_height: int = 900,
-                                         set_attributes_kwargs: dict = {},
-                                         logger: logging.Logger = NULL_LOGGER,
-                                         log_step: int = 10):
-    # First of all, we need to create a temporary folder in which we are going to complete all the
-    # intermediate file operations.
-    logger.info(f'starting creation of molecule eye tracking dataset with {len(molecule_infos)} elements...')
-    with tempfile.TemporaryDirectory() as temp_path:
-
-        logger.info('Writing temporary csv file...')
-        # First step is to create a temporary csv file containing the given information about the molecules
-        # smiles
-        csv_path = os.path.join(temp_path, 'smiles.csv')
-        with open(csv_path, mode='w') as csv_file:
-            csv_writer = csv.DictWriter(csv_file, fieldnames=['id', 'smiles'], delimiter=',', quotechar='"')
-            csv_writer.writeheader()
-            for mol_id, mol_info in molecule_infos.items():
-                csv_writer.writerow({'id': mol_id, 'smiles': mol_info['smiles']})
-            logger.info(f'csv file written to: {csv_path}')
-
-        logger.info('parsing csv file with kgcnn...')
-        # With this CSV file we can now instantiate a MoleculeNetDataset instance and process all
-        # the molecules
-        moleculenet = MoleculeNetDataset(
-            file_name=os.path.basename(csv_path),
-            data_directory=os.path.dirname(csv_path),
-            dataset_name='temp',
-            verbose=0
-        )
-        moleculenet.prepare_data(
-            overwrite=True,
-            smiles_column_name='smiles',
-            add_hydrogen=True,
-            make_conformers=False,
-            optimize_conformer=False
-        )
-        moleculenet.read_in_memory(
-            label_column_name='smiles',
-            add_hydrogen=False,
-            has_conformers=False
-        )
-
-        # Then we setup the additional callbacks for the property assignment. These functions can be passed
-        # to the dataset instance and they are invoked for every molecule object instance in the dataset.
-        # That will be the place at which we create the molecule images using RDKit
-
-        dataset_path = dest_path
-
-        def node_coordinates_cb(mg, ds):
-            mol = Chem.MolFromSmiles(str(ds['smiles']))
-            #mol = mg.mol
-
-            mol_drawer = MolDraw2DSVG(image_width, image_height)
-            mol_drawer.SetLineWidth(3)
-            mol_drawer.DrawMolecule(mol)
-            mol_drawer.FinishDrawing()
-            svg_string = mol_drawer.GetDrawingText()
-            png_path = os.path.join(dataset_path, str(ds['id']) + '.png')
-            cairosvg.svg2png(
-                bytestring=svg_string.encode(),
-                write_to=png_path,
-                output_height=image_height,
-                output_width=image_width,
-            )
-
-            node_coordinates = []
-            for point in [mol_drawer.GetDrawCoords(i) for i, _ in enumerate(mol.GetAtoms())]:
-                node_coordinates.append([
-                    point.x,
-                    image_height - point.y
-                ])
-
-            return np.array(node_coordinates)
-
-        def node_indices_cb(mg, ds):
-            return np.array(list(range(len(mg.mol.GetAtoms()))))
-
-        kwargs = set_attributes_kwargs
-        if 'additional_callbacks' not in kwargs:
-            kwargs['additional_callbacks'] = {}
-
-        logger.info('creating custom properties in moleculenet dataset...')
-        kwargs['additional_callbacks']['node_coordinates'] = node_coordinates_cb
-        kwargs['additional_callbacks']['node_indices'] = node_indices_cb
-        kwargs['additional_callbacks']['id'] = lambda mg, ds: str(ds['id'])
-        moleculenet.set_attributes(**kwargs)
-
-        # 12.10.2022: Added this section in response to a bug which would cause the program to break if
-        # there were some corrupted elements in the original dataset.
-        logger.info(f'cleaning moleculenet dataset with {len(moleculenet)} elements...')
-        moleculenet.clean(['id', 'node_attributes', 'edge_indices'])
-        logger.info(f'dataset length after cleaning: {len(moleculenet)}')
-
-        dataset_length = len(moleculenet)
-        logger.info('start writing output files...')
-        # Now that the dataset is prepared and even the images are created, the only thing left to do is
-        # to create the metadata json file for each element
-        for c, g in enumerate(moleculenet):
-            mol_id = str(g['id'])
-            mol_info = molecule_infos[mol_id]
-            json_path = os.path.join(dataset_path, mol_id + '.json')
-
-            # Creating the node_adjacency matrix which is an important part of the GrapDict representation
-            length = len(g['node_indices'])
-            g['node_adjacency'] = np.zeros(shape=(length, length))
-            for i, j in g['edge_indices']:
-                g['node_adjacency'][i, j] = 1
-
-            # Adding empty importance tensors here because it will be required that these keys generally
-            # exist in further processing steps.
-            g['node_importances'] = np.zeros(shape=(g['node_indices'].shape[0], 1))
-            g['edge_importances'] = np.zeros(shape=(g['edge_indices'].shape[0], 1))
-
-            metadata = {
-                **mol_info,
-                'image_width': image_height,
-                'image_height': image_height,
-                'graph': {k: numpy_to_native(v) for k, v in g.items()}
-            }
-
-            with open(json_path, mode='wb') as json_file:
-                content = orjson.dumps(metadata)
-                json_file.write(content)
-
-            if c % log_step == 0:
-                logger.info(f'* ({c}/{dataset_length}) {mol_id}')
-
-
-def eye_tracking_dataset_from_moleculenet_dataset(moleculenet: MoleculeNetDataset,
-                                                  dest_path: str,
-                                                  set_attributes_kwargs: t.Dict[str, t.Any],
-                                                  smiles_column_name: str = 'smiles',
-                                                  clean_keys: t.List[str] = ['edge_attributes'],
-                                                  image_width: int = 900,
-                                                  image_height: int = 900,
-                                                  return_dataset: bool = True,
-                                                  logger: logging.Logger = NULL_LOGGER,
-                                                  log_step: int = 1000
-                                                  ) -> tc.EtDatasetDict:
-    dataset_length = len(moleculenet)
-
-    logger.info(f'setting moleculenet attributes...')
-    kwargs = {'additional_callbacks': {
-        'smiles': lambda mg, ds: str(ds[smiles_column_name])
-    }}
-    # The way that this function works is that the default options for 'additional_callbacks' are the ones
-    # defined above here, but IF the arg "set_attributes_kwargs" also contains an "additional_callbacks"
-    # dict, then it is even possible to override the default options we define here, which is probably
-    # especially useful for defining custom indexing and naming schemes for the elements.
-    kwargs = update_nested_dict(kwargs, set_attributes_kwargs)
-    moleculenet.set_attributes(**kwargs)
-
-    logger.info(f'cleaning moleculenet with keys: {clean_keys}')
-    moleculenet.clean(clean_keys)
-
-    logger.info(f'generating dataset files...')
-    start_time = time.time()
-    dataset_map = {}
-    for c, d in enumerate(moleculenet):
-        index = d['index'] if 'index' in d else c
-        name = d['name'] if 'name' in d else str(c)
-        smiles = d['smiles']
-
-        # ~ Render the image
-        # Technically we are being a bit redundant here:
-        mol = Chem.MolFromSmiles(str(smiles))
-        # mol = mg.mol
-
-        mol_drawer = MolDraw2DSVG(image_width, image_height)
-        mol_drawer.SetLineWidth(3)
-        mol_drawer.DrawMolecule(mol)
-        mol_drawer.FinishDrawing()
-        svg_string = mol_drawer.GetDrawingText()
-        image_path = os.path.join(dest_path, name + '.png')
-        cairosvg.svg2png(
-            bytestring=svg_string.encode(),
-            write_to=image_path,
-            output_height=image_height,
-            output_width=image_width,
-        )
-
-        node_coordinates = []
-        for point in [mol_drawer.GetDrawCoords(i) for i, _ in enumerate(mol.GetAtoms())]:
-            node_coordinates.append([
-                point.x,
-                image_height - point.y
-            ])
-
-        node_coordinates = np.array(node_coordinates)
-        d['node_coordinates'] = np.array(node_coordinates)
-
-        # "numpy_to_native" will convert any kind of numpy array to a native datatype such as a list of
-        # floats for example. We need to do this to be able to turn it into JSON later.
-        graph: tc.GraphDict = {key: numpy_to_native(value)
-                               for key, value in d.items()
-                               if isinstance(value, np.ndarray) or isinstance(value, np.generic)}
-
-        metadata = {
-            'name': name,
-            'index': index,
-            'image_width': image_width,
-            'image_height': image_height,
-            'graph': graph
-        }
-        if 'target' in d:
-            metadata['target'] = d['target']
-
-        metadata_path = os.path.join(dest_path, f'{name}.json')
-        with open(metadata_path, mode='w') as file:
-            content = json.dumps(metadata, cls=NumericJsonEncoder)
-            file.write(content)
-
-        if return_dataset:
-            dataset_map[name] = {
-                'index': index,
-                'image_path': image_path,
-                'metadata_path': metadata_path,
-                'metadata': metadata,
-            }
-
-        if c % log_step == 0:
-            elapsed_time = time.time() - start_time
-            time_per_element = elapsed_time / (c+1)
-            remaining_time = time_per_element * (dataset_length - c+1)
-            logger.info(f' * created ({c}/{dataset_length})'
-                        f' - index: {index} - name: {name}'
-                        f' - elapsed time: {elapsed_time:.1f}s ({elapsed_time/3600:.1f}hrs)'
-                        f' - remaining time: {remaining_time/3600:.1f}hrs')
-
-    return dataset_map
-
-
-# == TEXT GRAPHS ============================================================================================
-
-def load_text_graph_dataset(folder_path: str,
-                            logger: Optional[logging.Logger] = None,
-                            log_interval: int = 25) -> Dict[str, dict]:
-    start_time = time.time()
-    dataset_map = defaultdict(dict)
-    for root, dirs, files in os.walk(folder_path):
-
-        length = len(files)
-        for index, file_name in enumerate(files):
-            name, extension = file_name.split('.')
-            file_path = os.path.join(root, file_name)
-
-            if extension in ['txt']:
-                dataset_map[name]['name'] = name
-                dataset_map[name]['text_path'] = file_path
-
-            if extension in ['json']:
-                dataset_map[name]['metadata_path'] = file_path
-                with open(file_path, mode='r') as json_file:
-                    metadata = json.loads(json_file.read())
-
-                # This check fixes a bug, which can happen if there are other JSON files present in the
-                # folder and these most likely do not define a similar structure which would cause a
-                # KeyError here if we just assumed they would
-                if isinstance(metadata, dict) and 'graph' in metadata:
-                    dataset_map[name]['metadata'] = metadata
-
-                    # We need to convert the graph which is part of the metadata dict such that it's values
-                    # are no longer just lists, but numpy arrays instead
-                    graph = {k: np.array(v)
-                             for k, v in dataset_map[name]['metadata']['graph'].items()
-                             if k not in ['node_adjacency']}
-                    del dataset_map[name]['metadata']['graph']
-                    dataset_map[name]['metadata']['graph'] = graph
-
-            if logger and index % log_interval == 0:
-                logger.info(f'({index}/{length}) loaded element {name:<10} - '
-                            f'elapsed time: {time.time() - start_time:.2f} seconds')
-
-        break
-
-    # Now, if we just pass a folder to this function, then there is a real possibility that this folder
-    # contains other json or image files as well and we dont want these in our result, which is why we
-    # filter out any elements which does not contain both(!) the image and metadata file path fields!
-    for key in dataset_map.keys():
-        data = dataset_map[key]
-        if not ('metadata_path' in data and 'text_path' in data):
-            del dataset_map[key]
 
     return dataset_map
 

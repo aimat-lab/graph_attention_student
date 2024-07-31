@@ -1,8 +1,34 @@
+import os
+import contextlib
 import typing as t
 
 import random
 import numpy as np
 import visual_graph_datasets.typing as tv
+
+
+@contextlib.contextmanager
+def set_environ(data: dict):
+    """
+    This function can be used as a context manager. It temporarily modifes the environment variables 
+    in os.environ with the key value pairs of the given ``data`` dict on __enter__.
+    Upon __exit__ it resets the environment variables to the original values.
+    """
+    original_values = {}
+    for key, value in data.items():
+        if key in os.environ:
+            original_values[key] = os.environ[key]
+        
+        # we also actually need to modify the environment variables now
+        os.environ[key] = value
+    
+    try:
+        yield
+        
+    # At the end we need to reset the environment to the original values
+    finally:
+        for key, value in original_values.items():
+            os.environ[key] = value
 
 
 def get_mock_graphs(num: int,

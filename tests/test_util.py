@@ -11,12 +11,40 @@ from visual_graph_datasets.visualization.base import draw_image
 from visual_graph_datasets.visualization.importances import plot_edge_importances_border
 from visual_graph_datasets.visualization.importances import plot_node_importances_border
 
+from graph_attention_student.util import get_version
 from graph_attention_student.util import update_nested_dict
 from graph_attention_student.util import normalize_importances_fidelity
+from graph_attention_student.testing import set_environ
 
 from .util import ASSETS_PATH, ARTIFACTS_PATH
 
 mpl.use('Agg')
+
+
+def test_get_version():
+    """
+    31.08.24: The "get_version" util function should return the version string of the package read 
+    from the "VERSION" file in the root directory of the package.
+    """    
+    version = get_version()
+    
+    # Since the version changes we can only check surface-level if the given string matches 
+    # the general pattern of a version string.
+    assert version
+    assert version != ''
+    assert version.count('.') >= 1
+
+
+def test_overwrite_version():
+    """
+    31.08.24: The "get_version" util function should return the version string of the package read
+    from the "VERSION" file in the root directory of the package. If the environment variable
+    "GRAPH_ATTENTION_STUDENT_VERSION_OVERWRITE" is set then the version string should be overwritten
+    with the value of that environment variable.
+    """
+    with set_environ({'GRAPH_ATTENTION_STUDENT_VERSION_OVERWRITE': 'test'}):
+        version = get_version()
+        assert version == 'test'
 
 
 def test_normalize_importances_fidelity():

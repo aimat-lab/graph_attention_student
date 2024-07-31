@@ -232,3 +232,13 @@ MODEL BACKWARDS INCOMPATIBLE
   These mlps also use batch norm intermediates. This has shown improved convergence speed for almost all datasets.
 - Tweaked the value for the importance offset in the "edge" computation of the importance loss so that it produces 
   more meaningful results.
+
+0.18.0 - 28.06.2024
+-------------------
+
+BACKWARD INCOMPATIBLE CHANGES!
+
+- Completely removed the ``kgcnn`` and ``tensorflow`` dependency now as the model is fully ported to torch
+  - Remove ``graph_attention_student.training`` module
+  - Remove ``graph_attention_student.models`` package
+  

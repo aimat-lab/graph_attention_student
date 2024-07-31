@@ -294,7 +294,7 @@ class Megan(AbstractGraphModel):
                 [layer_func() for _ in range(num_channels)], 
                 activation=act, 
                 aggregation='mean',
-                residual=True,
+                residual=False,
             )
             
             prev_features = num_features
@@ -498,6 +498,7 @@ class Megan(AbstractGraphModel):
             
         # edge_importance: (B * E, K, L)
         edge_importance = torch.stack(alphas, dim=-1)
+        edge_importance = F.sigmoid(edge_importance)
   
         # 03.04.2024
         # Previously the edge importance was aggregated by summing up the individual attention values
@@ -521,7 +522,7 @@ class Megan(AbstractGraphModel):
         # dimension which previously was the number of message passing layers. No matter which aggregation
         # was used, the values are still technically attention LOGITS. To now calculate the actual attention
         # values we need to apply the sigmoid function to obtain values in the range of [0, 1].
-        edge_importance = F.sigmoid(edge_importance)
+        #edge_importance = F.sigmoid(edge_importance)
         #edge_importance = softmax(edge_importance, data)
         
         # edge_importance_pooled: (B * V, K)
@@ -555,24 +556,71 @@ class Megan(AbstractGraphModel):
         if node_importance_overwrite is not None:
             node_importance = node_importance_overwrite
             
-        # node_embedding: (B * V, D)
-        # node_embedding_channels: (B * V, K, D)
-        node_embedding_channels = node_embedding.unsqueeze(1) * node_importance.unsqueeze(2)
+        # ~ importance node masking
+        # One key step in the MEGAN architecture ist that the attention weights are not simply the edge 
+        # attention values during the message passing steps, but at the same time these attention values 
+        # are also being used in the global aggregation step as the weights of the global weighted 
+        # pooling operation. Specifically, we have one attention weight for every node and every channel 
+        # which is a value between 0 and 1. In the global sum aggregation step that turns the individual 
+        # node embeddigns into one single graph embedding, the node features of a node are multiplied by 
+        # the according value. Therefore, if a value is small ~0 then that node DOES NOT contribute 
+        # information towards the channel's graph embedding. In other words, each channel's graph embedding 
+        # (approximately) only contains information about the highlighted subgraphs!
+            
+        # ~ normalization & thresholding, 09.07.24
+        # The node importance is just the edge importance (attention values) mapped to the nodes via a 
+        # mean message aggregation function. Previously, we just used this raw value to multiply with 
+        # the node embeddings. This has the problem that the rest of the network can over time adapt 
+        # the the overall scale of the importance values. So even if all the importance values are 
+        # actually really low values on an absolute scale, the node embeddings can just generally become 
+        # larger by that same factor which can lead to misleading interpretations.
+        
+        # Here we normalize the node importances w.r.t. to the highest node importance value found 
+        # in each graph (across all channels). So after the normalization, the highest value is guaranteed 
+        # to be 1.0 and all other values are lower than that but maintain its relative scale. We also 
+        # apply a thresholding where all values below 0.25 are effectively set to zero. This helps 
+        # to reduce the noise in the graph explanation.
+         
+        # We need the scatter functionality to find the maximum value across a graph!
+        # max_values: (B, K)
+        max_values = torch_scatter.scatter_max(node_importance, data.batch, dim=0)[0]
+        # max_values: (B, )
+        max_values = torch.amax(max_values, dim=-1, keepdim=True)
+        max_values = torch.where(max_values < 0.01, torch.ones_like(max_values) * 1e9, max_values)
+        # node_importance_norm: (B * V, K)
+        node_importance_norm = node_importance / max_values[data.batch]
+        # An important detail here is that we dont actually set the values below 0.25 to 0 but rather just 
+        # scale them down by a certaion factor. This is important to maintain a proper gradient also 
+        # through that computational branch!
+        node_importance_norm = torch.where(node_importance_norm < 0.3, node_importance_norm * 0.01, node_importance_norm)
+            
+        # ~ graph embedding & projection
+        # As previously introduced, the graph embedding is calculated as the result of an 
+        # importanced-weighted sum of the node embeddings. This is done for each channel separately.
+        # Therefore the result of the global aggregation process is a set of K different graph embedding 
+        # vectors.
+        # In a second step, these graph embeddings are individually *projected*. This means that the 
+        # graph embedding for each channel is mapped into a (normally) higher dimensional space 
+        # with a feed forward network. Each channel thereby has it's own projection network. This is 
+        # done to allow the different channels to develop different representations and to further 
+        # reduce the correlation between them (which exists because of the shared node embeddings). 
+        # The final projected graph embedding is additionally L2-normalized aka projected onto a 
+        # high-dimensional unit sphere. This is done to support the vector product as a similarity
+        # measure between the graph embeddings.
             
         graph_embedding_channels = []
         for k, layers in enumerate(self.channel_projection_layers):
+            # node_embedding: (B * V, D)
             node_embedding_ = node_embedding
             
-            # lay_node_trafo = self.node_transformation_layers[k]
-            # node_embedding_ = lay_node_trafo(node_embedding_).relu()
-            
-            node_embedding_ = node_embedding_ * node_importance[:, k].unsqueeze(-1)
+            node_embedding_ = node_embedding_ * node_importance_norm[:, k].unsqueeze(-1)
             if node_feature_mask is not None:
                 node_embedding_ *= node_feature_mask[:, k].unsqueeze(-1)
             
             graph_embedding_ = self.lay_pool(node_embedding_, data.batch)
 
-            # The layers that are referred to here are the layers that are 
+            # The following layers implement the projection feed forward network for 
+            # the individual channels.
             if len(layers) != 0:
                 
                 for lay in layers[:-1]:
@@ -585,7 +633,8 @@ class Megan(AbstractGraphModel):
             
             if self.normalize_embedding:
                 # F.normalize will apply a transformation on the embedding so that all the embedding 
-                # vectors have a constant norm == 1.
+                # vectors have a constant norm == 1. This makes it possible to use the vector product
+                # directly as the cosine similarity measure between two vectors.
                 graph_embedding_ = F.normalize(graph_embedding_)
                 
             graph_embedding_channels.append(graph_embedding_)
@@ -595,7 +644,12 @@ class Megan(AbstractGraphModel):
         
         # output: (B, D * K)
         output = torch.cat(graph_embedding_channels, dim=-1)
-        # output = torch.sum(graph_embedding, dim=-1)
+        
+        # ~ final prediction network
+        # At the end of the projection step, the result is a set of K D-dimensional graph embedding 
+        # vectors. These are then concatenated into one single vector of shape (B, D * K) and passed
+        # as input to the final prediction feed-forward network, which will transform that vector 
+        # to the final output shape.
         
         for lay in self.dense_layers[:-1]:
             output = lay(output)    
@@ -718,7 +772,8 @@ class Megan(AbstractGraphModel):
         # )
         loss_spar = -(
             #torch.mean(torch.log(info['edge_importance'] + 1e-8))
-            torch.mean(torch.log(1 - info['edge_importance'] + 1e-8))
+            torch.mean(torch.log(1 - info['edge_importance'] + 1e-9)) +
+            torch.mean(torch.log(1 - info['node_importance'] + 1e-9))
         )
         self.log(
             'loss_spar', loss_spar,
@@ -1056,13 +1111,20 @@ class Megan(AbstractGraphModel):
             # for each *node* these are attention values in the range [0, 1]
             node_importance = info['node_importance']
             
+            max_values = torch_scatter.scatter_max(node_importance, data.batch, dim=0)[0]
+            max_values = torch.amax(max_values, dim=-1, keepdim=True)
+            max_values = torch.where(max_values < 0.01, torch.ones_like(max_values) * 1e9, max_values)
+            #print(max_values.shape, edge_importance.shape)
+            node_importance = node_importance / max_values[data.batch]
+            
             # node_importance_norm: (B * V, K)
             # max_values = torch_scatter.scatter_max(node_importance, data.batch, dim=0)[0] + 1e-8
             # node_importance = node_importance / max_values[data.batch]
             
             # node_transformed: (B * V, K)
-            node_transformed = (F.relu(self.lay_transform_2(F.relu(self.lay_transform_1(data.x))))) + self.importance_offset
+            node_transformed = F.sigmoid(self.lay_transform_2(self.lay_transform_1(data.x).relu())) + self.importance_offset
             node_transformed = node_transformed * node_importance
+            
             pooled_importance = self.lay_pool_importance(node_transformed, data.batch)
         
         elif self.importance_target == 'edge':
@@ -1075,12 +1137,15 @@ class Megan(AbstractGraphModel):
             # edge_input: (B * E, M + 2N)
             edge_input = torch.cat([data.edge_attr, data.x[data.edge_index[0]], data.x[data.edge_index[1]]], dim=-1)
             
-            # max_values = torch_scatter.scatter_max(edge_importance, data.batch[data.edge_index[0]], dim=0)[0] + 1e-8
-            # edge_importance = edge_importance / max_values[data.batch[data.edge_index[0]]]
+            max_values = torch_scatter.scatter_max(edge_importance, data.batch[data.edge_index[0]], dim=0)[0]
+            max_values = torch.amax(max_values, dim=-1, keepdim=True)
+            max_values = torch.where(max_values < 0.01, torch.ones_like(max_values) * 1e9, max_values)
+            #print(max_values.shape, edge_importance.shape)
+            edge_importance = edge_importance / max_values[data.batch[data.edge_index[0]]]
             
             # edge_transformed: (B * E, K)
             edge_transformed = F.sigmoid(self.lay_transform_2(self.lay_transform_1(edge_input).relu())) + self.importance_offset
-            edge_transformed = torch.ones_like(edge_transformed, device=self.device)
+            edge_transformed = torch.ones_like(edge_transformed, device=self.device) * self.importance_offset
             edge_transformed = edge_transformed * edge_importance
             
             pooled_importance = self.lay_pool_importance(edge_transformed, data.batch[data.edge_index[0]])
@@ -1103,15 +1168,24 @@ class Megan(AbstractGraphModel):
             # So here we construct the "true" labels simply as a binary decision problem of samples being either 
             # "positive" or "negative".
             
+            #regression_reference = self.regression_reference
+            regression_reference = torch.mean(out_true)
+            regression_lo = torch.quantile(out_true, 0.5 - self.regression_margin)
+            regression_hi = torch.quantile(out_true, 0.5 + self.regression_margin)
+            #print(regression_lo, regression_hi, regression_reference)
+
             values_true = torch.cat([
-                (out_true < (self.regression_reference - self.regression_margin)), 
-                (out_true > (self.regression_reference + self.regression_margin)),
+                # (out_true < (regression_reference - self.regression_margin)), 
+                # (out_true > (regression_reference + self.regression_margin)),
+                out_true < regression_lo,
+                out_true > regression_hi,
             ], 
             axis=1).float()
             # print(values_true)
             
             # values_pred: (B, K)
-            values_pred = torch.sigmoid(scaling * (pooled_importance - offset))
+            #values_pred = torch.sigmoid(scaling * (pooled_importance - offset))
+            values_pred = torch.tanh(0.1 * pooled_importance)
             
             loss_expl = F.binary_cross_entropy(values_pred, values_true, )
             
@@ -1124,7 +1198,8 @@ class Megan(AbstractGraphModel):
             # values_true: (B, K)
             values_true = out_true
             # values_pred: (B, K)
-            values_pred = torch.sigmoid(scaling * (pooled_importance - offset))
+            #values_pred = torch.sigmoid(scaling * (pooled_importance - offset))
+            values_pred = torch.tanh(0.1 * pooled_importance)
             
             loss_expl = F.binary_cross_entropy(values_pred, values_true)
                         

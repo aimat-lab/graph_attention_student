@@ -331,6 +331,7 @@ class GraphAttentionLayerV2(AbstractAttentionLayer):
         
         node_embedding = self.lay_act(node_embedding)
         node_embedding = self.lay_transform(torch.cat([node_embedding, x], axis=-1))
+        node_embedding = F.tanh(node_embedding)
         
         return node_embedding, self._attention_logits
     
@@ -401,7 +402,7 @@ class GraphAttentionLayerV3(AbstractAttentionLayer):
         self.lay_act = nn.LeakyReLU()
         
         self.lay_transform = nn.Sequential(
-            nn.Linear(in_features=out_dim,#+in_dim,
+            nn.Linear(in_features=out_dim +in_dim,
                       out_features=hidden_dim),
             nn.BatchNorm1d(hidden_dim),
             nn.LeakyReLU(),
@@ -437,8 +438,8 @@ class GraphAttentionLayerV3(AbstractAttentionLayer):
         )
         
         node_embedding = self.lay_act(node_embedding)
+        node_embedding = self.lay_transform(torch.cat([node_embedding, x], axis=-1))
         #node_embedding = self.lay_transform(torch.cat([node_embedding, x], axis=-1))
-        node_embedding = self.lay_transform(torch.cat([x, node_embedding], axis=-1))
         node_embedding = F.tanh(node_embedding)
         
         return node_embedding, self._attention_logits

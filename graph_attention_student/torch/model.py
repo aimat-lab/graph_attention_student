@@ -9,6 +9,7 @@ import pytorch_lightning as pl
 from torch_geometric.data import Data
 from torch_geometric.loader import DataLoader
 
+from graph_attention_student.utils import get_version
 from graph_attention_student.torch.data import data_list_from_graphs
 
 
@@ -79,9 +80,26 @@ class AbstractGraphModel(pl.LightningModule):
     
     def forward_graphs(self,
                        graphs: t.List[tv.GraphDict],
-                       batch_size: int = BATCH_SIZE,
+                       batch_size: int = 1_000,
                        ) -> t.List[dict]:
+        """
+        Given a list ``graphs`` of graph dict objects, this method runs the forward pass of the model for 
+        all of them. Returns a list of dictionaries that contain all the outputs of the forward method.
         
+        The forward implementation of the model itself returns a dictionary with string keys and torch 
+        tensor values, since each forward pass can produce multiple outputs.
+        
+        This forward computation is batched with the given ``batch_size``. This number of elements will 
+        be converted into a batch tensor and processed by the network at the same time.
+        
+        :param graphs: A list of graph dictionary instances - each representing a single graph for which 
+            the prediction should be generated.
+        :param batch_size: The number of graphs to predict at the same time.
+        
+        :returns: A list of dictionaries. Each dict has several string keys which are descriptive names 
+            of different outputs produced by the model. The values are numpy arrays that contain the 
+            actual values of the outputs.
+        """
         loader = self._loader_from_graphs(graphs, batch_size)
         
         # This will be the data structure that holds all the results of the inference process. Each element 
@@ -171,11 +189,52 @@ class AbstractGraphModel(pl.LightningModule):
         prediction: np.ndarray = info['graph_output']
         return prediction
     
+    @classmethod
+    def load(cls, path: str) -> 'AbstractGraphModel':
+        """
+        
+        """
+        try:
+            return cls.load_from_checkpoint(path)
+            
+        except Exception as exc:
+            # Even if we can't load the model itself directly
+            info = torch.load(path)
+            model_version = info['version']            
+            current_version = get_version()
+
+            if model_version != current_version:
+                message = (
+                    f'EXCEPTION: {str(exc)}\n\n'
+                    f'WARNING: The package version ({current_version}) does not match the model '
+                    f'version ({model_version}) that was used to create the model. This is most likely '
+                    f'the source of the problem! To load the model please try to downgrade the package '
+                    f'version accordingly: "pip install graph-attention-student=={model_version}"'
+                )
+                
+                raise Exception(message) from exc
+
+            raise exc
+    
     def save(self, path: str) -> None:
+        """
+        Saves the model as a persistent file to the disk at the given ``path``. The file will be a torch
+        ckpt file which is in essence a zipped archive that contains the model's state dictionary and the 
+        hyperparameters that were used to create the model. Based on this information, the model can later 
+        be reconstructed and loaded.
+        
+        :param path: The absolute file path of the file to which the model should be saved.
+        
+        :returns: None
+        """
         torch.save({
             'state_dict': self.state_dict(),
             'hyper_parameters': self.hparams,
             'pytorch-lightning_version': pl.__version__,
+            # 31.08.24: Adding the version of the package to the saved model so that 
+            #           during loading we can provide this information to the user in case 
+            #           the loading process fails due to a version mismatch...
+            'version': get_version(),
         }, path)
     
     def _loader_from_graphs(self,
