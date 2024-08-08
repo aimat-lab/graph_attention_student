@@ -233,7 +233,7 @@ MODEL BACKWARDS INCOMPATIBLE
 - Tweaked the value for the importance offset in the "edge" computation of the importance loss so that it produces 
   more meaningful results.
 
-0.18.0 - 28.06.2024
+0.18.0 - 08.08.2024
 -------------------
 
 BACKWARD INCOMPATIBLE CHANGES!
@@ -262,3 +262,9 @@ Additional changes:
 - Updated the examples to be more up-to-date with the current state of the model
 - When attempting to load an old model version, there is now an appropriate error message that explains the 
   version incompatibility.
+
+0.18.1 - 08.08.2024
+-------------------
+
+HOTFIX: The ``Megan.regression_reference`` running mean is now a ``nn.Parameter`` and therefore also included 
+when saving/loading the model from persistent files.

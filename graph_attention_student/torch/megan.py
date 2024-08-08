@@ -409,7 +409,10 @@ class Megan(AbstractGraphModel):
         # ~ regression mean
         self.n_samples = torch.ones((1, ))
         self.running_mean = torch.zeros((final_units[-1], ))
-        self.regression_reference = torch.zeros((final_units[-1], ))
+        self.regression_reference = torch.nn.Parameter(
+            torch.zeros((final_units[-1], )),
+            requires_grad=False,
+        )
         
         # ~ Training Loss
         # Since this model supports both regression and classification, the loss function will have to be 
@@ -854,8 +857,9 @@ class Megan(AbstractGraphModel):
             batch_mean = torch.mean(out_true, dim=0)
             
             self.running_mean += (batch_mean - self.running_mean) * (batch_size / self.n_samples)
-            self.regression_reference = self.running_mean
             self.n_samples += batch_size
+            
+            self.regression_reference.data.copy_(self.running_mean)
                     
         return loss
     
@@ -864,7 +868,6 @@ class Megan(AbstractGraphModel):
         if self.prediction_mode == 'regression':
             self.n_samples = self.n_samples.to(device)
             self.running_mean = self.running_mean.to(device)
-            self.regression_reference = self.running_mean
             
         return super().to(device, *args, **kwargs)
     
