@@ -113,7 +113,7 @@ class AbstractGraphModel(pl.LightningModule):
             
             # This line ultimately invokes the "forward" method of the class which returns a dictionary structure 
             # that contains all the various bits of information about the prediction process.
-            info: dict = self(data)
+            info: dict = self.forward(data)
                 
             for index in range(_batch_size):
                 
@@ -145,6 +145,17 @@ class AbstractGraphModel(pl.LightningModule):
                 results.append(result)
                 
         return results
+    
+    def forward_graph(self,
+                      graph: tv.GraphDict
+                      ) -> dict:
+        """
+        Performs the forward pass of the model for a single ``graph`` dict instance. Returns the info 
+        dict with all the model outputs.
+        
+        :returns: dict
+        """
+        return self.forward_graphs([graph], batch_size=1)[0]
     
     def predict_graphs(self, 
                        graphs: t.List[tv.GraphDict], 
@@ -192,17 +203,41 @@ class AbstractGraphModel(pl.LightningModule):
     @classmethod
     def load(cls, path: str) -> 'AbstractGraphModel':
         """
+        Loads the model from a persistent CKPT path at the given absolute ``path``. Returns the 
+        reconstructed model instance.
         
+        :returns: model instance
         """
         try:
-            return cls.load_from_checkpoint(path)
+            model = cls.load_from_checkpoint(path)
+            model.eval()
+            return model
             
         except Exception as exc:
-            # Even if we can't load the model itself directly
+            # Even if we can't load the model itself directly we can load the state dict and the hyperparameters.
+            # One of the most common reasons for a problem with the model loading is that the model was exported 
+            # with a prior version of the package and the current version has changed the model architecture in 
+            # a backward-incompatible way. In this case, we give a meaningful error message to inform the user 
+            # that downgrading the package might be required.
             info = torch.load(path)
-            model_version = info['version']            
             current_version = get_version()
+            
+            # The first possibility is that the exported model doesnt even contain the model version information 
+            # since that was only added at a later version as well. So we first check for that and give a slightly 
+            # more generic error message.
+            if 'version' not in info:
+                message = (
+                    f'EXCEPTION: {str(exc)}\n\n'
+                    f'WARNING: The package version ({current_version}) does not match the older model '
+                    f'version that was used to create the model. This is most likely the source of the '
+                    f'problem. You might try to downgrade the model version.'
+                )
+                raise Exception(message) from exc
+            
+            model_version = info['version']            
 
+            # If there is a model version we can give a more detailed message where we inform the user about the
+            # specific version with which the model was exported.
             if model_version != current_version:
                 message = (
                     f'EXCEPTION: {str(exc)}\n\n'
@@ -211,7 +246,6 @@ class AbstractGraphModel(pl.LightningModule):
                     f'the source of the problem! To load the model please try to downgrade the package '
                     f'version accordingly: "pip install graph-attention-student=={model_version}"'
                 )
-                
                 raise Exception(message) from exc
 
             raise exc

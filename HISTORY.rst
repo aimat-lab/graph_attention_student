@@ -240,5 +240,25 @@ BACKWARD INCOMPATIBLE CHANGES!
 
 - Completely removed the ``kgcnn`` and ``tensorflow`` dependency now as the model is fully ported to torch
   - Remove ``graph_attention_student.training`` module
+  - Remove ``graph_attention_student.layers`` module
+  - Remove ``graph_attention_student.data`` module
   - Remove ``graph_attention_student.models`` package
-  
+  - Removed all derivations of the ``vgd_single.py`` experiment modules
+- Changes to the model (loading previously exported versions of the model will no longer work!)
+  - Using BatchNorm and ELU activation functions in all MLPs now
+  - Using BatchNorm and multi layer MLPs for every transformation function in the GraphAttentionLayerV2 now
+  - DEPRECATED the ``regression_reference`` parameter now. On the prediction part of the model this is replaced by 
+    a running average that calculates the mean of the dataset directly from the batch ground truth labels. For the 
+    explanation approximation loss, the reference is not locally chosen as the median of the ground truth values in 
+    each batch.
+  - In the calculation of the explanation approximation loss, the model now uses the normalized importances instead 
+    of the absolute importances. This now prevents the model from cheating the loss by simply decreasing the values 
+    of the importances further.
+  - DEPRECATED the ``sparsity_factor`` parameter now. Due to the usage of the normalized importances, the sparsity 
+    can now be more accurately controlled by the ``importance_offset`` parameter.
+
+Additional changes:
+
+- Updated the examples to be more up-to-date with the current state of the model
+- When attempting to load an old model version, there is now an appropriate error message that explains the 
+  version incompatibility.

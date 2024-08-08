@@ -18,12 +18,15 @@ import matplotlib.colors as mcolors
 from nltk.tokenize import word_tokenize
 from scipy.spatial import distance
 
+from visual_graph_datasets.util import dynamic_import
+
 PATH = pathlib.Path(__file__).parent.absolute()
 VERSION_PATH = os.path.join(PATH, 'VERSION')
 
 DATASETS_FOLDER = os.path.join(PATH, 'datasets')
 EXAMPLES_FOLDER = os.path.join(PATH, 'examples')
 TEMPLATES_FOLDER = os.path.join(PATH, 'templates')
+EXAMPLES_PATH = EXAMPLES_FOLDER
 EXPERIMENTS_PATH = os.path.join(PATH, 'experiments')
 ASSETS_PATH = os.path.join(PATH, 'assets')
 
@@ -113,6 +116,20 @@ class PathDict:
                 current_dict = current_dict[current_key]
 
         current_dict[current_key] = value
+        
+        
+def load_processing(path: str) -> 'Processing':
+    """
+    Given the absolute string ``path`` to a processing module, this function will dynamically import 
+    the module and return the Processing instance that is defined in that module.
+    
+    :param path: The absolute string path to the processing module
+    
+    :returns: The Processing sub-class instance
+    """
+    module = dynamic_import(path)
+    return module.processing
+
 
 # == GENERAL GRAPH OPERATIONS ===============================================================================
 

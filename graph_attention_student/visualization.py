@@ -18,7 +18,6 @@ import matplotlib.patches as mpatches
 from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.colors import LinearSegmentedColormap
 from imageio.v2 import imread
-from umap import AlignedUMAP
 
 from graph_attention_student.utils import NULL_LOGGER
 from graph_attention_student.typing import GraphDict, RgbList
@@ -179,6 +178,7 @@ def create_embeddings_pdf(embeddings: np.ndarray,
     :returns: None
     """
     logger.info(f'creating embedding PDF for the given embeddings of shape {embeddings.shape}')
+    from umap import AlignedUMAP
     
     # 1. (Optional) dimensionality reduction
     # If the embeddings are in a high dimensional space, they can't be visualized effectively, which is why 

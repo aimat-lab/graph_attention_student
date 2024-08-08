@@ -576,10 +576,15 @@ def evaluate_model(e: Experiment,
                 ax_img.text(x, y, s=str(node_index))
             
             if 'node_embedding' in info:
+                
+                if len(info['node_embedding'].shape) > 2:
+                    node_embedding = info['node_embedding'][:, :, 0]
+                else:
+                    # node_embedding: (V, D)
+                    node_embedding = info['node_embedding']
+                
                 ax_node = rows[0][1]
                 ax_node.set_title('Node Embedding Pairwise Distance')
-                # node_embedding: (V, D)
-                node_embedding = info['node_embedding']
                 # node_dist: (V, V)
                 #node_dist = np.corrcoef(node_embedding)
                 node_dist = pairwise_distances(node_embedding, metric='euclidean')
@@ -642,6 +647,10 @@ def experiment(e: Experiment):
     e['node_dim'] = example_graph['node_attributes'].shape[1]
     e['edge_dim'] = example_graph['edge_attributes'].shape[1]
     e['output_dim'] = example_graph['graph_labels'].shape[0]
+    e.apply_hook(
+        'after_example_graph',
+        example_graph=example_graph,
+    )
     
     # 24.04.24
     # :hook after_dataset:
@@ -760,7 +769,8 @@ def experiment(e: Experiment):
         # (= model checkpoint) to the archive folder so that it can be used in the future.
         e.log('saving the model to the disk...')
         model_path = os.path.join(archive_path, 'model.ckpt')
-        trainer.save_checkpoint(model_path)
+        # trainer.save_checkpoint(model_path)
+        model.save(model_path)
     
 
 @experiment.analysis

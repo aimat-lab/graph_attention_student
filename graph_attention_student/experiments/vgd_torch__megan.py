@@ -121,10 +121,11 @@ IMPORTANCE_FACTOR: float = 1.0
 #       lead to sparser explanations. Typical value range 0.5 - 1.5
 IMPORTANCE_OFFSET: float = 0.8
 # :param SPARSITY_FACTOR:
+#       DEPRECATED
 #       This is the coefficient that is used to scale the explanation sparsity loss during training.
 #       The higher this value the more explanation sparsity (less and more discrete explanation masks)
 #       is promoted.
-SPARSITY_FACTOR: float = 1.0
+SPARSITY_FACTOR: float = 0.0
 # :param FIDELITY_FACTOR:
 #       This parameter controls the coefficient of the explanation fidelity loss during training. The higher
 #       this value, the more the model will be trained to create explanations that actually influence the
@@ -140,6 +141,7 @@ FIDELITY_FACTOR: float = 0.0
 #       that choice it is possible to adjust the value to adjust the explanations.
 REGRESSION_REFERENCE: t.Optional[float] = 0.0
 # :param REGRESSION_MARGIN:
+#       DEPRECATED
 #       When converting the regression problem into the negative/positive classification problem for the 
 #       explanation co-training, this determines the margin for the thresholding. Instead of using the regression
 #       reference as a hard threshold, values have to be at least this margin value lower/higher than the 
@@ -154,7 +156,7 @@ NORMALIZE_EMBEDDING: bool = True
 #       This string literal determines the strategy which is used to aggregate the edge attention logits over 
 #       the various message passing layers in the graph encoder part of the network. This may be one of the 
 #       following values: 'sum', 'max', 'min'.
-ATTENTION_AGGREGATION: str = 'min'
+ATTENTION_AGGREGATION: str = 'max'
 # :param CONTRASTIVE_FACTOR:
 #       This is the factor of the contrastive representation learning loss of the network. If this value is 0 
 #       the contrastive repr. learning is completely disabled (increases computational efficiency). The higher 
@@ -240,7 +242,7 @@ def train_model(e: Experiment,
             units=e.UNITS,
             hidden_units=e.HIDDEN_UNITS,
             importance_units=e.IMPORTANCE_UNITS,
-            layer_version='v3',
+            layer_version='v2',
             # only if this is a not-None value, the explanation co-training of the model is actually
             # enabled. The explanation co-training works differently for regression and classification tasks
             projection_units=e.PROJECTION_UNITS,
@@ -310,6 +312,7 @@ def evaluate_model(e: Experiment,
     """
     
     model.eval()
+    
     last_layer = model.dense_layers[-1]
     e.log(f'final layer info:')
     e.log(f' * final layer bias value: {last_layer.bias.detach().numpy()}')
