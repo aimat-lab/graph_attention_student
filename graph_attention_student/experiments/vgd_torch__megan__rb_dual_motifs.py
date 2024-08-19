@@ -69,7 +69,7 @@ TARGET_NAMES: t.Dict[int, str] = {
 #       This list determines the layer structure of the model's graph encoder part. Each element in 
 #       this list represents one layer, where the integer value determines the number of hidden units 
 #       in that layer of the encoder network.
-UNITS: t.List[int] = [64, 64, 64, 64, 64]
+UNITS: t.List[int] = [64, 64, 64]
 # :param HIDDEN_UNITS:
 #       This integer value determines the number of hidden units in the model's graph attention layer's
 #       transformative dense networks that are used for example to perform the message update and to 
@@ -91,7 +91,7 @@ PROJECTION_UNITS: t.List[int] = [64, 128]
 #       in that layer of the prediction network.
 #       Note that the last value of this list determines the output shape of the entire network and 
 #       therefore has to match the number of target values given in the dataset.
-FINAL_UNITS: t.List[int] = [1]
+FINAL_UNITS: t.List[int] = [128, 1]
 # :param NUM_CHANNELS:
 #       The number of explanation channels for the model.
 NUM_CHANNELS: int = 2
@@ -103,12 +103,12 @@ IMPORTANCE_FACTOR: float = 1.0
 #       This parameter more or less controls how expansive the explanations are - how much of the graph they
 #       tend to cover. Higher values tend to lead to more expansive explanations while lower values tend to 
 #       lead to sparser explanations. Typical value range 0.5 - 1.5
-IMPORTANCE_OFFSET: float = 1.0
+IMPORTANCE_OFFSET: float = 1.2
 # :param SPARSITY_FACTOR:
 #       This is the coefficient that is used to scale the explanation sparsity loss during training.
 #       The higher this value the more explanation sparsity (less and more discrete explanation masks)
 #       is promoted.
-SPARSITY_FACTOR: float = 1.0
+SPARSITY_FACTOR: float = 0.0
 # :param FIDELITY_FACTOR:
 #       This parameter controls the coefficient of the explanation fidelity loss during training. The higher
 #       this value, the more the model will be trained to create explanations that actually influence the
@@ -128,7 +128,7 @@ REGRESSION_REFERENCE: t.Optional[float] = 0.0
 #       explanation co-training, this determines the margin for the thresholding. Instead of using the regression
 #       reference as a hard threshold, values have to be at least this margin value lower/higher than the 
 #       regression reference to be considered a class sample.
-REGRESSION_MARGIN: t.Optional[float] = 0.0
+REGRESSION_MARGIN: t.Optional[float] = +0.0
 # :param NORMALIZE_EMBEDDING:
 #       This boolean value determines whether the graph embeddings are normalized to a unit length or not.
 #       If this is true, the embedding of each individual explanation channel will be L2 normalized such that 
@@ -138,7 +138,7 @@ NORMALIZE_EMBEDDING: bool = True
 #       This string literal determines the strategy which is used to aggregate the edge attention logits over 
 #       the various message passing layers in the graph encoder part of the network. This may be one of the 
 #       following values: 'sum', 'max', 'min'.
-ATTENTION_AGGREGATION: str = 'min'
+ATTENTION_AGGREGATION: str = 'max'
 # :param CONTRASTIVE_FACTOR:
 #       This is the factor of the contrastive representation learning loss of the network. If this value is 0 
 #       the contrastive repr. learning is completely disabled (increases computational efficiency). The higher 
@@ -169,8 +169,23 @@ CONTRASTIVE_BETA: float = 1.0
 #       tasks with a vastly different target value scale.
 PREDICTION_FACTOR: float = 1.0
 
-EPOCHS = 100
-BATCH_SIZE = 50
+# == TRAINING PARAMETERS ==
+# These parameters configure the training process itself, such as how many epochs to train 
+# for and the batch size of the training
+
+# :param EPOCHS:
+#       The integer number of epochs to train the dataset for. Each epoch means that the model is trained 
+#       once on the entire training dataset.
+EPOCHS: int = 100
+# :param BATCH_SIZE:
+#       The batch size to use while training. This is the number of elements from the dataset that are 
+#       presented to the model at the same time to estimate the gradient direction for the stochastic gradient 
+#       descent optimization.
+BATCH_SIZE: int = 64
+# :param LEARNING_RATE:
+#       This float determines the learning rate of the optimizer.
+LEARNING_RATE: float = 1e-4
+
 REPETITIONS = 1
 
 __DEBUG__ = True

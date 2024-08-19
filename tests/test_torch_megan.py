@@ -1,7 +1,9 @@
 import os
 import pytest
 import random
+import tempfile
 import typing as t
+from rich import print as pprint
 
 import torch
 import numpy as np
@@ -16,6 +18,34 @@ from graph_attention_student.torch.model import AbstractGraphModel
 from graph_attention_student.torch.megan import Megan
 
 from .util import ARTIFACTS_PATH
+
+
+def test_saving_loading_megan_works():
+    
+    model = Megan(
+        node_dim=3,
+        edge_dim=3,
+        units=[32, 32, 32],
+        num_channels=2,
+        final_units=[32, 1],
+    )
+    
+    with tempfile.TemporaryDirectory() as path:
+        
+        model_path = os.path.join(path, 'megan.ckpt')
+        model.save(model_path)
+        assert os.path.exists(model_path)
+        
+        data = torch.load(model_path)
+        assert 'hyper_parameters' in data
+        assert 'state_dict' in data
+        pprint(data['hyper_parameters'])
+        pprint(data['state_dict'])
+        
+        loaded_model = Megan.load(model_path)
+        assert loaded_model is not None
+        assert isinstance(loaded_model, Megan)
+
 
 @pytest.mark.parametrize('num_graphs, node_dim, edge_dim, output_dim', [
     (100, 10, 4, 2),
@@ -143,6 +173,7 @@ def test_megan_classification_explanation_training_works(num_graphs, node_dim, e
         num_channels=output_dim, # for classification co-training must num_channels==num_outputs
         importance_units=[32],
         importance_factor=1.0,
+        prediction_mode='classification',
         importance_mode='classification',
         regression_reference=0.0,
         final_units=[32, output_dim],
@@ -214,6 +245,7 @@ def test_megan_training_works(num_graphs, node_dim, edge_dim, num_channels):
         num=num_graphs,
         num_node_attributes=node_dim,
         num_edge_attributes=edge_dim,
+        num_outputs=1,
     )
     data_list = data_list_from_graphs(graphs)
     loader = DataLoader(data_list, batch_size=32, shuffle=False)
@@ -223,7 +255,7 @@ def test_megan_training_works(num_graphs, node_dim, edge_dim, num_channels):
         edge_dim=edge_dim,
         units=[32, 32, embedding_dim],
         num_channels=num_channels,
-        importance_units=[32],
+        importance_factor=0.0,
         final_units=[32, 1],
     )
 

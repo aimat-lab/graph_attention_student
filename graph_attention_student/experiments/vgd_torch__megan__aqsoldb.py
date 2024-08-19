@@ -61,7 +61,7 @@ TARGET_NAMES: t.Dict[int, str] = {
 #       This list determines the layer structure of the model's graph encoder part. Each element in 
 #       this list represents one layer, where the integer value determines the number of hidden units 
 #       in that layer of the encoder network.
-UNITS: t.List[int] = [64, 64, 64, 64]
+UNITS: t.List[int] = [128, 128, 128, 128]
 # :param HIDDEN_UNITS:
 #       This integer value determines the number of hidden units in the model's graph attention layer's
 #       transformative dense networks that are used for example to perform the message update and to 
@@ -75,14 +75,14 @@ IMPORTANCE_UNITS: t.List[int] = [ ]
 #       This list determines the layer structure of the MLP's that act as the channel-specific projections.
 #       Each element in this list represents one layer where the integer value determines the number of hidden
 #       units in that layer.
-PROJECTION_UNITS: t.List[int] = [128, 256]
+PROJECTION_UNITS: t.List[int] = [128, 128]
 # :param FINAL_UNITS:
 #       This list determines the layer structure of the model's final prediction MLP. Each element in 
 #       this list represents one layer, where the integer value determines the number of hidden units 
 #       in that layer of the prediction network.
 #       Note that the last value of this list determines the output shape of the entire network and 
 #       therefore has to match the number of target values given in the dataset.
-FINAL_UNITS: t.List[int] = [1]
+FINAL_UNITS: t.List[int] = [128, 1]
 # :param NUM_CHANNELS:
 #       The number of explanation channels for the model.
 NUM_CHANNELS: int = 2
@@ -94,26 +94,14 @@ IMPORTANCE_FACTOR: float = 1.0
 #       This parameter more or less controls how expansive the explanations are - how much of the graph they
 #       tend to cover. Higher values tend to lead to more expansive explanations while lower values tend to 
 #       lead to sparser explanations. Typical value range 0.5 - 1.5
-IMPORTANCE_OFFSET: float = 5.0
-# :param SPARSITY_FACTOR:
-#       This is the coefficient that is used to scale the explanation sparsity loss during training.
-#       The higher this value the more explanation sparsity (less and more discrete explanation masks)
-#       is promoted.
-SPARSITY_FACTOR: float = 0.1
+IMPORTANCE_OFFSET: float = 0.7
 # :param FIDELITY_FACTOR:
 #       This parameter controls the coefficient of the explanation fidelity loss during training. The higher
 #       this value, the more the model will be trained to create explanations that actually influence the
 #       model's behavior with a positive fidelity (according to their pre-defined interpretation).
 #       If this value is set to 0.0, the explanation fidelity loss is completely disabled (==higher computational
 #       efficiency).
-FIDELITY_FACTOR: float = 1.0
-# :param REGRESSION_REFERENCE:
-#       When dealing with regression tasks, an important hyperparameter to set is this reference value in the 
-#       range of possible target values, which will determine what part of the dataset is to be considered as 
-#       negative / positive in regard to the negative and the positive explanation channel. A good first choice 
-#       for this parameter is the average target value of the training dataset. Depending on the results for 
-#       that choice it is possible to adjust the value to adjust the explanations.
-REGRESSION_REFERENCE: t.Optional[float] = -3.0
+FIDELITY_FACTOR: float = 0.1
 # :param NORMALIZE_EMBEDDING:
 #       This boolean value determines whether the graph embeddings are normalized to a unit length or not.
 #       If this is true, the embedding of each individual explanation channel will be L2 normalized such that 
@@ -123,13 +111,13 @@ NORMALIZE_EMBEDDING: bool = True
 #       This string literal determines the strategy which is used to aggregate the edge attention logits over 
 #       the various message passing layers in the graph encoder part of the network. This may be one of the 
 #       following values: 'sum', 'max', 'min'.
-ATTENTION_AGGREGATION: str = 'min'
+ATTENTION_AGGREGATION: str = 'max'
 # :param REGRESSION_MARGIN:
 #       When converting the regression problem into the negative/positive classification problem for the 
 #       explanation co-training, this determines the margin for the thresholding. Instead of using the regression
 #       reference as a hard threshold, values have to be at least this margin value lower/higher than the 
 #       regression reference to be considered a class sample.
-REGRESSION_MARGIN: t.Optional[float] = 0.0
+REGRESSION_MARGIN: t.Optional[float] = +0.1
 # :param CONTRASTIVE_FACTOR:
 #       This is the factor of the contrastive representation learning loss of the network. If this value is 0 
 #       the contrastive repr. learning is completely disabled (increases computational efficiency). The higher 
@@ -155,8 +143,9 @@ CONTRASTIVE_TEMP: float = 1.0
 #       parameter. It determines how much the contrastive loss is focused on the hardest negative samples.
 CONTRASTIVE_BETA: float = 1.0
 
-EPOCHS: int = 200
-BATCH_SIZE: int = 100
+EPOCHS: int = 100
+BATCH_SIZE: int = 64
+LEARNING_RATE = 1e-4
 
 __DEBUG__ = True
 __TESTING__ = False

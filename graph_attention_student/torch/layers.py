@@ -4,6 +4,7 @@ import torch
 from torch._tensor import Tensor
 import torch.nn as nn
 import torch.nn.functional as F
+from torch_geometric.nn.norm import BatchNorm, LayerNorm
 from torch_geometric.nn import MessagePassing
 from torch_geometric.nn.conv import GINEConv
 from torch_geometric.utils import softmax
@@ -154,6 +155,69 @@ class MultiHeadAttention(nn.Module):
     
         return node_embeddings, alphas
     
+    
+class ParallelHeadAttention(nn.Module):
+    
+    def __init__(self,
+                 layers: t.List[AbstractAttentionLayer],
+                 activation: str = 'leaky_relu',
+                 residual: bool = True,
+                 ):
+        super().__init__()
+        
+        self.layers = nn.ModuleList(layers)
+        
+        self.activation = activation
+        self.lay_act = NAME_ACTIVATION_MAP[activation]()
+        
+        self.residual = residual
+        
+    def forward(self,
+                x: torch.Tensor,
+                edge_attr: torch.Tensor,
+                edge_index: torch.Tensor,
+                **kwargs,
+                ) -> t.Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Given the previous node embedding tensor ``x``, the edge embedding tensor ``edge_attr`` and the 
+        tensor of edge indices ``edge_index``, this method will perform one round of attention message 
+        passing and return the tuple (node_embedding, edge_attention_logit).
+        
+        ``node_embedding`` is the tensor of new node embeddings with the shape (B * V, out)
+        
+        ``edge_attention_logit`` is the tensor of shape (B * E, K) which assigns K attention logits 
+        to each edge of the graphs - where K is the number of individual attention heads.
+        
+        :param x: The previous node embedding tensor (B * E, in)
+        :param edge_attr: The edge embeddign tensor (B * E, edge)
+        :param edge_index: The tensor of edge indices (B * E, 2)
+        
+        :returns: Tuple (node_embedding, edge_attention_logit)
+        """
+        # In these two lists we will store the results of the individual attention heads outputs.
+        # Each head will produce the transformed node features vector and the edge attention weights.
+        node_embeddings: t.List[torch.Tensor] = []
+        alphas: t.List[torch.Tensor] = []
+        
+        for channel_index, lay in enumerate(self.layers):
+            
+            # node_embeddings: (B * V, num_features_out)
+            node_embedding = x[:, :, channel_index]
+            # alpha: (B * E, 1)
+            node_embedding, alpha = lay(node_embedding, edge_attr, edge_index)
+            
+            node_embeddings.append(node_embedding)
+            alphas.append(alpha)
+    
+        # node_embeddings: (B * V, num_features_out, num_channels)
+        node_embeddings = torch.stack(node_embeddings, dim=-1)
+        
+        # alphas: (B * E, num_channels)
+        alphas = torch.cat(alphas, dim=-1)
+    
+        return node_embeddings, alphas
+    
+
 
 class GraphAttentionLayer(AbstractAttentionLayer):
     
@@ -240,7 +304,7 @@ class GraphAttentionLayerV2(AbstractAttentionLayer):
                  in_dim: int,
                  out_dim: int,
                  edge_dim: int,
-                 hidden_dim: int = 256,
+                 hidden_dim: int = 128,
                  ):
         super().__init__(
             in_dim=in_dim,
@@ -248,31 +312,21 @@ class GraphAttentionLayerV2(AbstractAttentionLayer):
             edge_dim=edge_dim,
             aggr='sum',
         )
+        self.message_dim = (2 * in_dim) + edge_dim
         
         self.lay_message = nn.Sequential(
-            nn.Linear(in_features=(2 * in_dim) + edge_dim, 
+            nn.Linear(in_features=self.message_dim, 
                       out_features=hidden_dim),
             nn.BatchNorm1d(hidden_dim),
             nn.LeakyReLU(),
             nn.Linear(in_features=hidden_dim,
                       out_features=out_dim),
             nn.BatchNorm1d(out_dim),
-        )
-        
-        self.lay_conv = GINEConv(
-            nn.Sequential(
-                nn.Linear(in_features=in_dim, out_features=hidden_dim),
-                nn.BatchNorm1d(hidden_dim),
-                nn.LeakyReLU(),
-                nn.Linear(in_features=hidden_dim, out_features=in_dim),
-                nn.BatchNorm1d(in_dim),
-                nn.LeakyReLU(),
-            ),
-            edge_dim=edge_dim,
+            nn.LeakyReLU(),
         )
         
         self.lay_attention = nn.Sequential(
-            nn.Linear(in_features=(2 * in_dim) + edge_dim, 
+            nn.Linear(in_features=self.message_dim, 
                       out_features=hidden_dim),
             nn.BatchNorm1d(hidden_dim),
             nn.LeakyReLU(),
@@ -286,10 +340,6 @@ class GraphAttentionLayerV2(AbstractAttentionLayer):
         
         self.lay_act = nn.LeakyReLU()
         
-        # self.lay_transform = nn.Linear(
-        #     in_features=out_dim+in_dim,
-        #     out_features=out_dim,
-        # )
         self.lay_transform = nn.Sequential(
             nn.Linear(in_features=out_dim+in_dim,
                       out_features=hidden_dim),
@@ -297,7 +347,8 @@ class GraphAttentionLayerV2(AbstractAttentionLayer):
             nn.LeakyReLU(),
             nn.Linear(in_features=hidden_dim,
                       out_features=out_dim),
-            nn.BatchNorm1d(out_dim),  
+            nn.BatchNorm1d(out_dim),
+            nn.LeakyReLU(),
         )
         
         # We will use this instance property to transport the attention weights from the class' 
@@ -317,32 +368,29 @@ class GraphAttentionLayerV2(AbstractAttentionLayer):
         # node_embedding: (B * V, out)
         # node_embedding = self.lay_linear(x)
         
-        x_conv = self.lay_conv(x, edge_index, edge_attr)
-        
         self._attention = None
         self._attention_logits = None
         # node_embedding: (B * V, out)
         node_embedding = self.propagate(
             edge_index,
             x=x,
-            x_conv=x_conv,
             edge_attr=edge_attr
         )
         
-        node_embedding = self.lay_act(node_embedding)
+        # node_embedding = self.lay_act(node_embedding)
         node_embedding = self.lay_transform(torch.cat([node_embedding, x], axis=-1))
-        node_embedding = F.tanh(node_embedding)
+        node_embedding += x
         
         return node_embedding, self._attention_logits
     
     def message(self,
                 x_i, x_j,
-                x_conv_i, x_conv_j,
                 edge_attr,
                 ) -> torch.Tensor:
         
         # message: (B * E, 2*out + edge)
         # message = torch.cat([x_i, x_j, x_conv_i, x_conv_j, edge_attr], dim=-1)
+        #message = torch.cat([x_j, edge_attr], dim=-1)
         message = torch.cat([x_i, x_j, edge_attr], dim=-1)
         
         # _attention: (B * E, 1)

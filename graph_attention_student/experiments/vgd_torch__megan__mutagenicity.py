@@ -48,7 +48,7 @@ USE_BOOTSTRAPPING: bool = False
 #       This integer determines how many elements to sample from the test set elements to act as 
 #       examples for the evaluation process. These examples will be visualized together with their
 #       predictions.
-NUM_EXAMPLES: int = 20
+NUM_EXAMPLES: int = 50
 # :param TARGET_NAMES:
 #       This dictionary structure can be used to define the human readable names for the various 
 #       target values that are part of the dataset. The keys of this dict have to be integer indices 
@@ -66,12 +66,12 @@ TARGET_NAMES: t.Dict[int, str] = {
 #       This list determines the layer structure of the model's graph encoder part. Each element in 
 #       this list represents one layer, where the integer value determines the number of hidden units 
 #       in that layer of the encoder network.
-UNITS: t.List[int] = [64, 64, 64, 64, 64]
+UNITS: t.List[int] = [64, 64, 64, 64]
 # :param HIDDEN_UNITS:
 #       This integer value determines the number of hidden units in the model's graph attention layer's
 #       transformative dense networks that are used for example to perform the message update and to 
 #       derive the attention logits.
-HIDDEN_UNITS: int = 128
+HIDDEN_UNITS: int = 256
 # :param IMPORTANCE_UNITS:
 #       This list determines the layer structure of the importance MLP which determines the node importance 
 #       weights from the node embeddings of the graph. 
@@ -98,14 +98,14 @@ CHANNEL_INFOS: dict = {
 #       This list determines the layer structure of the MLP's that act as the channel-specific projections.
 #       Each element in this list represents one layer where the integer value determines the number of hidden
 #       units in that layer.
-PROJECTION_UNITS: t.List[int] = [128, 256]
+PROJECTION_UNITS: t.List[int] = [64, 128]
 # :param FINAL_UNITS:
 #       This list determines the layer structure of the model's final prediction MLP. Each element in 
 #       this list represents one layer, where the integer value determines the number of hidden units 
 #       in that layer of the prediction network.
 #       Note that the last value of this list determines the output shape of the entire network and 
 #       therefore has to match the number of target values given in the dataset.
-FINAL_UNITS: t.List[int] = [2]
+FINAL_UNITS: t.List[int] = [128, 2]
 # :param OUTPUT_NORM:
 #       Optionally, for a classification logits, this parameter can be set to a float value and in that 
 #       case the output logits vector of the model will be projected onto a unit sphere with that given 
@@ -129,7 +129,7 @@ IMPORTANCE_FACTOR: float = 1.0
 #       This parameter more or less controls how expansive the explanations are - how much of the graph they
 #       tend to cover. Higher values tend to lead to more expansive explanations while lower values tend to 
 #       lead to sparser explanations. Typical value range 0.5 - 1.5
-IMPORTANCE_OFFSET: float = 0.8
+IMPORTANCE_OFFSET: float = 0.6
 # :param SPARSITY_FACTOR:
 #       This is the coefficient that is used to scale the explanation sparsity loss during training.
 #       The higher this value the more explanation sparsity (less and more discrete explanation masks)
@@ -158,12 +158,12 @@ NORMALIZE_EMBEDDING: bool = True
 #       This string literal determines the strategy which is used to aggregate the edge attention logits over 
 #       the various message passing layers in the graph encoder part of the network. This may be one of the 
 #       following values: 'sum', 'max', 'min'.
-ATTENTION_AGGREGATION: str = 'min'
+ATTENTION_AGGREGATION: str = 'max'
 # :param CONTRASTIVE_FACTOR:
 #       This is the factor of the contrastive representation learning loss of the network. If this value is 0 
 #       the contrastive repr. learning is completely disabled (increases computational efficiency). The higher 
 #       this value the more the contrastive learning will influence the network during training.
-CONTRASTIVE_FACTOR: float = 0.1
+CONTRASTIVE_FACTOR: float = 0.0
 # :param CONTRASTIVE_NOISE:
 #       This float value determines the noise level that is applied when generating the positive augmentations 
 #       during the contrastive learning process.
@@ -201,10 +201,10 @@ EPOCHS: int = 200
 #       The batch size to use while training. This is the number of elements from the dataset that are 
 #       presented to the model at the same time to estimate the gradient direction for the stochastic gradient 
 #       descent optimization.
-BATCH_SIZE: int = 50
+BATCH_SIZE: int = 100
 # :param LEARNING_RATE:
 #       This float determines the learning rate of the optimizer.
-LEARNING_RATE: float = 1e-3
+LEARNING_RATE: float = 1e-4
 
 __DEBUG__ = True
 __TESTING__ = False

@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name = "graph_attention_student"
-version = "0.17.0"
+version = "0.18.1"
 description = "MEGAN: Multi Explanation Graph Attention Network"
 license = "MIT"
 authors = ["Jonas Teufel <jonseb1998@gmail.com>"]
@@ -52,7 +52,6 @@ torch = ">=2.1.2,<=2.3.1"
 torch_scatter = ">=2.1.2"
 torch_geometric = ">=2.4.0"
 lightning = ">=2.1.3"
-wandb = ">=0.17.3"
 
 [tool.poetry_bumpversion.file."graph_attention_student/__init__.py"]
 search = '__version__ = "{current_version}"'
