@@ -21,11 +21,12 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install uv
+        uv pip install --system torch==2.1.2
         uv pip install --system -e .
 
     - name: Lint with Ruff
       run: |
-        uv pip install ruff
+        uv pip install --system ruff
         ruff check .
 
     - name: Run tests
