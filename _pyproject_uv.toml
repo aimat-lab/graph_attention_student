@@ -1,0 +1,69 @@
+[build-system]
+requires = ["hatchling>=1.25.0", "setuptools>=70.0.0"]
+#build-backend = "hatchling.build"
+
+[project]
+name = "graph_attention_student"
+version = "0.18.2"
+description = "MEGAN: Multi Explanation Graph Attention Network"
+requires-python = ">=3.10.0,<3.12"
+dependencies = [
+    "pycomex>=0.13.1",
+    "visual_graph_datasets>=0.11.0",
+    "click>=7.1.2,<8.0.0",
+    "rich_click>=1.8.0,<2.0.0",
+    "numpy>=1.22.0,<2.0.0",
+    "matplotlib>=3.5.3,<4.0.0",
+    "imageio>=2.19.0,<3.0.0",
+    "seaborn>=0.13.1,<0.14.0",
+    "cairosvg>=2.5.2,<3.0.0",
+    "rdkit>=2022.9.1",
+    "orjson>=3.8.0",
+    "hdbscan>=0.8.33",
+    "torch>=2.1.2,<=2.3.1",
+    "torch_scatter>=2.1.2",
+    "torch_geometric>=2.1.2",
+    "lightning>=2.1.3",
+    "nltk>=3.7,<4.0.0",
+    "setuptools>=70.0.0",
+]
+
+[project.scripts]
+graph_attention_student = 'graph_attention_student.cli:cli'
+
+[tool.uv]
+no-build-isolation-package = ["torch", "torch_scatter", "torch_geometric"]
+dev-dependencies = [
+    "pytest==8.3.2",
+    "ruff==0.6.9",
+]
+
+[tool.uv.workspace]
+exclude = [
+    "graph_attention_student/experiments/results",
+    "graph_attention_student/examples/results",
+    "venv",
+]
+
+# Here we define the editable dependencies which are mainly used during development
+[tool.uv.sources]
+pycomex = { path = "../pycomex" }
+visual_graph_datasets = { path = "../visual_graph_datasets" }
+
+# We need to provide some additional metadata for torch_geometric here, specifically 
+# the fact that it depends on torch because for some reason the package itself does 
+# not declare this dependency.
+[[tool.uv.dependency-metadata]]
+name = "torch_geometric"
+version = "2.4.0"
+requires-dist = [
+    "torch>=2.1.2,<=2.3.1",
+    "torch_scatter>=2.1.2",
+]
+
+[[tool.uv.dependency-metadata]]
+name = "torch-scatter"
+version = "2.1.2"
+requires-dist = [
+    "torch>=2.1.2,<=2.3.1",
+]

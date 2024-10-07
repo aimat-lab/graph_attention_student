@@ -20,15 +20,15 @@ jobs:
 
     - name: Install dependencies
       run: |
-        python -m pip install uv
-        uv pip install --system --no-build-isolation torch==2.1.2
-        uv pip install --system --no-build-isolation -e .
+        pip install torch=2.1.2
+        pip install .
 
     - name: Lint with Ruff
       run: |
-        uv pip install --system ruff
+        pip install ruff
         ruff check .
 
     - name: Run tests
       run: |
+        pip install pytest
         python -m unittest discover -s tests

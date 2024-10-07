@@ -23,3 +23,6 @@ graph_attention_student/examples/results/*
 graph_attention_student/examples/assets/*
 
 tests/artifacts/*
+
+# slurm logs
+slurm-*
