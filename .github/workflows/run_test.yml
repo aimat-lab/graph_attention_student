@@ -21,8 +21,8 @@ jobs:
     - name: Install dependencies
       run: |
         pip install -U pip
-        pip install torch==2.1.2
-        pip install .
+        pip install torch==2.1.2+cpu
+        pip install --no-use-pep517 --no-build-isolation .
 
     - name: Lint with Ruff
       run: |
