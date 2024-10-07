@@ -61,16 +61,14 @@ Due to a problem with the ``torch-scatter`` package, the ``torch`` package has t
 
 .. code-block:: shell
 
-    pip3 install torch==2.1.2
+    pip install torch==2.1.2
 
 Then in the main folder run a ``pip install``:
 
 .. code-block:: shell
 
     cd graph_attention_student
-    pip3 install -e .
-
-
+    pip install -e .
 
 ⚠️ Warning For Windows Users
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -88,7 +86,23 @@ The package is also published as a library on PyPi and can be installed like thi
 
 .. code-block:: shell
 
-    pip3 install graph_attention_student
+    pip install torch==2.1.2
+    pip install graph_attention_student
+
+📦 CPU-only Installation
+------------------------
+
+Sometimes one needs to install the package for a CPU-only environment. This could be because the CUDA toolkit is not
+installed on the machine or because the machine does not have a GPU at all. In this case, the package can be installed
+with the following commands that require the manual installation of the torch related libraries before installing 
+the main package.
+
+.. code-block:: shell
+
+    pip install torch==2.2.0+cpu --index-url https://download.pytorch.org/whl/cpu
+    pip install torch-scatter -f https://data.pyg.org/whl/torch-2.2.0+cpu.html
+    pip install torch-geometric>=2.4.0 -f https://data.pyg.org/whl/torch-2.2.0+cpu.html
+    pip install graph_attention_student
 
 🚀 Quickstart
 -------------

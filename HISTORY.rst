@@ -282,3 +282,6 @@ running the model in eval mode versus in
 -------------------
 
 - modified the augementations that are used for the contrastive learning now.
+- using the Ruff Linter now
+- added the ``ruff.toml`` configuration file
+- removed various unused imports
