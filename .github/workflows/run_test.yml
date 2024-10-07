@@ -20,7 +20,8 @@ jobs:
 
     - name: Install dependencies
       run: |
-        pip install torch=2.1.2
+        pip install -U pip
+        pip install torch==2.1.2
         pip install .
 
     - name: Lint with Ruff
