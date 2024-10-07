@@ -7,7 +7,6 @@ Inherits ""
 """
 import os
 import pathlib
-import typing as t
 
 from pycomex.util import Skippable
 from pycomex.experiment import SubExperiment

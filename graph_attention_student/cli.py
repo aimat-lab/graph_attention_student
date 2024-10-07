@@ -1,12 +1,10 @@
 import os
-import sys
 import click
 
 from pycomex.experiment import run_experiment
 from pycomex.cli import ExperimentCLI
 
 from graph_attention_student.util import get_version
-from graph_attention_student.util import DATASETS_FOLDER
 from graph_attention_student.util import EXAMPLES_FOLDER
 from graph_attention_student.util import EXPERIMENTS_PATH
 

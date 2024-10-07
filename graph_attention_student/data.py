@@ -1,35 +1,30 @@
 import os
 import sys
-import csv
 import time
 import json
 import random
 import orjson
 import logging
-import tempfile
 import typing as t
 from copy import copy
 from typing import List, Tuple, Optional, Dict, Callable
 from collections import defaultdict
 
-import cairosvg
 import numpy as np
 import networkx as nx
 import matplotlib.pyplot as plt
 import tensorflow as tf
 import visual_graph_datasets.typing as tv
-from rdkit import Chem
-from rdkit.Chem.Draw.rdMolDraw2D import MolDraw2DSVG
 from rdkit.Chem import rdDepictor
-rdDepictor.SetPreferCoordGen(True)
 
 import graph_attention_student.typing as tc
 from graph_attention_student.util import NULL_LOGGER
 from graph_attention_student.util import graph_dict_to_list_values
-from graph_attention_student.util import update_nested_dict
 from graph_attention_student.visualization import draw_extended_colors_graph
 from graph_attention_student.visualization import draw_edge_black
 from graph_attention_student.visualization import draw_node_color_scatter
+
+rdDepictor.SetPreferCoordGen(True)
 
 
 class NumericJsonEncoder(json.JSONEncoder):
@@ -96,7 +91,6 @@ def process_index_data_map(index_data_map: t.Dict[int, dict],
 
     :returns: A tuple of two lists.
     """
-    dataset_length = len(index_data_map)
     dataset_indices = []
     dataset = [None for _ in range(max(index_data_map.keys()) + 1)]
     for index, data in index_data_map.items():
@@ -270,7 +264,7 @@ def load_eye_tracking_dataset_dict(dataset_path: str,
     :param sanitize_dict:
     :return:
     """
-    logger.info(f'determining the file names...')
+    logger.info('determining the file names...')
     files = os.listdir(dataset_path)
     names = set()
     for file_name in files:
@@ -431,7 +425,7 @@ def graphs_locally_similar(primary_graph: dict,
                     primary_adjacency_mask[i][primary_index] = primary_ingoing
                     break
 
-                except StopIteration as e:
+                except StopIteration:
                     pass
 
         # If we have not found a similar node at the end of the iteration, then there is none within the
@@ -825,9 +819,9 @@ class ExtendedColorsGraphGenerator:
         else:
             edges = [[i, j], [j, i]]
 
-        for k, l in edges:
-            self.edge_indices[self.current_edge_index] = [k, l]
-            self.edge_attributes[self.current_edge_index] = self.create_single_edge_attributes(k, l)
+        for k, h in edges:
+            self.edge_indices[self.current_edge_index] = [k, h]
+            self.edge_attributes[self.current_edge_index] = self.create_single_edge_attributes(k, h)
             self.current_edge_index += 1
 
     def grow_nodes(self):

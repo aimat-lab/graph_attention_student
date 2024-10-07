@@ -7,15 +7,12 @@ synthetic graph regression dataset based on randomly generated color graphs whic
 with value determining motifs. The advantage here is that all the ground truth explanations are 
 known and can be used to validate the effectiveness of megans explanations.
 """
-import os
 import pathlib
 import typing as t
 
-import numpy as np
 from pycomex.functional.experiment import Experiment
 from pycomex.utils import file_namespace, folder_path
 
-from graph_attention_student.utils import EXPERIMENTS_PATH
 
 PATH = pathlib.Path(__file__).parent.absolute()
 
@@ -69,7 +66,7 @@ TARGET_NAMES: t.Dict[int, str] = {
 #       This list determines the layer structure of the model's graph encoder part. Each element in 
 #       this list represents one layer, where the integer value determines the number of hidden units 
 #       in that layer of the encoder network.
-UNITS: t.List[int] = [64, 64, 64]
+UNITS: t.List[int] = [64, 64]
 # :param HIDDEN_UNITS:
 #       This integer value determines the number of hidden units in the model's graph attention layer's
 #       transformative dense networks that are used for example to perform the message update and to 
@@ -83,7 +80,7 @@ IMPORTANCE_UNITS: t.List[int] = [ ]
 #       This list determines the layer structure of the MLP's that act as the channel-specific projections.
 #       Each element in this list represents one layer where the integer value determines the number of hidden
 #       units in that layer.
-PROJECTION_UNITS: t.List[int] = [64, 128]
+PROJECTION_UNITS: t.List[int] = [64, 128, 128]
 #PROJECTION_UNITS = []
 # :param FINAL_UNITS:
 #       This list determines the layer structure of the model's final prediction MLP. Each element in 
@@ -91,7 +88,7 @@ PROJECTION_UNITS: t.List[int] = [64, 128]
 #       in that layer of the prediction network.
 #       Note that the last value of this list determines the output shape of the entire network and 
 #       therefore has to match the number of target values given in the dataset.
-FINAL_UNITS: t.List[int] = [128, 1]
+FINAL_UNITS: t.List[int] = [64, 1]
 # :param NUM_CHANNELS:
 #       The number of explanation channels for the model.
 NUM_CHANNELS: int = 2
@@ -100,15 +97,17 @@ NUM_CHANNELS: int = 2
 #       Roughly, the higher this value, the more the model will prioritize the explanations during training.
 IMPORTANCE_FACTOR: float = 1.0
 # :param IMPORTANCE_OFFSET:
-#       This parameter more or less controls how expansive the explanations are - how much of the graph they
-#       tend to cover. Higher values tend to lead to more expansive explanations while lower values tend to 
-#       lead to sparser explanations. Typical value range 0.5 - 1.5
-IMPORTANCE_OFFSET: float = 1.2
+#       This parameter controls the sparsity of the explanation masks even more so than the sparsity factor.
+#       It basically provides the upper limit of how many nodes/edges need to be activated for a channel to 
+#       be considered as active. The higher this value, the less sparse the explanations will be.
+#       Typical values range from 0.2 - 2.0 but also depend on the graph size and the specific problem at 
+#       hand. This is a parameter with which one has to experiment until a good trade-off is found!
+IMPORTANCE_OFFSET: float = 3.0
 # :param SPARSITY_FACTOR:
 #       This is the coefficient that is used to scale the explanation sparsity loss during training.
 #       The higher this value the more explanation sparsity (less and more discrete explanation masks)
 #       is promoted.
-SPARSITY_FACTOR: float = 0.0
+SPARSITY_FACTOR: float = 0.1
 # :param FIDELITY_FACTOR:
 #       This parameter controls the coefficient of the explanation fidelity loss during training. The higher
 #       this value, the more the model will be trained to create explanations that actually influence the
@@ -116,19 +115,12 @@ SPARSITY_FACTOR: float = 0.0
 #       If this value is set to 0.0, the explanation fidelity loss is completely disabled (==higher computational
 #       efficiency).
 FIDELITY_FACTOR: float = 0.1
-# :param REGRESSION_REFERENCE:
-#       When dealing with regression tasks, an important hyperparameter to set is this reference value in the 
-#       range of possible target values, which will determine what part of the dataset is to be considered as 
-#       negative / positive in regard to the negative and the positive explanation channel. A good first choice 
-#       for this parameter is the average target value of the training dataset. Depending on the results for 
-#       that choice it is possible to adjust the value to adjust the explanations.
-REGRESSION_REFERENCE: t.Optional[float] = 0.0
 # :param REGRESSION_MARGIN:
 #       When converting the regression problem into the negative/positive classification problem for the 
 #       explanation co-training, this determines the margin for the thresholding. Instead of using the regression
 #       reference as a hard threshold, values have to be at least this margin value lower/higher than the 
 #       regression reference to be considered a class sample.
-REGRESSION_MARGIN: t.Optional[float] = +0.0
+REGRESSION_MARGIN: t.Optional[float] = -0.3
 # :param NORMALIZE_EMBEDDING:
 #       This boolean value determines whether the graph embeddings are normalized to a unit length or not.
 #       If this is true, the embedding of each individual explanation channel will be L2 normalized such that 
@@ -181,7 +173,7 @@ EPOCHS: int = 100
 #       The batch size to use while training. This is the number of elements from the dataset that are 
 #       presented to the model at the same time to estimate the gradient direction for the stochastic gradient 
 #       descent optimization.
-BATCH_SIZE: int = 64
+BATCH_SIZE: int = 100
 # :param LEARNING_RATE:
 #       This float determines the learning rate of the optimizer.
 LEARNING_RATE: float = 1e-4

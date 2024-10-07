@@ -1,10 +1,8 @@
 import os
 import contextlib
-import typing as t
 
 import random
 import numpy as np
-import visual_graph_datasets.typing as tv
 
 
 @contextlib.contextmanager

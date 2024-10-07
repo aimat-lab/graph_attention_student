@@ -9,6 +9,7 @@ import logging
 import subprocess
 import shutil
 import typing as t
+import typing as typ
 from typing import List, Dict, Any, Tuple, Optional, Union, Callable
 from collections import defaultdict
 
@@ -118,7 +119,7 @@ class PathDict:
         current_dict[current_key] = value
         
         
-def load_processing(path: str) -> 'Processing':
+def load_processing(path: str) -> typ.Any:
     """
     Given the absolute string ``path`` to a processing module, this function will dynamically import 
     the module and return the Processing instance that is defined in that module.
@@ -509,7 +510,8 @@ def text_to_graph(text: str,
 def latex_table_element_mean(values: List[float],
                              template_name: str = 'table_element_mean.tex.j2',
                              vertical: bool = True,
-                             raw: bool = False) -> str:
+                             raw: bool = False,
+                             ) -> str:
     if raw:
         mean, std = values
     else:

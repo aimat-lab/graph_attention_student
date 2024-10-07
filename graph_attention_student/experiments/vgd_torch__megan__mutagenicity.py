@@ -5,7 +5,6 @@ visual graph dataset.
 This experiment specifically implements the mutagenicity dataset. This is a real world classification 
 dataset for the AMES mutagenicity assay.
 """
-import os
 import typing as t
 
 from pycomex.functional.experiment import Experiment
@@ -71,7 +70,7 @@ UNITS: t.List[int] = [64, 64, 64, 64]
 #       This integer value determines the number of hidden units in the model's graph attention layer's
 #       transformative dense networks that are used for example to perform the message update and to 
 #       derive the attention logits.
-HIDDEN_UNITS: int = 256
+HIDDEN_UNITS: int = 128
 # :param IMPORTANCE_UNITS:
 #       This list determines the layer structure of the importance MLP which determines the node importance 
 #       weights from the node embeddings of the graph. 
@@ -98,14 +97,15 @@ CHANNEL_INFOS: dict = {
 #       This list determines the layer structure of the MLP's that act as the channel-specific projections.
 #       Each element in this list represents one layer where the integer value determines the number of hidden
 #       units in that layer.
-PROJECTION_UNITS: t.List[int] = [64, 128]
+PROJECTION_UNITS: t.List[int] = [64, 32, 8, 3]
+PROJECTION_UNITS = [64, 128, 256]
 # :param FINAL_UNITS:
 #       This list determines the layer structure of the model's final prediction MLP. Each element in 
 #       this list represents one layer, where the integer value determines the number of hidden units 
 #       in that layer of the prediction network.
 #       Note that the last value of this list determines the output shape of the entire network and 
 #       therefore has to match the number of target values given in the dataset.
-FINAL_UNITS: t.List[int] = [128, 2]
+FINAL_UNITS: t.List[int] = [64, 2]
 # :param OUTPUT_NORM:
 #       Optionally, for a classification logits, this parameter can be set to a float value and in that 
 #       case the output logits vector of the model will be projected onto a unit sphere with that given 
@@ -117,7 +117,7 @@ OUTPUT_NORM: t.Optional[float] = None
 #       This is the label smoothing parameter that is used for the cross entropy loss of the model.
 #       If this value is set to 0.0, no label smoothing is applied. If this value is set to a value
 #       between 0.0 and 1.0, the label smoothing will be applied to the cross entropy loss.
-LABEL_SMOOTHING: t.Optional[float] = 0.00
+LABEL_SMOOTHING: t.Optional[float] = 0.0
 # :param NUM_CHANNELS:
 #       The number of explanation channels for the model.
 NUM_CHANNELS: int = 2
@@ -126,10 +126,12 @@ NUM_CHANNELS: int = 2
 #       Roughly, the higher this value, the more the model will prioritize the explanations during training.
 IMPORTANCE_FACTOR: float = 1.0
 # :param IMPORTANCE_OFFSET:
-#       This parameter more or less controls how expansive the explanations are - how much of the graph they
-#       tend to cover. Higher values tend to lead to more expansive explanations while lower values tend to 
-#       lead to sparser explanations. Typical value range 0.5 - 1.5
-IMPORTANCE_OFFSET: float = 0.6
+#       This parameter controls the sparsity of the explanation masks even more so than the sparsity factor.
+#       It basically provides the upper limit of how many nodes/edges need to be activated for a channel to 
+#       be considered as active. The higher this value, the less sparse the explanations will be.
+#       Typical values range from 0.2 - 2.0 but also depend on the graph size and the specific problem at 
+#       hand. This is a parameter with which one has to experiment until a good trade-off is found!
+IMPORTANCE_OFFSET: float = 2.0
 # :param SPARSITY_FACTOR:
 #       This is the coefficient that is used to scale the explanation sparsity loss during training.
 #       The higher this value the more explanation sparsity (less and more discrete explanation masks)
@@ -173,7 +175,7 @@ CONTRASTIVE_NOISE: float = 0.1
 #       This value should be chosen as roughly the inverse of the number of expected concepts. So as an example 
 #       if it is expected that each explanation consists of roughly 10 distinct concepts, this should be chosen 
 #       as 1/10 = 0.1
-CONTRASTIVE_TAU: float = 0.05
+CONTRASTIVE_TAU: float = 0.01
 # :param CONTRASTIVE_TEMP:
 #       This float value is a hyperparameter that controls the "temperature" of the contrastive learning loss.
 #       The higher this value, the more the contrastive learning will be smoothed out. The lower this value,
@@ -196,12 +198,12 @@ PREDICTION_FACTOR: float = 1.0
 # :param EPOCHS:
 #       The integer number of epochs to train the dataset for. Each epoch means that the model is trained 
 #       once on the entire training dataset.
-EPOCHS: int = 200
+EPOCHS: int = 100
 # :param BATCH_SIZE:
 #       The batch size to use while training. This is the number of elements from the dataset that are 
 #       presented to the model at the same time to estimate the gradient direction for the stochastic gradient 
 #       descent optimization.
-BATCH_SIZE: int = 100
+BATCH_SIZE: int = 120
 # :param LEARNING_RATE:
 #       This float determines the learning rate of the optimizer.
 LEARNING_RATE: float = 1e-4

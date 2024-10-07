@@ -3,7 +3,6 @@ import torch
 from graph_attention_student.torch.layers import GraphAttentionLayer
 from graph_attention_student.testing import get_mock_graphs
 from graph_attention_student.torch.data import data_list_from_graphs
-from graph_attention_student.torch.data import data_from_graph
 
 
 def test_graph_attention_layer_forward_pass():

@@ -31,51 +31,10 @@ def test_data_list_from_graphs(num_graphs):
     for data in data_list:
         assert isinstance(data, Data)
 
-
-def test_data_from_graph_node_coordinates_works():
-    """
-    The ``data_from_graph`` should now be able to process the custom graph dict property 
-    "node_coordinates" and transform it into a tensor and attach it to the Data object 
-    as the "coords" property.
-    """
-    # Some random graph
-    graph = {
-        'node_indices': np.array([0, 1, 2]),
-        'node_attributes': np.array([
-            [1, 0, 0],
-            [1, 0, 0],
-            [0, 0, 1],
-        ]),
-        'node_coordinates': np.array([
-            [0.1, 0.2],
-            [0.4, 0.5],
-            [0.7, 0.8],
-        ]),
-        'edge_indices': np.array([
-            [0, 1],
-            [1, 2],
-            [2, 0]
-        ]),
-        'edge_attributes': np.array([
-            [0, 1],
-            [1, 0],
-            [1, 0]
-        ]),
-        'graph_labels': np.array([
-            [1]
-        ])
-    }
-    
-    data = data_from_graph(graph)
-    
-    # The "coords" property should now have been added to the Data object and it should be a 
-    # float tensor with the same shape as the given node coordinates in the graph dict.
-    assert isinstance(data.coords, torch.Tensor)
-    assert data.coords.shape == (3, 2)
-    assert data.coords.dtype == torch.float32
+# == data_from_graph ==
 
 
-def test_data_from_graph():
+def test_data_from_graph_basically_works():
     """
     The ``data_from_graph`` function should be able to convert a graph dict into a torch Data object.
     """
@@ -113,3 +72,95 @@ def test_data_from_graph():
     # target value
     assert isinstance(data.y, torch.Tensor)
     assert data.y.shape == (1, 1)
+    
+    
+def test_data_from_graph_node_coordinates_work():
+    """
+    When the graph dict contains the optional property "node_coordinates" the ``data_from_graph``
+    function should be able to convert this into a tensor and attach it to the Data object as the
+    "coords" property dynamically.
+    """
+    graph = {
+        'node_indices': np.array([0, 1, 2]),
+        'node_attributes': np.array([
+            [1, 0, 0],
+            [1, 0, 0],
+            [0, 0, 1],
+        ]),
+        'edge_indices': np.array([
+            [0, 1],
+            [1, 2],
+            [2, 0]
+        ]),
+        'edge_attributes': np.array([
+            [0, 1],
+            [1, 0],
+            [1, 0]
+        ]),
+        'graph_labels': np.array([
+            [1]
+        ])
+    }
+    
+    data = data_from_graph(graph)
+    assert isinstance(data, Data)
+    assert not hasattr(data, 'coords')
+    
+    # Only after we add the optional attribute to the graph dict, the data object should contain 
+    # the additional properties as well.
+    graph['node_coordinates'] = np.array([
+        [0.1, 0.2, 0.3],
+        [0.4, 0.5, 0.5],
+        [0.7, 0.8, 0.5],
+    ])
+    data = data_from_graph(graph)
+    assert isinstance(data, Data)
+    
+    assert hasattr(data, 'coords')
+    assert isinstance(data.coords, torch.Tensor)
+    assert data.coords.shape == (3, 3)
+    
+    
+def test_data_from_graph_graph_weight_works():
+    """
+    When the graph dict contains the optional property "graph_weight" the ``data_from_graph`` function
+    should be able to convert this into a tensor and attach it to the Data object as the "train_weight"
+    property dynamically. During the training this should act as a sample specific weight of the loss.
+    """
+    graph = {
+        'node_indices': np.array([0, 1, 2]),
+        'node_attributes': np.array([
+            [1, 0, 0],
+            [1, 0, 0],
+            [0, 0, 1],
+        ]),
+        'edge_indices': np.array([
+            [0, 1],
+            [1, 2],
+            [2, 0]
+        ]),
+        'edge_attributes': np.array([
+            [0, 1],
+            [1, 0],
+            [1, 0]
+        ]),
+        'graph_labels': np.array([
+            [1]
+        ])
+    }
+    
+    data = data_from_graph(graph)
+    assert isinstance(data, Data)
+    assert not hasattr(data, 'train_weight')
+    
+    # Only after we add the optional attribute to the graph dict, the data object should contain 
+    # the additional properties as well.
+    graph['graph_weight'] = np.array([0.1])
+    data = data_from_graph(graph)
+    assert isinstance(data, Data)
+    
+    assert hasattr(data, 'train_weight')
+    assert isinstance(data.train_weight, torch.Tensor)
+    assert data.train_weight.shape == (1, )
+
+    

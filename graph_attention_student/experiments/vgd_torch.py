@@ -21,10 +21,8 @@ from collections import defaultdict
 
 import pandas as pd
 import numpy as np
-import matplotlib as mpl
 import matplotlib.pyplot as plt
 import seaborn as sns
-import torch.nn as nn
 import pytorch_lightning as pl
 from matplotlib.backends.backend_pdf import PdfPages
 from sklearn.metrics import r2_score
@@ -42,7 +40,6 @@ from visual_graph_datasets.config import Config
 from visual_graph_datasets.web import ensure_dataset
 from visual_graph_datasets.data import VisualGraphDatasetReader
 from visual_graph_datasets.visualization.base import draw_image
-from torch_geometric.data import Data
 from torch_geometric.loader import DataLoader
 from lightning.pytorch.loggers import CSVLogger
 
@@ -618,8 +615,8 @@ def experiment(e: Experiment):
         dataset_path = e.VISUAL_GRAPH_DATASET
         
     else:
-        e.log(f'dataset is not a local folder')
-        e.log(f'attempting to fetch dataset from remote file share...')
+        e.log('dataset is not a local folder')
+        e.log('attempting to fetch dataset from remote file share...')
         config = Config()
         config.load()
         dataset_path = ensure_dataset(e.VISUAL_GRAPH_DATASET, config)

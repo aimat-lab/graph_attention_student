@@ -1,6 +1,4 @@
-import os
 import typing as t
-from pytorch_lightning.utilities.types import OptimizerLRScheduler
 
 import torch
 import torch.nn as nn
@@ -9,20 +7,17 @@ import torch_scatter
 import pytorch_lightning as pl
 import numpy as np
 import visual_graph_datasets.typing as tv
-from torch_geometric.nn import GATv2Conv
 from torch_geometric.nn.aggr import SumAggregation
 from torch_geometric.nn.aggr import MeanAggregation
 from torch_geometric.nn.aggr import MaxAggregation
 from torch_geometric.data import Data
-from torch_geometric.utils import softmax
 
-from graph_attention_student.torch.utils import torch_uniform, torch_gauss
+from graph_attention_student.torch.utils import torch_gauss
 from graph_attention_student.torch.model import AbstractGraphModel
-from graph_attention_student.torch.layers import MultiHeadAttention, ParallelHeadAttention
+from graph_attention_student.torch.layers import ParallelHeadAttention
 from graph_attention_student.torch.layers import GraphAttentionLayer
 from graph_attention_student.torch.layers import GraphAttentionLayerV2
 from graph_attention_student.torch.layers import GraphAttentionLayerV3
-from graph_attention_student.torch.layers import AttentiveFpLayer
 from graph_attention_student.torch.layers import MaskExpansionLayer
 
 
@@ -115,7 +110,8 @@ class Megan(AbstractGraphModel):
                  contrastive_temp: float = 1.0,
                  contrastive_beta: float = 1.0,
                  contrastive_tau: float = 0.1,
-                 contrastive_units: int = 2048,
+                 contrastive_units: int = 1028,
+                 #contrastive_units: int = 2048,
                  # prediction-related
                  final_units: t.List[int] = [16, 1],
                  final_dropout_rate: float = 0.0,
@@ -128,6 +124,7 @@ class Megan(AbstractGraphModel):
                  label_smoothing: float = 0.0,
                  # training-related
                  learning_rate: float = 1e-3,
+                 bn_momentum: float = 0.5,
                  ):
         pl.LightningModule.__init__(self)
         
@@ -267,28 +264,35 @@ class Megan(AbstractGraphModel):
             # compatibility.
 
             if layer_version == 'v1':
-                layer_func = lambda: GraphAttentionLayer(
-                    in_dim=prev_features,
-                    out_dim=num_features,
-                    edge_dim=edge_dim,
-                )
+                
+                def layer_func():
+                    return GraphAttentionLayer(
+                        in_dim=prev_features,
+                        out_dim=num_features,
+                        edge_dim=edge_dim,
+                    )
                 
             elif layer_version == 'v2':
-                layer_func = lambda: GraphAttentionLayerV2(
-                    in_dim=prev_features,
-                    out_dim=num_features,
-                    edge_dim=edge_dim,
-                    hidden_dim=hidden_units,
-                )
+                
+                def layer_func():
+                    return GraphAttentionLayerV2(
+                        in_dim=prev_features,
+                        out_dim=num_features,
+                        edge_dim=edge_dim,
+                        hidden_dim=hidden_units,
+                        bn_momentum=bn_momentum,
+                    )
                 
             elif layer_version == 'v3':
-                layer_func = lambda: GraphAttentionLayerV3(
-                    in_dim=prev_features,
-                    out_dim=num_features,
-                    edge_dim=edge_dim,
-                    hidden_dim=hidden_units,
-                    num_heads=3,
-                )
+                
+                def layer_func():
+                    return GraphAttentionLayerV3(
+                        in_dim=prev_features,
+                        out_dim=num_features,
+                        edge_dim=edge_dim,
+                        hidden_dim=hidden_units,
+                        num_heads=3,
+                    )
                 
             lay = ParallelHeadAttention(
                 [layer_func() for _ in range(num_channels)],
@@ -351,7 +355,7 @@ class Megan(AbstractGraphModel):
                 lay = nn.Sequential(
                     nn.Linear(in_features=prev_features,
                               out_features=num_features),
-                    nn.BatchNorm1d(num_features),
+                    #nn.BatchNorm1d(num_features, momentum=bn_momentum),
                 )
                 prev_features = num_features
                 layers.append(lay)
@@ -364,7 +368,7 @@ class Megan(AbstractGraphModel):
         
         self.dense_layers = nn.ModuleList()
         prev_features = self.embedding_dim * num_channels
-        self.lay_dense_norm = nn.BatchNorm1d(prev_features)
+        # self.lay_dense_norm = nn.BatchNorm1d(prev_features, momentum=bn_momentum)
         for num_features in final_units:
             
             lay = nn.Linear(
@@ -458,6 +462,7 @@ class Megan(AbstractGraphModel):
                 node_importance_overwrite: t.Optional[torch.Tensor] = None,
                 node_feature_mask: t.Optional[torch.Tensor] = None,
                 stop_importance_grad: bool = False,
+                edge_importance_overwrite: t.Optional[torch.Tensor] = None,
                 ) -> t.Dict[str, torch.Tensor]:
     
         node_input, edge_input, edge_index = data.x, data.edge_attr, data.edge_index
@@ -487,7 +492,8 @@ class Megan(AbstractGraphModel):
             node_embedding, alpha = lay(
                 x=node_embedding, 
                 edge_index=edge_index,
-                edge_attr=edge_input, 
+                edge_attr=edge_input,
+                edge_weights=edge_importance_overwrite,
                 return_attention_weights=True
             )
             # applying the dropout to the node embedding after each layer
@@ -583,7 +589,22 @@ class Megan(AbstractGraphModel):
         # An important detail here is that we dont actually set the values below 0.25 to 0 but rather just 
         # scale them down by a certaion factor. This is important to maintain a proper gradient also 
         # through that computational branch!
-        node_importance_norm = torch.where(node_importance_norm < 0.3, node_importance_norm * 0.01, node_importance_norm)
+        node_importance_norm = torch.where(node_importance_norm < 0.1, node_importance_norm * 0.01, node_importance_norm)
+            
+        # ~ normalization & thresholding for edge importance
+        # Similar to node importance, we normalize the edge importance w.r.t. the highest edge importance value found 
+        # in each graph (across all channels). This ensures that the highest value is 1.0 and all other values are lower 
+        # but maintain their relative scale. We also apply a thresholding where all values below 0.25 are effectively set to zero.
+
+        # max_edge_values: (B, K)
+        max_edge_values = torch_scatter.scatter_max(edge_importance, data.batch[edge_index[0]], dim=0)[0]
+        # max_edge_values: (B, )
+        max_edge_values = torch.amax(max_edge_values, dim=-1, keepdim=True)
+        max_edge_values = torch.where(max_edge_values < 0.01, torch.ones_like(max_edge_values) * 1e9, max_edge_values)
+        # edge_importance_norm: (B * E, K)
+        edge_importance_norm = edge_importance / max_edge_values[data.batch[edge_index[0]]]
+        # Apply thresholding
+        edge_importance_norm = torch.where(edge_importance_norm < 0.1, edge_importance_norm * 0.01, edge_importance_norm)
             
         # ~ graph embedding & projection
         # As previously introduced, the graph embedding is calculated as the result of an 
@@ -677,24 +698,48 @@ class Megan(AbstractGraphModel):
             'node_importance': node_importance,
             'node_importance_norm': node_importance_norm,
             'edge_importance': edge_importance,
+            'edge_importance_norm': edge_importance_norm,
         }
         
     def training_step(self, data: Data, batch_idx):
         
         batch_size = np.max(data.batch.cpu().numpy()) + 1
         
+        # out_pred: (B, O)
+        out_true = data.y.view(-1, self.out_dim)
+        
+        # 07.08.24
+        # ~ updating running mean
+        # The most recent changes to the explanation training routine replaced the global use of the 
+        # regression reference by just splitting each batch according to it's median locally. However, 
+        # the regression reference is still important for the actual output of the model - if the model 
+        # output is not symmetrically centered around the mean value, this can affect the fidelity calculation 
+        # therefore we implement the regression reference as a running mean over all the batches here.
+        
+        if self.prediction_mode == 'regression':
+
+            batch_size_ = torch.amax(data.batch) + 1
+            batch_mean = torch.mean(out_true, dim=0)
+            
+            self.running_mean += (batch_mean - self.running_mean) * (batch_size_ / self.n_samples)
+            self.n_samples += batch_size_
+            
+            self.regression_reference.data.copy_(self.running_mean)
+        
         # Conforming to the AbstractGraphModel, the "forward" method that is being invoked here 
         # returns a dictionary structure, whose values are torch tensor object that are somehow 
         # produced by the forward pass of the model.
-        info: dict = self(data)
+        try:
+            info: dict = self(data)
+        except RuntimeError as exc:
+            print(f'Runtime Error: {exc}')
+            return torch.tensor(0.0)
         
         # out_pred: (B, O)
         out_pred = info['graph_output']
-        # out_pred: (B, O)
-        out_true = data.y.view(out_pred.shape)
         
         # graph_embedding: (B, D)
-        graph_embedding = info['graph_embedding']
+        # graph_embedding = info['graph_embedding']
         
         # In the classification case the model outputs the classification LOGITS and it has to 
         # stay like that, but for the loss calculation we need the class proabilities which is 
@@ -717,7 +762,7 @@ class Megan(AbstractGraphModel):
         
         # ~ prediction loss
         loss_pred = self.loss_pred(out_pred, out_true)
-        if hasattr(data, 'train_weight'):
+        if False: # hasattr(data, 'train_weight'):
             loss_pred = (loss_pred * data.train_weight.unsqueeze(-1)).mean()
         else:
             loss_pred = loss_pred.mean()
@@ -774,7 +819,7 @@ class Megan(AbstractGraphModel):
         
         #loss_spar = (info['node_importance_norm'] - 0.5).pow(2).mean()
         ni = info['node_importance_norm']
-        loss_spar = torch.mean((1 - 2 * torch.abs(ni - 0.5)).relu())
+        loss_spar = torch.mean(torch.abs(ni))
         
         self.log(
             'loss_spar', loss_spar,
@@ -842,24 +887,6 @@ class Megan(AbstractGraphModel):
             # fidelity loss to encourage positive fidelity values
             + self.fidelity_factor * loss_fid
         )
-        
-        # 07.08.24
-        # ~ updating running mean
-        # The most recent changes to the explanation training routine replaced the global use of the 
-        # regression reference by just splitting each batch according to it's median locally. However, 
-        # the regression reference is still important for the actual output of the model - if the model 
-        # output is not symmetrically centered around the mean value, this can affect the fidelity calculation 
-        # therefore we implement the regression reference as a running mean over all the batches here.
-        
-        if self.prediction_mode == 'regression':
-
-            batch_size = torch.amax(data.batch) + 1
-            batch_mean = torch.mean(out_true, dim=0)
-            
-            self.running_mean += (batch_mean - self.running_mean) * (batch_size / self.n_samples)
-            self.n_samples += batch_size
-            
-            self.regression_reference.data.copy_(self.running_mean)
                     
         return loss
     
@@ -921,20 +948,25 @@ class Megan(AbstractGraphModel):
         # node_importance: (B * V, K)
         node_importance = info['node_importance']
         # node_importance_norm: (B * V, K)
-        max_values = torch_scatter.scatter_max(node_importance, data.batch, dim=0)[0]
-        node_importance_norm = node_importance / max_values[data.batch]
+        #max_values = torch_scatter.scatter_max(node_importance, data.batch, dim=0)[0]
+        #node_importance_norm = node_importance / max_values[data.batch]
+        node_importance_norm = info['node_importance_norm']
+        edge_importance_norm = info['edge_importance_norm']
         
+        #print(node_importance.shape, data.batch.shape, data.batch)
         # pooled_node_importance: (B, K)
-        pooled_node_importance = self.lay_pool_importance(node_importance, data.batch)
+        #pooled_node_importance = self.lay_pool_importance(node_importance, data.batch)
         # is_empty: (B, K)
         # This tensor is a binary mask on the 
-        is_empty = (pooled_node_importance < self.importance_offset).float()
+        #is_empty = (pooled_node_importance < 0.1).float()
         
         # In the SimCLR framework we need 2 augmented views in total, so here we create the binarized 
         # feature masks but with two slightly different thresholds to capture kind of a multi-level 
         # information about the explanation
-        node_importance_bin_1 = (node_importance_norm > 0.8).float()
-        node_importance_bin_2 = (node_importance_norm > 0.6).float()
+        node_importance_bin_1 = (node_importance_norm > 0.7).float()
+        #node_importance_bin_2 = (node_importance_norm > 0.7).float()
+        
+        edge_importance_bin = (edge_importance_norm > 0.7).float()
         
         # node_importance_bin_1 = self.lay_mask_expansion(
         #     mask=node_importance_bin_1,
@@ -947,20 +979,31 @@ class Megan(AbstractGraphModel):
         # )
         
         node_importance_1 = node_importance + torch_gauss(list(node_importance.size()), mean=0, std=self.contrastive_noise).to(self.device)
+        node_importance_1 = torch.clamp(node_importance_1, 0, 1)
         node_importance_2 = node_importance + torch_gauss(list(node_importance.size()), mean=0, std=self.contrastive_noise).to(self.device)
+        node_importance_2 = torch.clamp(node_importance_2, 0, 1)
         
         # To now create the corresponding graph embedding vectors for the data augmentations we have
         # to actually query the model again with those augementations as addditional arguments.
+        data_1 = data.clone()
+        data_1.x = data.x + (1 - torch.amax(node_importance_bin_1, dim=-1).unsqueeze(-1)) * torch_gauss(list(data.x.size()), mean=0, std=0.2).to(self.device)
+        data_1.edge_attr = data.edge_attr + (1 - torch.amax(edge_importance_bin, dim=-1).unsqueeze(-1)) * torch_gauss(list(data.edge_attr.size()), mean=0, std=0.2).to(self.device)
         info_1 = self(
-            data, 
-            node_importance_overwrite=node_importance_1, 
-            node_feature_mask=node_importance_bin_1,
+            data_1, 
+            #node_importance_overwrite=node_importance_bin_1, 
+            #edge_importance_overwrite=edge_importance_bin,
+            #node_feature_mask=node_importance_bin_1,
             stop_importance_grad=False,
         )
+        
+        data_2 = data.clone()
+        data_2.x = data.x + (1 - torch.amax(node_importance_bin_1, dim=-1).unsqueeze(-1)) * torch_gauss(list(data.x.size()), mean=0, std=0.2).to(self.device)
+        data_1.edge_attr = data.edge_attr + (1 - torch.amax(edge_importance_bin, dim=-1).unsqueeze(-1)) * torch_gauss(list(data.edge_attr.size()), mean=0, std=0.2).to(self.device)
         info_2 = self(
-            data, 
-            node_importance_overwrite=node_importance_2, 
-            node_feature_mask=node_importance_bin_2,
+            data_2,
+            #node_importance_overwrite=node_importance_2,
+            #edge_importance_overwrite=edge_importance_bin,
+            #node_feature_mask=node_importance_bin_2,
             stop_importance_grad=False,
         )
         
@@ -976,13 +1019,15 @@ class Megan(AbstractGraphModel):
             mask[i, i] = 0
             mask[i, i + batch_size] = 0
         mask = torch.cat([mask, mask], dim=0)
+        
+        pos_weight = 1.0
     
         # Essentially we want each channel to develop it's own independent embedding space, so here we 
         # iterate over all the channels and calculate the constrastive loss contribution for each channel.
         for k in range(self.num_channels):
             
             # is_empty_k: (B, )
-            is_empty_k = torch.cat([is_empty[:, k], is_empty[:, k]], dim=0)
+            #is_empty_k = torch.cat([is_empty[:, k], is_empty[:, k]], dim=0)
             
             # NOTE: Looking at the similarity computations, one can see that these are realized as simple 
             # vector multiplications between the embeddings. However, the graph embeddings are inherently 
@@ -1008,12 +1053,12 @@ class Megan(AbstractGraphModel):
             
             # sim_pos_1: (B, )
             sim_pos_1 = (graph_embedding_1 * graph_embedding_k).sum(dim=-1)
-            sim_pos_1_exp = torch.exp(sim_pos_1 / self.contrastive_temp)
+            sim_pos_1_exp = torch.exp(pos_weight * sim_pos_1 / self.contrastive_temp)
             # sim_pos_2: (B, )
             sim_pos_2 = (graph_embedding_2 * graph_embedding_k).sum(dim=-1)
-            sim_pos_2_exp = torch.exp(sim_pos_2 / self.contrastive_temp)
+            sim_pos_2_exp = torch.exp(pos_weight * sim_pos_2 / self.contrastive_temp)
             sim_pos = (graph_embedding_1 * graph_embedding_2).sum(dim=-1)
-            sim_pos_exp = torch.exp(sim_pos / self.contrastive_temp)
+            sim_pos_exp = torch.exp(pos_weight * sim_pos / self.contrastive_temp)
             # sim_pos_exp: (2 *B, 1)
             sim_pos_exp = torch.cat([
                 torch.stack([sim_pos_exp, sim_pos_1_exp], dim=-1).sum(dim=-1),
@@ -1030,10 +1075,11 @@ class Megan(AbstractGraphModel):
             #Neg = (-N*self.contrastive_tau*sim_pos_exp + sim_neg_exp.sum(dim=-1)) / (1-self.contrastive_tau)
             Neg = (-N*self.contrastive_tau*sim_pos_exp + reweight_neg) / (1-self.contrastive_tau)
             Neg = torch.clamp(Neg, min=N*np.e**(-1/self.contrastive_temp))
-            #Neg = sim_neg_exp.sum(dim=-1)
+            Neg = sim_neg_exp.sum(dim=-1)
             
             loss_cont += (1 / self.num_channels) * torch.mean(-torch.log((sim_pos_exp) / (sim_pos_exp + Neg)))
-            
+            #loss_cont += (1 / self.num_channels) * torch.mean(-torch.log((sim_pos_exp) / (Neg)))
+                     
         return loss_cont
     
     def training_fidelity(self,
@@ -1169,8 +1215,10 @@ class Megan(AbstractGraphModel):
             #print(max_values.shape, edge_importance.shape)
             edge_importance = edge_importance / max_values[data.batch[data.edge_index[0]]]
             
+            #edge_importance = torch.where(edge_importance < 0.1, edge_importance * 0.01, edge_importance)
+            
             # edge_transformed: (B * E, K)
-            edge_transformed = F.sigmoid(self.lay_transform_2(self.lay_transform_1(edge_input).relu())) + self.importance_offset
+            edge_transformed = F.sigmoid(self.lay_transform_2(self.lay_transform_1(edge_input).relu()) - 5) + self.importance_offset
             edge_transformed = torch.ones_like(edge_transformed, device=self.device) * self.importance_offset
             edge_transformed = edge_transformed * edge_importance
             
@@ -1192,12 +1240,9 @@ class Megan(AbstractGraphModel):
             # So here we construct the "true" labels simply as a binary decision problem of samples being either 
             # "positive" or "negative".
             
-            #regression_reference = self.regression_reference
-            regression_reference = torch.mean(out_true)
             regression_lo = torch.quantile(out_true, 0.5 - self.regression_margin)
             regression_hi = torch.quantile(out_true, 0.5 + self.regression_margin)
-            #print(regression_lo, regression_hi, regression_reference)
-
+            
             values_true = torch.cat([
                 # (out_true < (regression_reference - self.regression_margin)), 
                 # (out_true > (regression_reference + self.regression_margin)),
@@ -1209,6 +1254,7 @@ class Megan(AbstractGraphModel):
             # values_pred: (B, K)
             #values_pred = torch.sigmoid(scaling * (pooled_importance - offset))
             values_pred = torch.tanh(0.1 * pooled_importance)
+            values_true *= 0.9
             
             loss_expl = F.binary_cross_entropy(values_pred, values_true, )
             
@@ -1223,6 +1269,7 @@ class Megan(AbstractGraphModel):
             # values_pred: (B, K)
             #values_pred = torch.sigmoid(scaling * (pooled_importance - offset))
             values_pred = torch.tanh(0.1 * pooled_importance)
+            values_true = values_true * 0.9
             
             loss_expl = F.binary_cross_entropy(values_pred, values_true)
                         

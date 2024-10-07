@@ -268,3 +268,17 @@ Additional changes:
 
 HOTFIX: The ``Megan.regression_reference`` running mean is now a ``nn.Parameter`` and therefore also included 
 when saving/loading the model from persistent files.
+
+0.18.2 - 08.08.2024
+-------------------
+
+HOTFIX: Removed batchnorm layers in the projection MLPs as this was causing significantly different results when 
+running the model in eval mode versus in 
+
+- modified the GraphAttentionLayerV2 to now use a "look ahead" aggregation of the neighbor nodes as well in the 
+  message update. significantly improves the explanations for the BA2Motifs dataset.
+
+0.18.3 - 01.10.2024
+-------------------
+
+- modified the augementations that are used for the contrastive learning now.

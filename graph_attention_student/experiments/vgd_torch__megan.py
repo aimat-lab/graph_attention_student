@@ -14,6 +14,7 @@ space of the all the trained models and will create PDF files that will visualiz
 elements in the dataset that are the closest to the cluster centroids.
 """
 import os
+import tempfile
 import typing as t
 
 import hdbscan
@@ -21,15 +22,12 @@ import numpy as np
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
-import torch
-import torch.nn as nn
 import pytorch_lightning as pl
 from matplotlib.backends.backend_pdf import PdfPages
 from pycomex.functional.experiment import Experiment
 from pycomex.utils import folder_path, file_namespace
 from sklearn.neighbors import NearestNeighbors
 from sklearn.metrics import pairwise_distances
-from torch_geometric.data import Data
 from torch_geometric.loader import DataLoader
 from lightning.pytorch.loggers import CSVLogger
 from visual_graph_datasets.visualization.importances import create_importances_pdf
@@ -37,15 +35,14 @@ from visual_graph_datasets.visualization.importances import plot_node_importance
 from visual_graph_datasets.visualization.importances import plot_edge_importances_background
 from visual_graph_datasets.visualization.base import draw_image
 
-from graph_attention_student.utils import export_metadatas_csv
 from graph_attention_student.visualization import generate_contrastive_colors
 from graph_attention_student.visualization import plot_embeddings_3d
 from graph_attention_student.visualization import plot_embeddings_2d
 from graph_attention_student.visualization import plot_leave_one_out_analysis
-from graph_attention_student.torch.data import data_from_graph
 from graph_attention_student.torch.data import data_list_from_graphs
 from graph_attention_student.torch.model import AbstractGraphModel
 from graph_attention_student.torch.megan import Megan
+from graph_attention_student.torch.utils import SwaCallback
 
 # == MODEL PARAMETERS ==
 # The following parameters configure the model architecture.
@@ -116,9 +113,11 @@ LABEL_SMOOTHING: t.Optional[float] = 0.0
 #       Roughly, the higher this value, the more the model will prioritize the explanations during training.
 IMPORTANCE_FACTOR: float = 1.0
 # :param IMPORTANCE_OFFSET:
-#       This parameter more or less controls how expansive the explanations are - how much of the graph they
-#       tend to cover. Higher values tend to lead to more expansive explanations while lower values tend to 
-#       lead to sparser explanations. Typical value range 0.5 - 1.5
+#       This parameter controls the sparsity of the explanation masks even more so than the sparsity factor.
+#       It basically provides the upper limit of how many nodes/edges need to be activated for a channel to 
+#       be considered as active. The higher this value, the less sparse the explanations will be.
+#       Typical values range from 0.2 - 2.0 but also depend on the graph size and the specific problem at 
+#       hand. This is a parameter with which one has to experiment until a good trade-off is found!
 IMPORTANCE_OFFSET: float = 0.8
 # :param SPARSITY_FACTOR:
 #       DEPRECATED
@@ -196,6 +195,31 @@ PREDICTION_FACTOR: float = 1.0
 #       to True, be aware that the clustering analysis will take a lot of time and memory for large datasets!
 DO_CLUSTERING: bool = True
 
+# == TRAINING PARAMETERS ==
+# These parameters configure the training process itself, such as how many epochs to train 
+# for and the batch size of the training
+
+# :param BATCH_ACCUMULATE:
+#       This integer determines how many batches will be used to accumulate the training gradients 
+#       before applying an optimization step. Batch gradient accumulation is a method to simulate 
+#       a larger batch size if there isn't enough memory available to increase the batch size 
+#       itself any further. The effective batch size will be BATCH_SIZE * BATCH_ACCUMULATE.
+BATCH_ACCUMULATE: int = 2
+
+# NOTE: Using SWA is currently NOT recommended because while it seems to stabilize the prediction 
+#       performance of the model, it also seems to have a negative impact on the explanation quality
+#       of the model.
+
+# :param USE_SWA:
+#       This flag determines whether to use Stochastic Weight Averaging (SWA) at the end of the training. 
+#       if this is enables, the last SWA_EPOCHS of the model weights will be recorded and then the mean of 
+#       these weights will be used as the final model weights.
+USE_SWA: bool = False
+# :param SWA_EPOCHS:
+#       The number of the last epochs of the training process that will be used to determine the mean weights 
+#       at the end of the training process.
+SWA_EPOCHS: int = 10
+
 
 __DEBUG__ = True
 
@@ -232,7 +256,60 @@ def train_model(e: Experiment,
         train_loader = DataLoader(data_list_from_graphs(graphs_train), batch_size=e.BATCH_SIZE, shuffle=True)
         test_loader = DataLoader(data_list_from_graphs(graphs_test), batch_size=e.BATCH_SIZE, shuffle=False)
         
-        e.log(f'Instantiating Megan model - with explanation training...')
+        class RecordEmbeddingsCallback(pl.Callback):
+    
+            def on_train_epoch_start(self, trainer: pl.Trainer, pl_module: Megan):
+                
+                # Linearly ramp up the contrastive factor
+                max_epochs = trainer.max_epochs
+                current_epoch = trainer.current_epoch
+                pl_module.contrastive_factor = e.CONTRASTIVE_FACTOR * (current_epoch / max_epochs)
+    
+            def on_train_epoch_end(self, trainer: pl.Trainer, pl_module: Megan):
+                
+                # We only want to record the embeddings when the embedding dimension is 2 or 3 because 
+                # everything else, we cant't really visualize anyways.
+                if pl_module.embedding_dim <= 3:
+                    
+                    # We want to query the model with the entire test set to get the embeddings of all 
+                    # these graphs and then we plot them into a corresponding plot.
+                    e.log('recording embeddings...')
+                    device = pl_module.device
+                    pl_module.eval()
+                    pl_module.to('cpu')
+                    
+                    infos_test = pl_module.forward_graphs(graphs_test)
+                    # embeddings: (N, D, K)
+                    embeddings = np.array([info['graph_embedding'] for info in infos_test])
+                    
+                    kwargs = {'projection': '3d'} if pl_module.embedding_dim == 3 else {}
+                    
+                    fig, rows = plt.subplots(
+                        ncols=e.NUM_CHANNELS,
+                        nrows=1,
+                        figsize=(8 * e.NUM_CHANNELS, 8),
+                        squeeze=False,
+                        subplot_kw=kwargs,
+                    )
+                    fig.suptitle(f'embeddings epoch {trainer.current_epoch}')
+                    
+                    for k in range(e.NUM_CHANNELS):
+                        ax = rows[0][k]
+                        ax.set_title(f'channel {k}')
+                        plot_embeddings_3d(
+                            embeddings=embeddings[:, :, k],
+                            ax=ax,
+                            color=e.CHANNEL_INFOS[k]['color'],
+                            x_range=[-1.1, 1.1],
+                            y_range=[-1.1, 1.1],
+                            z_range=[-1.1, 1.1],
+                        )
+                        
+                    e.track('embeddings', fig)
+                    pl_module.train()
+                    pl_module.to(device)
+
+        e.log('Instantiating Megan model - with explanation training...')
         e.log(f'explanation mode: {e.DATASET_TYPE}')
         e.log(f' * importance offset: {e.IMPORTANCE_OFFSET}')
         e.log(f' * hidden units: {e.HIDDEN_UNITS}')
@@ -272,16 +349,33 @@ def train_model(e: Experiment,
         
         e.log(f'starting model training with {e.EPOCHS} epochs...')
         logger = CSVLogger(e[f'path/{rep}'], name='logs')
+        
+        callbacks = [
+            # This will record the embeddings of the test set after each epoch and then track them into the 
+            # experiment storage so that the evolution of the embeddings can be animated at the end of the 
+            # experiment.
+            RecordEmbeddingsCallback(),
+        ]
+        
+        # The SwaCallback fully implements the stochastic weight averaging by itself without any modification 
+        # in the model itself. The callback simply updates a FIFO queue of the model weights in each epoch 
+        # and then at the end of the training calculates an average over those and assigns them as the new 
+        # weights of the model.
+        if e.USE_SWA:
+            callbacks.append(SwaCallback(history_length=e.SWA_EPOCHS, logger=logger))
+        
         trainer = pl.Trainer(
             max_epochs=e.EPOCHS,
             logger=logger,
-            # accelerator='cpu',
+            callbacks=callbacks,
+            accumulate_grad_batches=e.BATCH_ACCUMULATE,
         )
+        
+        e.log('starting model training...')
         trainer.fit(
             model,
             train_dataloaders=train_loader,
             val_dataloaders=test_loader,
-            
         )
         
         model.to('cpu')
@@ -313,10 +407,16 @@ def evaluate_model(e: Experiment,
     
     model.eval()
     
+    with tempfile.TemporaryDirectory() as path:
+        model_path = os.path.join(path, 'model.ckpt')
+        model.save(model_path)
+        model = Megan.load(model_path)
+    # model.train()
+    
     last_layer = model.dense_layers[-1]
-    e.log(f'final layer info:')
+    e.log('final layer info:')
     e.log(f' * final layer bias value: {last_layer.bias.detach().numpy()}')
-    e.log(f' * regression reference: {e.REGRESSION_REFERENCE}')
+    e.log(f' * regression reference: {model.regression_reference}')
     
     e.log('evaluating Megan explanations...')
     graphs = [data['metadata']['graph'] for data in index_data_map.values()]
@@ -356,7 +456,7 @@ def evaluate_model(e: Experiment,
     # The fidelity of the MEGAN model is a special case because it can be calculated for every explanation 
     # channel independently
     
-    e.log(f'calculating explanation fidelity...')
+    e.log('calculating explanation fidelity...')
     
     # leave_one_out: (B, O, K) numpy
     leave_one_out = model.leave_one_out_deviations(graphs_test)

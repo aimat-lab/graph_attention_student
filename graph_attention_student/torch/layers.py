@@ -1,13 +1,9 @@
 import typing as t
 
 import torch
-from torch._tensor import Tensor
 import torch.nn as nn
 import torch.nn.functional as F
-from torch_geometric.nn.norm import BatchNorm, LayerNorm
 from torch_geometric.nn import MessagePassing
-from torch_geometric.nn.conv import GINEConv
-from torch_geometric.utils import softmax
 
 
 NAME_ACTIVATION_MAP: t.Dict[str, t.Callable] = {
@@ -176,6 +172,7 @@ class ParallelHeadAttention(nn.Module):
                 x: torch.Tensor,
                 edge_attr: torch.Tensor,
                 edge_index: torch.Tensor,
+                edge_weights: torch.Tensor = None,
                 **kwargs,
                 ) -> t.Tuple[torch.Tensor, torch.Tensor]:
         """
@@ -203,8 +200,17 @@ class ParallelHeadAttention(nn.Module):
             
             # node_embeddings: (B * V, num_features_out)
             node_embedding = x[:, :, channel_index]
+            
             # alpha: (B * E, 1)
-            node_embedding, alpha = lay(node_embedding, edge_attr, edge_index)
+            if edge_weights is not None:
+                kwargs.update({'edge_weights': edge_weights[:, channel_index].unsqueeze(-1)})
+                
+            node_embedding, alpha = lay(
+                node_embedding, 
+                edge_attr, 
+                edge_index, 
+                **kwargs
+            )
             
             node_embeddings.append(node_embedding)
             alphas.append(alpha)
@@ -298,6 +304,31 @@ class GraphAttentionLayer(AbstractAttentionLayer):
         return self._attention * self.lay_linear(x_j)
 
 
+class SumNeighbors(MessagePassing):
+    
+    def __init__(self,
+                 aggr: str = 'sum',
+                 **kwargs,
+                 ):
+        super().__init__(aggr=aggr, **kwargs)
+    
+    def forward(self,
+                x: torch.Tensor,
+                edge_index: torch.Tensor,
+                **kwargs,
+                ) -> torch.Tensor:
+        
+        return self.propagate(
+            edge_index,
+            x=x,
+        )
+    
+    def message(self,
+                x_j: torch.Tensor,
+                ) -> torch.Tensor:
+        return x_j
+
+
 class GraphAttentionLayerV2(AbstractAttentionLayer):
     
     def __init__(self,
@@ -305,6 +336,7 @@ class GraphAttentionLayerV2(AbstractAttentionLayer):
                  out_dim: int,
                  edge_dim: int,
                  hidden_dim: int = 128,
+                 bn_momentum: float = 0.1,
                  ):
         super().__init__(
             in_dim=in_dim,
@@ -312,27 +344,27 @@ class GraphAttentionLayerV2(AbstractAttentionLayer):
             edge_dim=edge_dim,
             aggr='sum',
         )
-        self.message_dim = (2 * in_dim) + edge_dim
+        self.message_dim = (3 * in_dim) + edge_dim
         
         self.lay_message = nn.Sequential(
             nn.Linear(in_features=self.message_dim, 
                       out_features=hidden_dim),
-            nn.BatchNorm1d(hidden_dim),
+            nn.BatchNorm1d(hidden_dim, momentum=bn_momentum),
             nn.LeakyReLU(),
             nn.Linear(in_features=hidden_dim,
                       out_features=out_dim),
-            nn.BatchNorm1d(out_dim),
+            nn.BatchNorm1d(out_dim, momentum=bn_momentum),
             nn.LeakyReLU(),
         )
         
         self.lay_attention = nn.Sequential(
             nn.Linear(in_features=self.message_dim, 
                       out_features=hidden_dim),
-            nn.BatchNorm1d(hidden_dim),
+            nn.BatchNorm1d(hidden_dim, momentum=bn_momentum),
             nn.LeakyReLU(),
             nn.Linear(in_features=hidden_dim,
                       out_features=hidden_dim),
-            nn.BatchNorm1d(hidden_dim),
+            nn.BatchNorm1d(hidden_dim, momentum=bn_momentum),
             nn.LeakyReLU(),
             nn.Linear(in_features=hidden_dim,
                       out_features=1),
@@ -343,13 +375,15 @@ class GraphAttentionLayerV2(AbstractAttentionLayer):
         self.lay_transform = nn.Sequential(
             nn.Linear(in_features=out_dim+in_dim,
                       out_features=hidden_dim),
-            nn.BatchNorm1d(hidden_dim),
+            nn.BatchNorm1d(hidden_dim, momentum=bn_momentum),
             nn.LeakyReLU(),
             nn.Linear(in_features=hidden_dim,
                       out_features=out_dim),
-            nn.BatchNorm1d(out_dim),
+            nn.BatchNorm1d(out_dim, momentum=bn_momentum),
             nn.LeakyReLU(),
         )
+        
+        self.lay_neighbors = SumNeighbors()
         
         # We will use this instance property to transport the attention weights from the class' 
         # "message" method to the "forward" method. So during the "message" method we will actually
@@ -361,6 +395,7 @@ class GraphAttentionLayerV2(AbstractAttentionLayer):
                 x: torch.Tensor,
                 edge_attr: torch.Tensor,
                 edge_index: torch.Tensor,
+                edge_weights: torch.Tensor = None,
                 **kwargs):
         
         # At first we apply a linear transformation on the input node features themselves so that they 
@@ -370,11 +405,16 @@ class GraphAttentionLayerV2(AbstractAttentionLayer):
         
         self._attention = None
         self._attention_logits = None
+        
+        x_neighbor = self.lay_neighbors(x, edge_index)
+        
         # node_embedding: (B * V, out)
         node_embedding = self.propagate(
             edge_index,
             x=x,
-            edge_attr=edge_attr
+            x_neighbor=x_neighbor,
+            edge_attr=edge_attr,
+            edge_weights=edge_weights,
         )
         
         # node_embedding = self.lay_act(node_embedding)
@@ -385,19 +425,27 @@ class GraphAttentionLayerV2(AbstractAttentionLayer):
     
     def message(self,
                 x_i, x_j,
+                x_neighbor_i, x_neighbor_j,
                 edge_attr,
+                edge_weights,
                 ) -> torch.Tensor:
         
         # message: (B * E, 2*out + edge)
         # message = torch.cat([x_i, x_j, x_conv_i, x_conv_j, edge_attr], dim=-1)
         #message = torch.cat([x_j, edge_attr], dim=-1)
-        message = torch.cat([x_i, x_j, edge_attr], dim=-1)
+        #message = torch.cat([x_i, x_j, edge_attr], dim=-1)
+        message = torch.cat([x_i, x_j, x_neighbor_j, edge_attr], dim=-1)
         
         # _attention: (B * E, 1)
         self._attention_logits = self.lay_attention(message)
         self._attention = F.sigmoid(self._attention_logits)
         
-        return self._attention * self.lay_message(message)
+        result = self._attention * self.lay_message(message)
+        
+        if edge_weights is not None:
+            result *= edge_weights
+        
+        return result
 
 
 class GraphAttentionLayerV3(AbstractAttentionLayer):

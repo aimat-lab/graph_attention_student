@@ -7,7 +7,6 @@ from rich import print as pprint
 
 import torch
 import numpy as np
-import visual_graph_datasets.typing as tv
 import pytorch_lightning as pl
 from torch_geometric.loader import DataLoader
 
@@ -114,8 +113,6 @@ def test_megan_leave_one_out_deviations(num_graphs, node_dim, edge_dim, output_d
         num_edge_attributes=edge_dim,
     )
     
-    data_list = data_list_from_graphs(graphs)
-    loader = DataLoader(data_list, batch_size=32, shuffle=False)
     model = Megan(
         node_dim=node_dim,
         edge_dim=edge_dim,
@@ -150,7 +147,6 @@ def test_megan_classification_explanation_training_works(num_graphs, node_dim, e
     consequently 3 explanations.
     """
     # ~ test configuration
-    num_channels = 2
     embedding_dim = 32
 
     graphs = get_mock_graphs(
@@ -195,7 +191,6 @@ def test_megan_regression_explanation_training_works(num_graphs, node_dim, edge_
     consequently 2 explanations (negative and positive).
     """
     # ~ test configuration
-    num_channels = 2
     embedding_dim = 32
     output_dim = 1
 
@@ -203,6 +198,7 @@ def test_megan_regression_explanation_training_works(num_graphs, node_dim, edge_
         num=num_graphs,
         num_node_attributes=node_dim,
         num_edge_attributes=edge_dim,
+        num_outputs=output_dim,
     )
     # Giving each graph an actual target value for the regression
     for graph in graphs:
@@ -245,7 +241,7 @@ def test_megan_training_works(num_graphs, node_dim, edge_dim, num_channels):
         num=num_graphs,
         num_node_attributes=node_dim,
         num_edge_attributes=edge_dim,
-        num_outputs=1,
+        num_outputs=output_dim,
     )
     data_list = data_list_from_graphs(graphs)
     loader = DataLoader(data_list, batch_size=32, shuffle=False)
@@ -275,10 +271,7 @@ def test_megan_basically_works(num_graphs, node_dim, edge_dim, num_channels):
         num=num_graphs,
         num_node_attributes=node_dim,
         num_edge_attributes=edge_dim,
-    )
-    data_list = data_list_from_graphs(graphs)
-    loader = DataLoader(data_list, batch_size=num_graphs, shuffle=False)
-    
+    )    
     output_dim = 1
     embedding_dim = 32
     model = Megan(
@@ -301,8 +294,7 @@ def test_megan_basically_works(num_graphs, node_dim, edge_dim, num_channels):
     for graph, result in zip(graphs, results):
         
         num_nodes = len(graph['node_attributes'])
-        num_edges = len(graph['edge_attributes'])
-        
+                
         assert isinstance(result, dict)
         assert len(result) != 0
         

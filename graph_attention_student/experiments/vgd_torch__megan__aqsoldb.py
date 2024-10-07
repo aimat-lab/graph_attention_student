@@ -5,7 +5,6 @@ visual graph dataset.
 This experiment specifically implements the AqSolDB dataset which is a dataset for predicting the 
 experimentally measured values for the water solubility of compounds.
 """
-import os
 import typing as t
 
 import numpy as np
@@ -61,7 +60,7 @@ TARGET_NAMES: t.Dict[int, str] = {
 #       This list determines the layer structure of the model's graph encoder part. Each element in 
 #       this list represents one layer, where the integer value determines the number of hidden units 
 #       in that layer of the encoder network.
-UNITS: t.List[int] = [128, 128, 128, 128]
+UNITS: t.List[int] = [64, 64, 64, 64]
 # :param HIDDEN_UNITS:
 #       This integer value determines the number of hidden units in the model's graph attention layer's
 #       transformative dense networks that are used for example to perform the message update and to 
@@ -75,14 +74,14 @@ IMPORTANCE_UNITS: t.List[int] = [ ]
 #       This list determines the layer structure of the MLP's that act as the channel-specific projections.
 #       Each element in this list represents one layer where the integer value determines the number of hidden
 #       units in that layer.
-PROJECTION_UNITS: t.List[int] = [128, 128]
+PROJECTION_UNITS: t.List[int] = [64, 128, 256]
 # :param FINAL_UNITS:
 #       This list determines the layer structure of the model's final prediction MLP. Each element in 
 #       this list represents one layer, where the integer value determines the number of hidden units 
 #       in that layer of the prediction network.
 #       Note that the last value of this list determines the output shape of the entire network and 
 #       therefore has to match the number of target values given in the dataset.
-FINAL_UNITS: t.List[int] = [128, 1]
+FINAL_UNITS: t.List[int] = [64, 1]
 # :param NUM_CHANNELS:
 #       The number of explanation channels for the model.
 NUM_CHANNELS: int = 2
@@ -91,10 +90,12 @@ NUM_CHANNELS: int = 2
 #       Roughly, the higher this value, the more the model will prioritize the explanations during training.
 IMPORTANCE_FACTOR: float = 1.0
 # :param IMPORTANCE_OFFSET:
-#       This parameter more or less controls how expansive the explanations are - how much of the graph they
-#       tend to cover. Higher values tend to lead to more expansive explanations while lower values tend to 
-#       lead to sparser explanations. Typical value range 0.5 - 1.5
-IMPORTANCE_OFFSET: float = 0.7
+#       This parameter controls the sparsity of the explanation masks even more so than the sparsity factor.
+#       It basically provides the upper limit of how many nodes/edges need to be activated for a channel to 
+#       be considered as active. The higher this value, the less sparse the explanations will be.
+#       Typical values range from 0.2 - 2.0 but also depend on the graph size and the specific problem at 
+#       hand. This is a parameter with which one has to experiment until a good trade-off is found!
+IMPORTANCE_OFFSET: float = 1.0
 # :param FIDELITY_FACTOR:
 #       This parameter controls the coefficient of the explanation fidelity loss during training. The higher
 #       this value, the more the model will be trained to create explanations that actually influence the
@@ -117,7 +118,7 @@ ATTENTION_AGGREGATION: str = 'max'
 #       explanation co-training, this determines the margin for the thresholding. Instead of using the regression
 #       reference as a hard threshold, values have to be at least this margin value lower/higher than the 
 #       regression reference to be considered a class sample.
-REGRESSION_MARGIN: t.Optional[float] = +0.1
+REGRESSION_MARGIN: t.Optional[float] = +0.2
 # :param CONTRASTIVE_FACTOR:
 #       This is the factor of the contrastive representation learning loss of the network. If this value is 0 
 #       the contrastive repr. learning is completely disabled (increases computational efficiency). The higher 
@@ -126,13 +127,13 @@ CONTRASTIVE_FACTOR: float = 0.0
 # :param CONTRASTIVE_NOISE:
 #       This float value determines the noise level that is applied when generating the positive augmentations 
 #       during the contrastive learning process.
-CONTRASTIVE_NOISE: float = 0.2
+CONTRASTIVE_NOISE: float = 0.1
 # :param CONTRASTIVE_TAU:
 #       This float value is a hyperparameters of the de-biasing improvement of the contrastive learning loss. 
 #       This value should be chosen as roughly the inverse of the number of expected concepts. So as an example 
 #       if it is expected that each explanation consists of roughly 10 distinct concepts, this should be chosen 
 #       as 1/10 = 0.1
-CONTRASTIVE_TAU: float = 0.05
+CONTRASTIVE_TAU: float = 0.1
 # :param CONTRASTIVE_TEMP:
 #       This float value is a hyperparameter that controls the "temperature" of the contrastive learning loss.
 #       The higher this value, the more the contrastive learning will be smoothed out. The lower this value,
@@ -144,7 +145,7 @@ CONTRASTIVE_TEMP: float = 1.0
 CONTRASTIVE_BETA: float = 1.0
 
 EPOCHS: int = 100
-BATCH_SIZE: int = 64
+BATCH_SIZE: int = 100
 LEARNING_RATE = 1e-4
 
 __DEBUG__ = True
@@ -171,10 +172,12 @@ def target_from_metadata(e: Experiment,
     """
     return metadata['graph']['graph_labels']
 
+
 @experiment.testing
 def testing(e: Experiment):
     e.log('TESTING MODE')
     e.NUM_EXAMPLE = 10
     e.EPOCHS = 3
+
 
 experiment.run_if_main()

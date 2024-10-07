@@ -1,8 +1,6 @@
-import os
 import typing as t
 
 import torch
-import torch.nn as nn
 import numpy as np
 import visual_graph_datasets.typing as tv
 import pytorch_lightning as pl

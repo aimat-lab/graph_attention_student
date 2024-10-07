@@ -1,14 +1,11 @@
 import os
-import pytest
 
-import tensorflow as tf
 import numpy as np
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 
 from visual_graph_datasets.data import load_visual_graph_element
 from visual_graph_datasets.visualization.base import draw_image
-from visual_graph_datasets.visualization.importances import plot_edge_importances_border
 from visual_graph_datasets.visualization.importances import plot_node_importances_border
 
 from graph_attention_student.util import get_version
@@ -99,29 +96,4 @@ def test_update_nested_dict():
     assert len(merged['nesting1']) == 2
     assert len(merged['nesting2']) == 1
     assert merged['nesting2']['value_original'] == 20
-    
-    
-def test_tensor_matrix_multiplication():
-    """
-    Understanding how to do matrix multiplication for graph embedding tensors.
-    """
-    tens = tf.random.normal((32, 16))
-    tens_expanded = tf.expand_dims(tens, axis=-2)
-    
-    product = tf.reduce_sum(tens * tens_expanded, axis=-1)
-    product_array = product.numpy()
-    print(product_array.shape)
-    
-    fig, (ax_1, ax_2) = plt.subplots(ncols=2, nrows=1, figsize=(20, 10))
-    ax_1.set_title('self product matrix')
-    ax_1.imshow(product_array)
-    
-    # I also need to create a diagonal "eye matrix" with thesame shape to be able to block out all the 
-    # auto terms in that result
-    eye = 1 - tf.eye(num_rows=product.shape[0], num_columns=product.shape[0])
-    eye_array = eye.numpy()
-    ax_2.set_title('self product matrix - eye window')
-    ax_2.imshow(eye_array)
-    
-    fig.savefig(os.path.join(ARTIFACTS_PATH, 'test_tensor_matrix_multiplication.pdf'))
     

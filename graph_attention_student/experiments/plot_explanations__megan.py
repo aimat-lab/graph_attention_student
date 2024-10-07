@@ -1,9 +1,7 @@
 import os
-import pathlib
 import typing as t
 
 import numpy as np
-import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import matplotlib.colors as mcolors
 from graph_attention_student.visualization import truncate_colormap
@@ -13,7 +11,6 @@ from visual_graph_datasets.visualization.importances import create_combined_impo
 
 from graph_attention_student.torch.megan import Megan
 from graph_attention_student.utils import fidelity_from_deviation
-from graph_attention_student.visualization import truncate_colormap
 
 # == DATASET PARAMETERS ==
 # This section contains the parameters which determine the dataset and how to handle said dataset.

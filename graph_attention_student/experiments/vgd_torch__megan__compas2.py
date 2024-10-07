@@ -5,11 +5,9 @@ visual graph dataset.
 This experiment specifically implements the AqSolDB dataset which is a dataset for predicting the 
 experimentally measured values for the water solubility of compounds.
 """
-import os
 import numpy as np
 import typing as t
 
-from sklearn.linear_model import LinearRegression
 from pycomex.functional.experiment import Experiment
 from pycomex.utils import file_namespace, folder_path
 
@@ -62,7 +60,7 @@ TARGET_NAMES: t.Dict[int, str] = {
 #       This list determines the layer structure of the model's graph encoder part. Each element in 
 #       this list represents one layer, where the integer value determines the number of hidden units 
 #       in that layer of the encoder network.
-UNITS: t.List[int] = [64, 64, 64, 64, 64]
+UNITS: t.List[int] = [64, 64, 64, 64]
 # :param IMPORTANCE_UNITS:
 #       This list determines the layer structure of the importance MLP which determines the node importance 
 #       weights from the node embeddings of the graph. 
@@ -71,14 +69,14 @@ IMPORTANCE_UNITS: t.List[int] = [ ]
 #       This list determines the layer structure of the MLP's that act as the channel-specific projections.
 #       Each element in this list represents one layer where the integer value determines the number of hidden
 #       units in that layer.
-PROJECTION_UNITS: t.List[int] = [64,128]
+PROJECTION_UNITS: t.List[int] = [64, 128, 256]
 # :param FINAL_UNITS:
 #       This list determines the layer structure of the model's final prediction MLP. Each element in 
 #       this list represents one layer, where the integer value determines the number of hidden units 
 #       in that layer of the prediction network.
 #       Note that the last value of this list determines the output shape of the entire network and 
 #       therefore has to match the number of target values given in the dataset.
-FINAL_UNITS: t.List[int] = [128, 1]
+FINAL_UNITS: t.List[int] = [64, 1]
 # :param NUM_CHANNELS:
 #       The number of explanation channels for the model.
 NUM_CHANNELS: int = 2
@@ -87,10 +85,12 @@ NUM_CHANNELS: int = 2
 #       Roughly, the higher this value, the more the model will prioritize the explanations during training.
 IMPORTANCE_FACTOR: float = 1.0
 # :param IMPORTANCE_OFFSET:
-#       This parameter more or less controls how expansive the explanations are - how much of the graph they
-#       tend to cover. Higher values tend to lead to more expansive explanations while lower values tend to 
-#       lead to sparser explanations. Typical value range 0.5 - 1.5
-IMPORTANCE_OFFSET: float = 0.25
+#       This parameter controls the sparsity of the explanation masks even more so than the sparsity factor.
+#       It basically provides the upper limit of how many nodes/edges need to be activated for a channel to 
+#       be considered as active. The higher this value, the less sparse the explanations will be.
+#       Typical values range from 0.2 - 2.0 but also depend on the graph size and the specific problem at 
+#       hand. This is a parameter with which one has to experiment until a good trade-off is found!
+IMPORTANCE_OFFSET: float = 0.5
 # :param SPARSITY_FACTOR:
 #       This is the coefficient that is used to scale the explanation sparsity loss during training.
 #       The higher this value the more explanation sparsity (less and more discrete explanation masks)
@@ -134,7 +134,7 @@ CONTRASTIVE_FACTOR: float = 0.0
 # :param CONTRASTIVE_NOISE:
 #       This float value determines the noise level that is applied when generating the positive augmentations 
 #       during the contrastive learning process.
-CONTRASTIVE_NOISE: float = 0.2
+CONTRASTIVE_NOISE: float = 0.1
 # :param CONTRASTIVE_TAU:
 #       This float value is a hyperparameters of the de-biasing improvement of the contrastive learning loss. 
 #       This value should be chosen as roughly the inverse of the number of expected concepts. So as an example 
@@ -151,10 +151,10 @@ CONTRASTIVE_TEMP: float = 1.0
 #       parameter. It determines how much the contrastive loss is focused on the hardest negative samples.
 CONTRASTIVE_BETA: float = 1.0
 
-DO_CLUSTERING = False
+DO_CLUSTERING = True
 
 EPOCHS: int = 50
-BATCH_SIZE: int = 32
+BATCH_SIZE: int = 64
 LEARNING_RATE = 1e-4
 
 __DEBUG__ = True

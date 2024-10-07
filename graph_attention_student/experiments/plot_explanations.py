@@ -5,8 +5,6 @@ import random
 import typing as t
 
 import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib.cm as cm
 from pycomex.functional.experiment import Experiment
 from pycomex.utils import file_namespace, folder_path
 from visual_graph_datasets.config import Config
@@ -15,7 +13,6 @@ from visual_graph_datasets.data import VisualGraphDatasetReader
 from visual_graph_datasets.data import VisualGraphDatasetWriter
 from visual_graph_datasets.processing.base import ProcessingBase
 from visual_graph_datasets.visualization.importances import create_importances_pdf
-from visual_graph_datasets.visualization.importances import create_combined_importances_pdf
 from visual_graph_datasets.visualization.importances import plot_node_importances_background
 from visual_graph_datasets.visualization.importances import plot_edge_importances_background
 

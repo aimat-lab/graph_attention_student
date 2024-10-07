@@ -6,8 +6,9 @@ import os
 import logging
 import tempfile
 import typing as t
+import typing as typ
 from collections import defaultdict
-from typing import List, Dict, Callable, Optional
+from typing import List, Callable, Optional
 
 import imageio.v2 as imageio
 import numpy as np
@@ -20,7 +21,7 @@ from matplotlib.colors import LinearSegmentedColormap
 from imageio.v2 import imread
 
 from graph_attention_student.utils import NULL_LOGGER
-from graph_attention_student.typing import GraphDict, RgbList
+from graph_attention_student.typing import GraphDict
 
 
 reds_cmap: mcolors.Colormap = mcolors.LinearSegmentedColormap.from_list(
@@ -241,13 +242,13 @@ def create_embeddings_pdf(embeddings: np.ndarray,
     if num_dimensions == 3:
         z_min, z_max = np.min(embeddings[:, :, 2]), np.max(embeddings[:, :, 2])
     
-    axs: t.List[plt.Axes] = []
+    axs: typ.List[plt.Axes] = []
     logger.info('plotting embeddings...')
     with PdfPages(output_path) as pdf, tempfile.TemporaryDirectory() as tmp_path:
         
         # In this structure we will collect the absolute string paths to the PNG images that act as the individual frames 
         # for the potential animation. These frames will be stored in the tmp_path
-        frame_paths: t.List[str] = []
+        frame_paths: typ.List[str] = []
         
         for t in range(num_steps):
             fig = plt.figure(figsize=(10, 10))
@@ -618,7 +619,7 @@ def pdf_from_eye_tracking_dataset(eye_tracking_dataset: List[dict],
                 ax_img.set_title(f'Target: {label}')
 
             # The second graph is supposed to show the ground truth importances, if they exist
-            ax_exp.set_title(f'Ground Truth Importances')
+            ax_exp.set_title('Ground Truth Importances')
             ax_exp.imshow(array, extent=(0, array.shape[0], 0, array.shape[1]))
             if 'node_importances' in g:
                 plot_node_importances(

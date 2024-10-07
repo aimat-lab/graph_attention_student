@@ -5,13 +5,11 @@ visual graph dataset.
 This experiment specifically implements the AqSolDB dataset which is a dataset for predicting the 
 experimentally measured values for the water solubility of compounds.
 """
-import os
 import typing as t
 
 import numpy as np
 from pycomex.functional.experiment import Experiment
 from pycomex.utils import file_namespace, folder_path
-from graph_attention_student.utils import EXPERIMENTS_PATH
 
 # == DATASET PARAMETERS ==
 # The following parameters determine the dataset and how to handle said dataset.
@@ -87,9 +85,11 @@ NUM_CHANNELS: int = 2
 #       Roughly, the higher this value, the more the model will prioritize the explanations during training.
 IMPORTANCE_FACTOR: float = 1.0
 # :param IMPORTANCE_OFFSET:
-#       This parameter more or less controls how expansive the explanations are - how much of the graph they
-#       tend to cover. Higher values tend to lead to more expansive explanations while lower values tend to 
-#       lead to sparser explanations. Typical value range 0.5 - 1.5
+#       This parameter controls the sparsity of the explanation masks even more so than the sparsity factor.
+#       It basically provides the upper limit of how many nodes/edges need to be activated for a channel to 
+#       be considered as active. The higher this value, the less sparse the explanations will be.
+#       Typical values range from 0.2 - 2.0 but also depend on the graph size and the specific problem at 
+#       hand. This is a parameter with which one has to experiment until a good trade-off is found!
 IMPORTANCE_OFFSET: float = 5.0
 # :param SPARSITY_FACTOR:
 #       This is the coefficient that is used to scale the explanation sparsity loss during training.
