@@ -21,16 +21,18 @@ jobs:
     - name: Install dependencies
       run: |
         pip install -U pip
-        pip install poetry
+        pip install poetry wheel
         pip install torch==2.2.0+cpu --index-url https://download.pytorch.org/whl/cpu
+        pip install torch-scatter -f https://data.pyg.org/whl/torch-2.2.0+cpu.html
+        pip install torch-geometric>=2.4.0 -f https://data.pyg.org/whl/torch-2.2.0+cpu.html
         pip install --no-build-isolation .
 
     - name: Lint with Ruff
       run: |
         pip install ruff
-        ruff check .
+        ruff check --fix .
 
     - name: Run tests
       run: |
         pip install pytest
-        python -m unittest discover -s tests
+        pytest tests/

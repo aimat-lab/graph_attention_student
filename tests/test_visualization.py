@@ -2,15 +2,10 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 
-from graph_attention_student.testing import get_mock_graphs
 
-from graph_attention_student.visualization import plot_distribution
-from graph_attention_student.visualization import plot_regression_fit
-from graph_attention_student.visualization import plot_leave_one_out_analysis
 from graph_attention_student.visualization import plot_regression_value_distribution
 
 from .util import ARTIFACTS_PATH
-from .util import save_fig
 
 
 def test_plot_regression_value_distribution():
