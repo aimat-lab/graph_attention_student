@@ -1,4 +1,5 @@
 import typing as t
+from typing import List, Tuple
 
 import torch
 import numpy as np
@@ -77,9 +78,9 @@ class AbstractGraphModel(pl.LightningModule):
         raise NotImplementedError('Please implement the "forward" method for the custom model')
     
     def forward_graphs(self,
-                       graphs: t.List[tv.GraphDict],
+                       graphs: List[tv.GraphDict],
                        batch_size: int = 1_000,
-                       ) -> t.List[dict]:
+                       ) -> List[dict]:
         """
         Given a list ``graphs`` of graph dict objects, this method runs the forward pass of the model for 
         all of them. Returns a list of dictionaries that contain all the outputs of the forward method.
@@ -103,7 +104,7 @@ class AbstractGraphModel(pl.LightningModule):
         # This will be the data structure that holds all the results of the inference process. Each element 
         # in this list will be a dictionary holding all the information for one graph in the given list of 
         # graphs - having the same order as that list.
-        results: t.List[dict] = []
+        results: List[dict] = []
         for data in loader:
             # This is the actual size of the CURRENT batch. Usually this will be the same as the given batch 
             # size, but if the number of graphs is not exactly divisible by that number, it CAN be different!
@@ -156,7 +157,7 @@ class AbstractGraphModel(pl.LightningModule):
         return self.forward_graphs([graph], batch_size=1)[0]
     
     def predict_graphs(self, 
-                       graphs: t.List[tv.GraphDict], 
+                       graphs: List[tv.GraphDict], 
                        batch_size: int = BATCH_SIZE,
                        ) -> np.ndarray:
         """
@@ -270,7 +271,7 @@ class AbstractGraphModel(pl.LightningModule):
         }, path)
     
     def _loader_from_graphs(self,
-                            graphs: t.List[tv.GraphDict], 
+                            graphs: List[tv.GraphDict], 
                             batch_size: int
                             ) -> DataLoader:
         """
@@ -286,3 +287,114 @@ class AbstractGraphModel(pl.LightningModule):
         data_list = data_list_from_graphs(graphs)
         loader = DataLoader(data_list, batch_size=batch_size, shuffle=False)
         return loader
+    
+    
+    
+class UncertaintyEstimatorMixin:
+    """
+    This mixin provides a method for estimating the uncertainty of graph predictions.
+
+    It assumes that the model, when used with the ``forward_graphs`` method,
+    returns a dictionary containing a "graph_uncertainty" field, which is a
+    tensor of shape (1,) representing the uncertainty estimate for the
+    corresponding graph prediction.
+    """
+    
+    def estimate_uncertainty_graphs(self, graphs: List[dict]) -> np.ndarray:
+        """
+        Estimates the uncertainty for a list of graphs.
+
+        This method relies on the ``forward_graphs`` method (provided by the
+        ``AbstractGraphModel`` class) to compute the model's output for each graph.
+        It extracts the "graph_uncertainty" value from the output dictionary,
+        which is assumed to be a tensor of shape (1,) representing the
+        uncertainty estimate for the corresponding graph prediction.
+
+        :param graphs: A list of graph dictionaries, where each dictionary represents a single graph.
+        :type graphs: List[dict]
+        :return: A NumPy array containing the uncertainty estimates for each graph.
+            The array has the same length as the input ``graphs`` list.
+        :rtype: np.ndarray
+        """ 
+        # The subclass which implements this mixin also has to be a AbstractGraphModel at the same time
+        # and therefore implement the forward_graphs method. This method returns a dict containing 
+        # the model outputs for the given list of graphs.
+        self: AbstractGraphModel
+        results: List[dict] = self.forward_graphs(graphs)
+        # As part of the requirements we assume that these results will contain the additional field 
+        # "graph_uncertainty" which is a tensor of the shape (1, ) that contains the uncertainty estimate 
+        # for the corresponding graph prediction.
+        
+        uncertainties: List[float] = [float(result['graph_uncertainty']) for result in results]
+        
+        return np.array(uncertainties)
+    
+    def _combine_importances(self, 
+                            importances: List[torch.Tensor], 
+                            strategy: str = 'discount'
+                            ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Combines the given list of ``importances`` explanation masks (either on nodes or edges) into 
+        a single importance mask depending on the chosen ``strategy``. Returns a tuple of 3 arrays 
+        (importances_combined, importances_mean, importances_std) where: 
+        - importances_combined: The combined importance mask
+        - importances_mean: The mean of the importance values
+        - importances_std: The standard deviation of the importance values
+        
+        :param importances: A list of numpy arrays of shape (num_variants, num_nodes, num_importances)
+            or (num_variants, num_edges, num_importances) that contain the importance values for the
+            nodes or edges of the graph.
+        :param strategy: The strategy to use for combining the importance values. Can be either 'discount'
+            or 'mean'.
+        
+        :returns: A tuple of 3 numpy arrays (importances_combined, importances_mean, importances_std)
+        """
+        
+        if isinstance(importances, list):
+            importances = torch.stack(importances, dim=0)
+        
+        # At first we are going to compute the mean and the standard variation for the importance
+        # values. These will be the two aggregations that we always compute and return regardless of 
+        # the combination strategy.
+        importances_mean = torch.mean(importances, dim=0)
+        importances_std = torch.std(importances, dim=0)
+        
+        # importances_combined: (num_nodes, num_importances)
+        importances_combined: torch.Tensor
+        if strategy == 'discount':
+            # The discount strategy is implemented as follows:
+            # 1. We compute the mean and standard deviation of the importances for each node.
+            # 2. We compute a discount factor for each node based on its standard deviation.
+            #    The discount factor is a value between 0 and 1, where 0 means that the node
+            #    is completely discounted and 1 means that the node is not discounted at all.
+            # 3. We multiply the mean importance of each node by its discount factor.
+            #    This gives us a discounted importance value for each node.
+            # 4. We return the discounted importance values.
+            
+            # The discount factor is computed as follows:
+            # discount = 1 - (std / max_std)
+            # where:
+            # - std is the standard deviation of the importances for the node
+            # - max_std is the maximum standard deviation of the importances for all nodes
+            
+            max_std = torch.max(importances_std) + 1e-6
+            
+            # In the rare case that the max_std is zero we dont want to divide by zero.
+            discount = 1 - (importances_std / max_std)
+            
+            importances_combined = importances_mean * discount
+        
+        elif strategy == 'mean':
+            importances_combined = importances_mean
+            
+        elif strategy == 'min':
+            importances_combined = torch.min(importances, dim=0).values
+        
+        elif strategy == 'max':
+            importances_combined = torch.max(importances, dim=0).values
+        
+        else:
+            raise ValueError(f'Unknown combination strategy: {strategy}')
+        
+        # at the end we return the combined importances, the mean and the standard deviation
+        return importances_combined, importances_mean, importances_std

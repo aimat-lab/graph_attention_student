@@ -16,18 +16,23 @@ elements in the dataset that are the closest to the cluster centroids.
 import os
 import tempfile
 import typing as t
+from typing import List, Optional
 
+import torch
 import hdbscan
 import numpy as np
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import pytorch_lightning as pl
+from rich.pretty import pprint
 from matplotlib.backends.backend_pdf import PdfPages
 from pycomex.functional.experiment import Experiment
 from pycomex.utils import folder_path, file_namespace
 from sklearn.neighbors import NearestNeighbors
 from sklearn.metrics import pairwise_distances
+from sklearn.metrics import r2_score
+from sklearn.metrics import mean_absolute_error
 from torch_geometric.loader import DataLoader
 from lightning.pytorch.loggers import CSVLogger
 from visual_graph_datasets.visualization.importances import create_importances_pdf
@@ -35,6 +40,7 @@ from visual_graph_datasets.visualization.importances import plot_node_importance
 from visual_graph_datasets.visualization.importances import plot_edge_importances_background
 from visual_graph_datasets.visualization.base import draw_image
 
+from graph_attention_student.visualization import plot_regression_fit
 from graph_attention_student.visualization import generate_contrastive_colors
 from graph_attention_student.visualization import plot_embeddings_3d
 from graph_attention_student.visualization import plot_embeddings_2d
@@ -42,7 +48,12 @@ from graph_attention_student.visualization import plot_leave_one_out_analysis
 from graph_attention_student.torch.data import data_list_from_graphs
 from graph_attention_student.torch.model import AbstractGraphModel
 from graph_attention_student.torch.megan import Megan
+from graph_attention_student.torch.megan import MveCallback
 from graph_attention_student.torch.utils import SwaCallback
+from sklearn.metrics import accuracy_score, f1_score, confusion_matrix
+import seaborn as sns
+
+mpl.use('Agg')
 
 # == MODEL PARAMETERS ==
 # The following parameters configure the model architecture.
@@ -160,7 +171,7 @@ ATTENTION_AGGREGATION: str = 'max'
 #       This is the factor of the contrastive representation learning loss of the network. If this value is 0 
 #       the contrastive repr. learning is completely disabled (increases computational efficiency). The higher 
 #       this value the more the contrastive learning will influence the network during training.
-CONTRASTIVE_FACTOR: float = 1.0
+CONTRASTIVE_FACTOR: float = 0.0
 # :param CONTRASTIVE_NOISE:
 #       This float value determines the noise level that is applied when generating the positive augmentations 
 #       during the contrastive learning process.
@@ -185,6 +196,17 @@ CONTRASTIVE_TAU: float = 0.1
 #       durign the model training. Changing this from 1.0 should usually not be necessary except for regression
 #       tasks with a vastly different target value scale.
 PREDICTION_FACTOR: float = 1.0
+# :param TRAIN_MVE:
+#       This boolean determines whether or not the (regression) model should be trained as a mean variance estimator
+#       (MVE) model. This would mean that the model predicts the mean and the variance of the target value distribution
+#       instead of just the mean. This is useful for regression tasks where the target values are not deterministic
+#       but have a certain variance/noise.
+TRAIN_MVE: bool = True
+# :param MVE_WARMUP_EPOCHS:
+#       This integer determines how many epochs the model should be trained normally (MSE loss) before switching on 
+#       the NLL loss to train the variance as well. In general it is recommended to fully converge a model on the 
+#       normal loss before switching to the NLL loss.
+MVE_WARMUP_EPOCHS: int = 50
 
 # == VISUALIZATION PARAMETERS ==
 # The following parameters configure the visualization of the model and the dataset.
@@ -194,6 +216,10 @@ PREDICTION_FACTOR: float = 1.0
 #       be performed or not. If this is set to False, the clustering analysis will be skipped. When setting this 
 #       to True, be aware that the clustering analysis will take a lot of time and memory for large datasets!
 DO_CLUSTERING: bool = True
+# :param EXAMPLE_VALUES:
+#       Optionally this defines a list of graphs in their domain string representatation which can be 
+#       used to be plotted as example graphs during each epoch of the training process.
+EXAMPLE_VALUES: List[str] = []
 
 # == TRAINING PARAMETERS ==
 # These parameters configure the training process itself, such as how many epochs to train 
@@ -204,7 +230,15 @@ DO_CLUSTERING: bool = True
 #       before applying an optimization step. Batch gradient accumulation is a method to simulate 
 #       a larger batch size if there isn't enough memory available to increase the batch size 
 #       itself any further. The effective batch size will be BATCH_SIZE * BATCH_ACCUMULATE.
-BATCH_ACCUMULATE: int = 2
+BATCH_ACCUMULATE: int = 1
+
+# :param LR_SCHEDULER:
+#       This string literal determines the learning rate scheduler that is used during the training
+#       process. The following values are possible: 'cyclic', None
+#       None will not apply a learning rate scheduler at all. 'cyclic' will apply a cyclic learning
+#       rate scheduler that will cycle the learning rate between the given LEARNING_RATE and 
+#       20 * LEARNING_RATE with a period of 10 epochs.
+LR_SCHEDULER: Optional[str] = 'cyclic'
 
 # NOTE: Using SWA is currently NOT recommended because while it seems to stabilize the prediction 
 #       performance of the model, it also seems to have a negative impact on the explanation quality
@@ -233,160 +267,337 @@ experiment = Experiment.extend(
 
 @experiment.hook('train_model', default=False, replace=True)
 def train_model(e: Experiment,
-                rep: int,
                 index_data_map: dict,
                 train_indices: t.List[int],
                 test_indices: t.List[int],
+                val_indices: t.List[int],
                 **kwargs,
                 ) -> t.Tuple[AbstractGraphModel, pl.Trainer]:
-        """
-        This hook gets called to actually construct and train a model during the main training loop. This hook 
-        receives the full dataset in the format of the index_data_map as well as the train test split in the format 
-        of the train_indices and test_indices. The hook is supposed to return a tuple (model, trainer) that were 
-        used for the training process.
-        
-        In this implementation a ``Megan`` model is trained. Besides the main property prediction task, this 
-        megan model is also trained to generate a set of explanations about that task at the same time by using the 
-        approximative explanation co-training procedure.
-        """
-        e.log('preparing data for training...')
-        graphs_train = [index_data_map[i]['metadata']['graph'] for i in train_indices]
-        graphs_test = [index_data_map[i]['metadata']['graph'] for i in test_indices]
-        
-        train_loader = DataLoader(data_list_from_graphs(graphs_train), batch_size=e.BATCH_SIZE, shuffle=True)
-        test_loader = DataLoader(data_list_from_graphs(graphs_test), batch_size=e.BATCH_SIZE, shuffle=False)
-        
-        class RecordEmbeddingsCallback(pl.Callback):
+    """
+    This hook gets called to actually construct and train a model during the main training loop. This hook 
+    receives the full dataset in the format of the index_data_map as well as the train test split in the format 
+    of the train_indices and test_indices. The hook is supposed to return a tuple (model, trainer) that were 
+    used for the training process.
     
-            def on_train_epoch_start(self, trainer: pl.Trainer, pl_module: Megan):
-                
-                # Linearly ramp up the contrastive factor
-                max_epochs = trainer.max_epochs
-                current_epoch = trainer.current_epoch
-                pl_module.contrastive_factor = e.CONTRASTIVE_FACTOR * (current_epoch / max_epochs)
+    In this implementation a ``Megan`` model is trained. Besides the main property prediction task, this 
+    megan model is also trained to generate a set of explanations about that task at the same time by using the 
+    approximative explanation co-training procedure.
+    """
+    e.log('preparing data for training...')
+    graphs_train = [index_data_map[i]['metadata']['graph'] for i in train_indices]
+    graphs_test = [index_data_map[i]['metadata']['graph'] for i in test_indices]
+    graphs_val = [index_data_map[i]['metadata']['graph'] for i in val_indices]
     
-            def on_train_epoch_end(self, trainer: pl.Trainer, pl_module: Megan):
+    train_loader = DataLoader(
+        data_list_from_graphs(graphs_train), 
+        batch_size=e.BATCH_SIZE, 
+        shuffle=True,
+        #persistent_workers=False,
+    )
+    test_loader = DataLoader(
+        data_list_from_graphs(graphs_test), 
+        batch_size=e.BATCH_SIZE, 
+        shuffle=False,
+        #persisetent_workers=False,
+    )
+     
+    example_indices = test_indices[:8]
+    example_graphs = [index_data_map[i]['metadata']['graph'] for i in example_indices]
+     
+    class TrainingCallback(pl.Callback):
+        
+        def on_keyboard_interrupt(self, trainer: pl.Trainer, pl_module: Megan):
+            print('keyboard interrupt...')
+            trainer.should_stop = True
+        
+        def on_train_epoch_end(self, trainer: pl.Trainer, pl_module: Megan):
+            
+            device = pl_module.device
+            pl_module.eval()
+            pl_module.to('cpu')
+            
+            # ~ metric tracking
+            # This method will track all the metrics that are being stored into the trainer's metrics
+            # dictionary. This will save the metrics into the experiment and automatically create plots
+            # for each of them at the end of the experiment runtime.
+            self.track_metrics(trainer, pl_module)
+            
+            # ~ example tracking
+            # This method will evaluate the model prediction and explanation on the chosen example graphs
+            # and will create a plot that visualizes the model's behavior on these examples
+            self.track_examples(trainer, pl_module)
+            
+            metrics = self.track_validation(trainer, pl_module)
+            e.track_many(metrics)
+            
+            e.log(f'epoch {trainer.current_epoch} - model evaluation'
+                  f' - {" - ".join([f"{key}: {value:.2f}" for key, value in metrics.items()])}')
+            pl_module.train()
+            pl_module.to(device)
+            
+        def track_validation(self, trainer: pl.Trainer, pl_module: Megan):
+            
+            model = pl_module
+            results: List[dict] = model.forward_graphs(graphs_val)
+            
+            values_true = np.array([graph['graph_labels'] for graph in graphs_val])
+            values_pred = np.array([result['graph_output'] for result in results])
+            
+            appox_true, approx_pred = model._predict_approximate(
+                results=results,
+                values_true=values_true
+            )
+            acc_approx_value = np.mean(appox_true == np.round(approx_pred))
+            
+            if e.DATASET_TYPE == 'regression':
+                # calculating the metrics
+                r2_value = r2_score(values_true, values_pred)
+                mae_value = mean_absolute_error(values_true, values_pred)
                 
-                # We only want to record the embeddings when the embedding dimension is 2 or 3 because 
-                # everything else, we cant't really visualize anyways.
-                if pl_module.embedding_dim <= 3:
+                # regression plot
+                fig, ax = plt.subplots(ncols=1, nrows=1, figsize=(8, 8))
+                plot_regression_fit(
+                    values_true, values_pred,
+                    ax=ax,
+                )
+                ax.set_title(f'Target\n'
+                             f'R2: {r2_value:.3f} - MAE: {mae_value:.3f}')
+                e.track('val_regression', fig)
+                
+                plt.close('all')
+                
+                return {'r2': r2_value, 'mae': mae_value, 'approx': acc_approx_value}
+            
+            if e.DATASET_TYPE == 'classification':
+                # calculating metrics
+                values_true = np.argmax(values_true, axis=1)
+                values_pred = np.argmax(values_pred, axis=1)
+                
+                acc_value = accuracy_score(values_true, values_pred)
+                f1_value = f1_score(values_true, values_pred, average='macro')
+                
+                # Confusion matrix
+                cm = confusion_matrix(values_true, values_pred)
+                fig, ax = plt.subplots(figsize=(8, 6))
+                sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax)
+                ax.set_xlabel('Predicted Labels')
+                ax.set_ylabel('True Labels')
+                ax.set_title('Confusion Matrix')
+                e.track('val_confusion_matrix', fig)
+                plt.close('all')
+                
+                return {'accuracy': acc_value, 'f1': f1_value, 'approx': acc_approx_value}
+                
+            
+        def track_examples(self, trainer: pl.Trainer, pl_module: Megan):
+            
+            fig, rows = plt.subplots(
+                ncols=len(example_indices),
+                nrows=e.NUM_CHANNELS,
+                figsize=(8 * len(example_indices), 8 * e.NUM_CHANNELS),
+                squeeze=False
+            )
+            fig.suptitle(f'Examples - Epoch {trainer.current_epoch}')
+            
+            model = pl_module        
+            results: List[dict] = model.forward_graphs(example_graphs)
+            
+            for c, (index, graph, result) in enumerate(zip(example_indices, example_graphs, results)):
+                
+                out_pred = result['graph_output']
+                out_true = graph['graph_labels']
+                
+                for k in range(e.NUM_CHANNELS):
                     
-                    # We want to query the model with the entire test set to get the embeddings of all 
-                    # these graphs and then we plot them into a corresponding plot.
-                    e.log('recording embeddings...')
-                    device = pl_module.device
-                    pl_module.eval()
-                    pl_module.to('cpu')
+                    node_importance = result['node_importance'][:, k]
+                    edge_importance = result['edge_importance'][:, k]
                     
-                    infos_test = pl_module.forward_graphs(graphs_test)
-                    # embeddings: (N, D, K)
-                    embeddings = np.array([info['graph_embedding'] for info in infos_test])
+                    ax = rows[k][c]
+                    ax.set_title(f'index {index}\n'
+                                 f'channel {k} - {CHANNEL_INFOS[k]["name"]}\n'
+                                 f'out_true: {np.round(out_true, 2)} - out_pred: {np.round(out_pred, 2)}\n'
+                                 f'importance'
+                                 f' - mean: {np.round(np.mean(node_importance), 2):.2f}'
+                                 f' - max: {np.round(np.max(node_importance), 2):.2f}'
+                                 f' - min: {np.round(np.min(node_importance), 2):.2f}')
                     
-                    kwargs = {'projection': '3d'} if pl_module.embedding_dim == 3 else {}
-                    
-                    fig, rows = plt.subplots(
-                        ncols=e.NUM_CHANNELS,
-                        nrows=1,
-                        figsize=(8 * e.NUM_CHANNELS, 8),
-                        squeeze=False,
-                        subplot_kw=kwargs,
+                    draw_image(ax=ax, image_path=index_data_map[index]['image_path'])
+                    plot_node_importances_background(
+                        ax=ax,
+                        g=graph,
+                        color=e.CHANNEL_INFOS[k]['color'],
+                        node_importances=result['node_importance'][:, k],
+                        node_positions=graph['node_positions'],
                     )
-                    fig.suptitle(f'embeddings epoch {trainer.current_epoch}')
+                    plot_edge_importances_background(
+                        ax=ax,
+                        g=graph,
+                        color=e.CHANNEL_INFOS[k]['color'],
+                        edge_importances=result['edge_importance'][:, k],
+                        node_positions=graph['node_positions'],
+                    )
+            
+            e.track('examples_training', fig)
+            plt.close('all')
+        
+        def track_metrics(self, trainer: pl.Trainer, pl_module: Megan):
+            
+            # Iterate through all logged values and track them with the experiment
+            for key, value in trainer.callback_metrics.items():
+                if value is not None:
+                    # Track each value using the experiment's track method
+                    e.track(key, value.item())
                     
-                    for k in range(e.NUM_CHANNELS):
-                        ax = rows[0][k]
-                        ax.set_title(f'channel {k}')
-                        plot_embeddings_3d(
-                            embeddings=embeddings[:, :, k],
-                            ax=ax,
-                            color=e.CHANNEL_INFOS[k]['color'],
-                            x_range=[-1.1, 1.1],
-                            y_range=[-1.1, 1.1],
-                            z_range=[-1.1, 1.1],
-                        )
-                        
-                    e.track('embeddings', fig)
-                    pl_module.train()
-                    pl_module.to(device)
+            # logging the current learning rate
+            e.track('lr', trainer.optimizers[0].param_groups[0]['lr'])
+            
+    
+    class RecordEmbeddingsCallback(pl.Callback):
 
-        e.log('Instantiating Megan model - with explanation training...')
-        e.log(f'explanation mode: {e.DATASET_TYPE}')
-        e.log(f' * importance offset: {e.IMPORTANCE_OFFSET}')
-        e.log(f' * hidden units: {e.HIDDEN_UNITS}')
-        model = Megan(
-            node_dim=e['node_dim'],
-            edge_dim=e['edge_dim'],
-            units=e.UNITS,
-            hidden_units=e.HIDDEN_UNITS,
-            importance_units=e.IMPORTANCE_UNITS,
-            layer_version='v2',
-            # only if this is a not-None value, the explanation co-training of the model is actually
-            # enabled. The explanation co-training works differently for regression and classification tasks
-            projection_units=e.PROJECTION_UNITS,
-            importance_mode=e.DATASET_TYPE,
-            final_units=e.FINAL_UNITS,
-            output_norm=e.OUTPUT_NORM,
-            label_smoothing=e.LABEL_SMOOTHING,
-            num_channels=e.NUM_CHANNELS,
-            importance_factor=e.IMPORTANCE_FACTOR,
-            importance_offset=e.IMPORTANCE_OFFSET,
-            importance_target='edge',
-            sparsity_factor=e.SPARSITY_FACTOR,
-            fidelity_factor=e.FIDELITY_FACTOR,
-            regression_reference=e.REGRESSION_REFERENCE,
-            regression_margin=e.REGRESSION_MARGIN,
-            prediction_mode=e.DATASET_TYPE,
-            prediction_factor=e.PREDICTION_FACTOR,
-            normalize_embedding=e.NORMALIZE_EMBEDDING,
-            attention_aggregation=e.ATTENTION_AGGREGATION,
-            contrastive_factor=e.CONTRASTIVE_FACTOR,
-            contrastive_temp=e.CONTRASTIVE_TEMP,
-            contrastive_noise=e.CONTRASTIVE_NOISE,
-            contrastive_beta=e.CONTRASTIVE_BETA,
-            contrastive_tau=e.CONTRASTIVE_TAU,
-            learning_rate=e.LEARNING_RATE,
-        )
+        def on_train_epoch_start(self, trainer: pl.Trainer, pl_module: Megan):
+            
+            # Linearly ramp up the contrastive factor
+            max_epochs = trainer.max_epochs
+            current_epoch = trainer.current_epoch
+            # pl_module.contrastive_factor = e.CONTRASTIVE_FACTOR * (current_epoch / max_epochs)
+            
+            e.track('contrastive_factor', pl_module.contrastive_factor)
+
+        def on_train_epoch_end(self, trainer: pl.Trainer, pl_module: Megan):
+            
+            # We only want to record the embeddings when the embedding dimension is 2 or 3 because 
+            # everything else, we cant't really visualize anyways.
+            if pl_module.embedding_dim <= 3:
+                
+                # We want to query the model with the entire test set to get the embeddings of all 
+                # these graphs and then we plot them into a corresponding plot.
+                e.log('recording embeddings...')
+                device = pl_module.device
+                pl_module.eval()
+                pl_module.to('cpu')
+                
+                infos_test = pl_module.forward_graphs(graphs_test)
+                # embeddings: (N, D, K)
+                embeddings = np.array([info['graph_embedding'] for info in infos_test])
+                
+                kwargs = {'projection': '3d'} if pl_module.embedding_dim == 3 else {}
+                
+                fig, rows = plt.subplots(
+                    ncols=e.NUM_CHANNELS,
+                    nrows=1,
+                    figsize=(8 * e.NUM_CHANNELS, 8),
+                    squeeze=False,
+                    subplot_kw=kwargs,
+                )
+                fig.suptitle(f'embeddings epoch {trainer.current_epoch}')
+                
+                for k in range(e.NUM_CHANNELS):
+                    ax = rows[0][k]
+                    ax.set_title(f'channel {k}')
+                    plot_embeddings_3d(
+                        embeddings=embeddings[:, :, k],
+                        ax=ax,
+                        color=e.CHANNEL_INFOS[k]['color'],
+                        x_range=[-1.1, 1.1],
+                        y_range=[-1.1, 1.1],
+                        z_range=[-1.1, 1.1],
+                    )
+                    
+                e.track('embeddings', fig)
+                pl_module.train()
+                pl_module.to(device)
+
+    e.log('Instantiating Megan model - with explanation training...')
+    e.log(f'explanation mode: {e.DATASET_TYPE}')
+    e.log(f' * importance offset: {e.IMPORTANCE_OFFSET}')
+    e.log(f' * hidden units: {e.HIDDEN_UNITS}')
+    model = Megan(
+        node_dim=e['node_dim'],
+        edge_dim=e['edge_dim'],
+        units=e.UNITS,
+        hidden_units=e.HIDDEN_UNITS,
+        importance_units=e.IMPORTANCE_UNITS,
+        layer_version='v2',
+        # only if this is a not-None value, the explanation co-training of the model is actually
+        # enabled. The explanation co-training works differently for regression and classification tasks
+        projection_units=e.PROJECTION_UNITS,
+        importance_mode=e.DATASET_TYPE,
+        final_units=e.FINAL_UNITS,
+        output_norm=e.OUTPUT_NORM,
+        label_smoothing=e.LABEL_SMOOTHING,
+        num_channels=e.NUM_CHANNELS,
+        importance_factor=e.IMPORTANCE_FACTOR,
+        importance_offset=e.IMPORTANCE_OFFSET,
+        importance_target='edge',
+        sparsity_factor=e.SPARSITY_FACTOR,
+        fidelity_factor=e.FIDELITY_FACTOR,
+        regression_reference=e.REGRESSION_REFERENCE,
+        regression_margin=e.REGRESSION_MARGIN,
+        prediction_mode=e.DATASET_TYPE,
+        prediction_factor=e.PREDICTION_FACTOR,
+        normalize_embedding=e.NORMALIZE_EMBEDDING,
+        attention_aggregation=e.ATTENTION_AGGREGATION,
+        contrastive_factor=e.CONTRASTIVE_FACTOR,
+        contrastive_temp=e.CONTRASTIVE_TEMP,
+        contrastive_noise=e.CONTRASTIVE_NOISE,
+        contrastive_beta=e.CONTRASTIVE_BETA,
+        contrastive_tau=e.CONTRASTIVE_TAU,
+        learning_rate=e.LEARNING_RATE,
+        lr_scheduler=e.LR_SCHEDULER,
+    )
+    
+    e.log(f'starting model training with {e.EPOCHS} epochs...')
+    logger = CSVLogger(e.path, name='logs')
+    
+    callbacks = [
+        # This will record the embeddings of the test set after each epoch and then track them into the 
+        # experiment storage so that the evolution of the embeddings can be animated at the end of the 
+        # experiment.
+        RecordEmbeddingsCallback(),
+        TrainingCallback(),
+    ]
+    
+    # The SwaCallback fully implements the stochastic weight averaging by itself without any modification 
+    # in the model itself. The callback simply updates a FIFO queue of the model weights in each epoch 
+    # and then at the end of the training calculates an average over those and assigns them as the new 
+    # weights of the model.
+    if e.USE_SWA:
+        callbacks.append(SwaCallback(history_length=e.SWA_EPOCHS, logger=logger))
         
-        e.log(f'starting model training with {e.EPOCHS} epochs...')
-        logger = CSVLogger(e[f'path/{rep}'], name='logs')
-        
-        callbacks = [
-            # This will record the embeddings of the test set after each epoch and then track them into the 
-            # experiment storage so that the evolution of the embeddings can be animated at the end of the 
-            # experiment.
-            RecordEmbeddingsCallback(),
-        ]
-        
-        # The SwaCallback fully implements the stochastic weight averaging by itself without any modification 
-        # in the model itself. The callback simply updates a FIFO queue of the model weights in each epoch 
-        # and then at the end of the training calculates an average over those and assigns them as the new 
-        # weights of the model.
-        if e.USE_SWA:
-            callbacks.append(SwaCallback(history_length=e.SWA_EPOCHS, logger=logger))
-        
-        trainer = pl.Trainer(
-            max_epochs=e.EPOCHS,
-            logger=logger,
-            callbacks=callbacks,
-            accumulate_grad_batches=e.BATCH_ACCUMULATE,
-        )
-        
-        e.log('starting model training...')
-        trainer.fit(
-            model,
-            train_dataloaders=train_loader,
-            val_dataloaders=test_loader,
-        )
-        
-        model.to('cpu')
-        return model, trainer
+    if e.TRAIN_MVE:
+        callbacks.append(MveCallback(
+            warmup_epochs=e.MVE_WARMUP_EPOCHS,
+        ))
+    
+    trainer = pl.Trainer(
+        max_epochs=e.EPOCHS,
+        logger=logger,
+        callbacks=callbacks,
+        accumulate_grad_batches=e.BATCH_ACCUMULATE,
+        enable_progress_bar=True,
+    )
+    
+    e.log('starting model training...')
+    trainer.fit(
+        model,
+        train_dataloaders=train_loader,
+        val_dataloaders=test_loader,
+    )
+    
+    del train_loader
+    del test_loader
+    torch.cuda.empty_cache()
+    
+    model.eval()
+    model.to('cpu')
+    
+    return model, trainer
 
 
 @experiment.hook('evaluate_model', default=False, replace=False)
 def evaluate_model(e: Experiment,
                    model: AbstractGraphModel,
                    trainer: pl.Trainer,
-                   rep: int,
                    index_data_map: dict,
                    train_indices: t.List[int],
                    test_indices: t.List[int],
@@ -428,7 +639,7 @@ def evaluate_model(e: Experiment,
     out_pred = model.predict_graphs(graphs_test)
 
     e.log('visualizing the example graphs...')
-    example_indices: t.List[int] = e[f'example_indices/{rep}']
+    example_indices: t.List[int] = e['indices/example']
     graphs_example = [index_data_map[i]['metadata']['graph'] for i in example_indices]
     example_infos: t.List[dict] = model.forward_graphs(graphs_example)
     create_importances_pdf(
@@ -441,13 +652,10 @@ def evaluate_model(e: Experiment,
                 [info['edge_importance'] for info in example_infos],
             )
         },
-        output_path=os.path.join(e[f'path/{rep}'], 'example_explanations.pdf'),
+        output_path=os.path.join(e.path, 'example_explanations.pdf'),
         plot_node_importances_cb=plot_node_importances_background,
         plot_edge_importances_cb=plot_edge_importances_background,
     )
-    for info in example_infos:
-        print(f'{np.mean(info["node_importance"][:, 0])} ({np.max(info["node_importance"][:, 0])}) - ', 
-              f'{np.mean(info["node_importance"][:, 1])} ({np.max(info["node_importance"][:, 1])})')
     
     # ~ explanation fidelity analysis
     # Explanation fidelity is a metric that essentially tells how much a given attributional explanation mask 
@@ -465,7 +673,7 @@ def evaluate_model(e: Experiment,
         num_channels=e.NUM_CHANNELS,
         num_targets=e.FINAL_UNITS[-1],
     )
-    fig.savefig(os.path.join(e[f'path/{rep}'], 'leave_one_out.pdf'))
+    fig.savefig(os.path.join(e.path, 'leave_one_out.pdf'))
 
     # ~ visualizing the graph embedding space
     # Another thing we would like to do for the MEGAN model is to visualize the graph embedding space to see 
@@ -576,9 +784,66 @@ def evaluate_model(e: Experiment,
                 **plot_kwargs
             )
             
-        fig.savefig(os.path.join(e[f'path/{rep}'], 'embeddings.pdf'))
-        fig.savefig(os.path.join(e[f'path/{rep}'], 'embeddings.png'))
+        fig.savefig(os.path.join(e.path, 'embeddings.pdf'))
+        fig.savefig(os.path.join(e.path, 'embeddings.png'))
         plt.close(fig)
+        
+    e.apply_hook(
+        'after_experiment',
+        index_data_map=index_data_map,
+        model=model,
+        trainer=trainer,
+    )
+    
+    
+@experiment.hook('after_experiment', default=False, replace=False)
+def after_experiment(e: Experiment,
+                     index_data_map: dict,
+                     model: Megan,
+                     trainer: pl.Trainer,
+                     ) -> None:
+    """
+    This hook is called at the very end of the experiment and receives the dataset, the model and 
+    the trainer instance as parameters.
+    
+    ---
+    
+    This particular implementation of the after_experiment hook is used to clean up the experiment
+    by deleting the optimizer states and moving the model to the cpu. This is done to free up the
+    GPU memory.
+    """
+    e.log('cleaning up experiment...')
+    
+    e.log('deleting the optimizer states...')
+    for optimizer in trainer.optimizers:
+        
+        optimizer.zero_grad()
+        for param in optimizer.state.values():
+            
+            if isinstance(param, torch.Tensor):
+                param.data = param.data.to('cpu')
+                del param
+            
+            if isinstance(param, dict):
+                for p in param.values():
+                    if isinstance(p, torch.Tensor):
+                        p.data = p.data.to('cpu')
+                        del p
+                        
+        del optimizer
+        torch.cuda.empty_cache()
+        
+    e.log('deleting the trainer...')
+    del trainer
+    torch.cuda.empty_cache()
+    
+    e.log('moving the model to the cpu...')
+    model.to('cpu')
+    torch.cuda.empty_cache()
+    
+    # printing the memory summary to see if there is still something left
+    e.log('memory summary:')
+    e.log('\n' + torch.cuda.memory_summary(device=None, abbreviated=False))
 
 
 @experiment.analysis
@@ -587,6 +852,7 @@ def analysis(e: Experiment):
     This analysis
     """
     e.log('running MEGAN specific analysis...')
+    return
     
     # In the analysis routine of the parent experiment, the index data map is loaded from the disk 
     # already and stored in this experiment storage entry, so that it can be reused here.

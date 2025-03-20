@@ -1,4 +1,6 @@
+import os
 import typing as t
+from typing import List, Dict, Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -7,13 +9,18 @@ import torch_scatter
 import pytorch_lightning as pl
 import numpy as np
 import visual_graph_datasets.typing as tv
+from rich.pretty import pprint
+from sklearn.isotonic import IsotonicRegression
+from sklearn.linear_model import LinearRegression
 from torch_geometric.nn.aggr import SumAggregation
 from torch_geometric.nn.aggr import MeanAggregation
 from torch_geometric.nn.aggr import MaxAggregation
 from torch_geometric.data import Data
 
+from graph_attention_student.utils import get_version
 from graph_attention_student.torch.utils import torch_gauss
 from graph_attention_student.torch.model import AbstractGraphModel
+from graph_attention_student.torch.model import UncertaintyEstimatorMixin
 from graph_attention_student.torch.layers import ParallelHeadAttention
 from graph_attention_student.torch.layers import GraphAttentionLayer
 from graph_attention_student.torch.layers import GraphAttentionLayerV2
@@ -21,7 +28,130 @@ from graph_attention_student.torch.layers import GraphAttentionLayerV3
 from graph_attention_student.torch.layers import MaskExpansionLayer
 
 
-class Megan(AbstractGraphModel):
+
+class MveMixin:
+    """
+    
+    This Mixin expects the following conditions to be implemented:
+    - The base class has to be a subclass of ``pl.LightningModule``
+    - The base class has to have an attribute ``self.embedding_dim`` which defines the dimensionality of 
+      the graph embedding vector that is pooled after the graph encoder part of the network.
+    """
+    def __init__(self,
+                 variance_units: List[int] = [32, 16, 1],
+                 nll_beta: float = 0.5,
+                 mve_active: bool = False,
+                 ):
+        
+        self.nll_beta = nll_beta
+        self.variance_units = variance_units
+        self.mve_active = mve_active
+        
+        self.hparams.update({
+            'variance_units': variance_units,
+            'nll_beta': nll_beta,
+            'mve_active': mve_active,
+        })
+        
+        self.variance_layers = nn.ModuleList()
+        prev_features = self.embedding_dim * self.num_channels
+        for i, num_features in enumerate(variance_units, start=1):
+            
+            # For the intermediate layers we apply batch norm and a non-linear activation function
+            if i != len(variance_units):
+                lay = nn.Sequential(
+                    nn.Linear(in_features=prev_features, out_features=num_features),
+                    nn.BatchNorm1d(num_features),
+                    nn.SiLU(),
+                )
+            
+            # For the last layer we dont want to apply the non-linear activation but instead use a softplus 
+            # activation function to ensure that the predicted variance is always positive.
+            if i == len(variance_units):
+                lay = nn.Sequential(
+                    nn.Linear(in_features=prev_features, out_features=num_features),
+                    nn.Softplus(),
+                )
+            
+            prev_features = num_features
+            self.variance_layers.append(lay)
+        
+    def after_forward(self,
+                data: Data,
+                info: dict,
+                *args, **kwargs
+                ) -> Dict[str, torch.Tensor]:
+        
+        graph_embedding = info['graph_embedding'].reshape(info['graph_embedding'].shape[0], -1)
+        #print('graph embedding shape', graph_embedding.shape)
+        graph_variance = graph_embedding
+        for lay in self.variance_layers:
+            graph_variance = lay(graph_variance)
+            
+        info['graph_variance'] = graph_variance
+        
+        return info
+
+    def activate_mve_training(self):
+        
+        # Here we are going to dynamically replace the ``training_prediction`` method of the model with the local 
+        # implementation that implements the MVE NLL loss. This method is called within the primary ``train_step`` 
+        # method to calculate the prediction loss. By switching these we can easily switch between the normal
+        # prediction loss and the MVE loss
+        setattr(self, 'training_prediction_', self.training_prediction)
+        setattr(self, 'training_prediction', self.training_prediction_mve)
+        self.mve_active = True
+
+    def deactivate_mve_training(self):
+        
+        if not hasattr(self, 'training_prediction_'):
+            raise ValueError('MVE training is not active!')
+        
+        setattr(self, 'training_prediction', self.training_prediction_)
+        self.mve_actvie = False
+
+    def training_prediction_mve(self,
+                                data: Data,
+                                info: dict,
+                                batch_size: int,
+                                *args, **kwargs
+                                ) -> torch.Tensor:
+        
+        # out_pred: (B, O)
+        out_pred = info['graph_output']
+        # out_pred: (B, O)
+        out_true = data.y.view(-1, self.out_dim)
+        # out_var: (B, O)
+        out_var = info['graph_variance']
+        
+        out_std = torch.sqrt(out_var)
+        
+        nll_loss = 0.5 * out_std.detach() ** (2 * self.nll_beta) * ( (out_pred - out_true).pow(2) / out_var + torch.log(out_var) )
+        nll_loss = nll_loss.mean()
+        self.log('loss_mve', nll_loss, on_epoch=True, on_step=False)
+
+        return nll_loss
+    
+    
+class MveCallback(pl.Callback):
+    
+    def __init__(self,
+                 warmup_epochs: int = 100,
+                 ):
+        self.warmup_epochs = warmup_epochs
+        self.is_active = False
+        
+    def on_train_start(self, trainer, pl_module):
+        print('MVE callback registered...')
+        
+    def on_train_epoch_end(self, trainer, pl_module):
+        if trainer.current_epoch >= self.warmup_epochs and not self.is_active:
+            print('activating MVE training...')
+            pl_module.activate_mve_training()
+            self.is_active = True
+
+
+class Megan(MveMixin, AbstractGraphModel):
     """
     **SHAPE DOCUMENTATION**
     
@@ -124,6 +254,7 @@ class Megan(AbstractGraphModel):
                  label_smoothing: float = 0.0,
                  # training-related
                  learning_rate: float = 1e-3,
+                 lr_scheduler: Optional[str] = None,
                  bn_momentum: float = 0.5,
                  ):
         pl.LightningModule.__init__(self)
@@ -178,6 +309,7 @@ class Megan(AbstractGraphModel):
         self.label_smoothing = label_smoothing
         
         self.learning_rate = learning_rate
+        self.lr_scheduler = lr_scheduler
 
         # The "hparams" attribute that a pl.LightningModule has anyways. This dict is used to store the hyper 
         # parameter configuration of the module so that it can be serialized and saved when creating a persistent 
@@ -456,6 +588,9 @@ class Megan(AbstractGraphModel):
                 reduction='none',
             )
             
+        # TODO: comment
+        MveMixin.__init__(self)
+            
     def forward(self, 
                 data: Data, 
                 node_mask: t.Optional[torch.Tensor] = None,
@@ -691,7 +826,7 @@ class Megan(AbstractGraphModel):
             output = self.output_norm * F.normalize(output, dim=-1)
             # print(output)
             
-        return {
+        info = {
             'graph_output': output,
             'graph_embedding': graph_embedding,
             'node_embedding': node_embedding,
@@ -700,6 +835,11 @@ class Megan(AbstractGraphModel):
             'edge_importance': edge_importance,
             'edge_importance_norm': edge_importance_norm,
         }
+        
+        if hasattr(self, 'after_forward'):
+            info = self.after_forward(data, info)
+        
+        return info
         
     def training_step(self, data: Data, batch_idx):
         
@@ -735,40 +875,14 @@ class Megan(AbstractGraphModel):
             print(f'Runtime Error: {exc}')
             return torch.tensor(0.0)
         
-        # out_pred: (B, O)
-        out_pred = info['graph_output']
-        
-        # graph_embedding: (B, D)
-        # graph_embedding = info['graph_embedding']
-        
-        # In the classification case the model outputs the classification LOGITS and it has to 
-        # stay like that, but for the loss calculation we need the class proabilities which is 
-        # why we apply the softmax function here.
-        if self.prediction_mode == 'classification':
-            
-            # 17.04.24
-            # If the label smoothing parameter is set, we will apply the label smoothing to the
-            # target values. This will make the target values more robust against overfitting and
-            # will promote the model to learn more generalizable features.
-            # The idea is to use soft targets instead of the hard one-hot target vectors.
-            # so a target of [1, 0] for example would become [0.9, 0.1] for a label smoothing.
-            if self.label_smoothing:
-                out_true = (1 - self.label_smoothing) * out_true + self.label_smoothing / self.target_dim
-                
-        if self.prediction_mode == 'bce':
-            
-            if self.label_smoothing:
-                out_true = (1 - self.label_smoothing) * out_true + self.label_smoothing
-        
-        # ~ prediction loss
-        loss_pred = self.loss_pred(out_pred, out_true)
-        if False: # hasattr(data, 'train_weight'):
-            loss_pred = (loss_pred * data.train_weight.unsqueeze(-1)).mean()
-        else:
-            loss_pred = loss_pred.mean()
+        loss_pred = self.training_prediction(
+            data=data,
+            info=info,
+            batch_size=batch_size,
+        )
         
         self.log(
-            'loss_pred', self.prediction_factor * loss_pred,
+            'loss_pred', loss_pred.detach().cpu(),
             prog_bar=True,
             on_epoch=True,
             on_step=False,
@@ -793,7 +907,7 @@ class Megan(AbstractGraphModel):
             )
         
         self.log(
-            'loss_expl', loss_expl,
+            'loss_expl', loss_expl.detach().cpu(),
             prog_bar=True,
             on_epoch=True,
             on_step=False,
@@ -822,7 +936,7 @@ class Megan(AbstractGraphModel):
         loss_spar = torch.mean(torch.abs(ni))
         
         self.log(
-            'loss_spar', loss_spar,
+            'loss_spar', loss_spar.detach().cpu(),
             prog_bar=True,
             on_epoch=True,
             on_step=False,
@@ -835,7 +949,7 @@ class Megan(AbstractGraphModel):
         # embedding space we want to promote that similiarly structured sub-graph explanations are 
         # grouped together in clusters.
         
-        loss_cont = 0.0
+        loss_cont = torch.tensor(0.0)
         if self.contrastive_factor != 0:
             # The "training_representation" method will calculate the loss for the contrastive 
             # representation learning of the graph embeddings.
@@ -846,7 +960,7 @@ class Megan(AbstractGraphModel):
             )
         
         self.log(
-            'loss_cont', loss_cont,
+            'loss_cont', loss_cont.detach().cpu(),
             prog_bar=True,
             on_epoch=True,
             on_step=False,
@@ -864,7 +978,7 @@ class Megan(AbstractGraphModel):
             )
             
         self.log(
-            'loss_fid', loss_fid,
+            'loss_fid', loss_fid.detach().cpu(),
             prog_bar=True,
             on_epoch=True,
             on_step=False,
@@ -891,12 +1005,67 @@ class Megan(AbstractGraphModel):
         return loss
     
     def to(self, device, *args, **kwargs):
+        """
+        Custom implementation to push the model to a specific ``device``.
         
+        The custom overwrite is necessary to also push the running mean in the case of a regression model to the 
+        new device. This running mean is an additional torch paramater which is not part of the model's default 
+        parameters and therefore would not be pushed to the new device by the default ``to`` method.
+        
+        :param device: The device to which the model should be pushed.
+        
+        :returns: The model instance itself, now on the new device
+        """
         if self.prediction_mode == 'regression':
             self.n_samples = self.n_samples.to(device)
             self.running_mean = self.running_mean.to(device)
             
         return super().to(device, *args, **kwargs)
+    
+    def training_prediction(self,
+                            data: Data,
+                            info: dict,
+                            batch_size: int
+                            ) -> float:
+        """
+        Given the input ``data`` instance, the corresponding model ``info`` dictionary returned by the model's forward method 
+        and the integer ``batch_size``, this method will calculate and return the prediction loss of the model.
+        
+        :param data: The input PyG Data instance.
+        :param info: The dictionary containing all the output values produced by the model's forward method.
+        :param batch_size: The number of graph elements contained in the given ``data`` instance.
+        
+        :returns: A torch Tensor of shape (1, ) containing the aggregated prediction loss for the given ``data`` instance.
+        """
+        
+        # out_pred: (B, O)
+        out_pred = info['graph_output']
+        
+        # out_pred: (B, O)
+        out_true = data.y.view(-1, self.out_dim)
+        
+        # In the classification case the model outputs the classification LOGITS and it has to 
+        # stay like that, but for the loss calculation we need the class proabilities which is 
+        # why we apply the softmax function here.
+        if self.prediction_mode == 'classification':
+            
+            # 17.04.24
+            # If the label smoothing parameter is set, we will apply the label smoothing to the
+            # target values. This will make the target values more robust against overfitting and
+            # will promote the model to learn more generalizable features.
+            # The idea is to use soft targets instead of the hard one-hot target vectors.
+            # so a target of [1, 0] for example would become [0.9, 0.1] for a label smoothing.
+            if self.label_smoothing:
+                out_true = (1 - self.label_smoothing) * out_true + self.label_smoothing / self.target_dim
+                
+        if self.prediction_mode == 'bce':
+            
+            if self.label_smoothing:
+                out_true = (1 - self.label_smoothing) * out_true + self.label_smoothing
+        
+        loss_pred = self.loss_pred(out_pred, out_true)
+        loss_pred = loss_pred.mean()
+        return loss_pred
     
     def training_representation(self,
                                 data: Data,
@@ -1022,6 +1191,8 @@ class Megan(AbstractGraphModel):
         
         pos_weight = 1.0
     
+        sim_pos_comb = 0.0
+        sim_neg_comb = 0.0
         # Essentially we want each channel to develop it's own independent embedding space, so here we 
         # iterate over all the channels and calculate the constrastive loss contribution for each channel.
         for k in range(self.num_channels):
@@ -1047,6 +1218,8 @@ class Megan(AbstractGraphModel):
             graph_embedding_all = torch.cat([graph_embedding_k, graph_embedding_k], dim=0)
             
             sim_neg = (graph_embedding_all.unsqueeze(0) * graph_embedding_all.unsqueeze(1)).sum(dim=-1)
+            sim_neg_comb += sim_neg.mean()
+            
             sim_neg_exp = torch.exp(sim_neg / self.contrastive_temp)
             # sim_neg_exp: (2 * B, 2 * B)
             sim_neg_exp = sim_neg_exp.masked_select(mask).view(2 * batch_size, -1)
@@ -1064,6 +1237,7 @@ class Megan(AbstractGraphModel):
                 torch.stack([sim_pos_exp, sim_pos_1_exp], dim=-1).sum(dim=-1),
                 torch.stack([sim_pos_exp, sim_pos_2_exp], dim=-1).sum(dim=-1),
             ], dim=0)
+            sim_pos_comb = 0.5 * sim_pos_1.mean() + 0.5 * sim_pos_2.mean()
             #sim_pos_exp[is_empty_k > 0.5] = 1.0
             
             # In this section the actual constrastive loss aka the InfoNCE loss is calculated. However, this is 
@@ -1077,8 +1251,11 @@ class Megan(AbstractGraphModel):
             Neg = torch.clamp(Neg, min=N*np.e**(-1/self.contrastive_temp))
             Neg = sim_neg_exp.sum(dim=-1)
             
-            loss_cont += (1 / self.num_channels) * torch.mean(-torch.log((sim_pos_exp) / (sim_pos_exp + Neg)))
-            #loss_cont += (1 / self.num_channels) * torch.mean(-torch.log((sim_pos_exp) / (Neg)))
+            #loss_cont += (1 / self.num_channels) * torch.mean(-torch.log((sim_pos_exp) / (sim_pos_exp + Neg)))
+            loss_cont += (1 / self.num_channels) * torch.mean(-torch.log((sim_pos_exp) / (Neg)))
+                     
+        self.log('sim_pos', sim_pos_comb.detach().cpu(), prog_bar=True, on_epoch=True, on_step=False, batch_size=batch_size)
+        self.log('sim_neg', sim_neg_comb.detach().cpu(), prog_bar=True, on_epoch=True, on_step=False, batch_size=batch_size)
                      
         return loss_cont
     
@@ -1195,6 +1372,7 @@ class Megan(AbstractGraphModel):
             
             # node_transformed: (B * V, K)
             node_transformed = F.sigmoid(self.lay_transform_2(self.lay_transform_1(data.x).relu())) + self.importance_offset
+            node_transformed = self.importance_offset * torch.ones_like(node_transformed, device=self.device)
             node_transformed = node_transformed * node_importance
             
             pooled_importance = self.lay_pool_importance(node_transformed, data.batch)
@@ -1275,6 +1453,91 @@ class Megan(AbstractGraphModel):
                         
         return loss_expl
     
+    def _predict_approximate(self,
+                                results: List[dict],
+                                values_true: np.ndarray,
+                                ) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Given a list of ``results`` and the corresponding list of ground truth ``labels``, this method 
+        will compute the explanation approximation of this ground truth objective. Specifically, the 
+        function will return a tuple (out_true, out_pred) where both are numpy arrays of the shape 
+        (num_graphs, num_channels) which represent the true and predicted labels of binary classification 
+        objectives respectively.
+        
+        For a regression task, the continuous ground truth values are converted into the binary labels 
+        of whether a value falls into the "positive/negative" range around the median value. Classification 
+        targets are kept as they are.
+        
+        The predicted values are the result of a tanh function applied to the pooled importance values 
+        of the explanation channels belonging to the corresponding input graph.
+        
+        :param results: A list of result dicts as they are returned by the ``forward_graphs`` method.
+        :param values_true: A numpy array of the ground truth labels
+        
+        :returns: A tuple of two numpy arrays (out_true, out_pred)
+        """
+        
+        out_pred: List[float] = []
+        for result in results:
+            
+            if self.importance_target == 'node':
+                
+                # -- node-level explanation approximation --
+                # for each *node* these are attention values in the range [0, 1]
+                node_importance = result['node_importance']
+                
+                max_value = max(np.max(node_importance), 1e-6)
+                node_importance = node_importance / max_value
+                node_importance *= self.importance_offset
+                
+                # pooled_importances: (num_channels, )
+                pooled_importance = np.sum(node_importance, axis=0)
+            
+            elif self.importance_target == 'edge':
+            
+                # -- edge-level explanation approximation --
+                # for each *edge* these are attention values in the range [0, 1]
+                # edge_importance: (num_edges, num_channels)
+                edge_importance = result['edge_importance']
+                
+                max_value = max(np.max(edge_importance), 1e-6)
+                edge_importance = edge_importance / max_value
+                edge_importance *= self.importance_offset
+                
+                # pooled_importances: (num_channels, )
+                pooled_importance = np.sum(edge_importance, axis=0)
+
+            # prediction: (num_channels, )
+            pred = np.tanh(0.1 * pooled_importance)
+            out_pred.append(pred)
+            
+        # out_pred: (num_graphs, num_channels)
+        out_pred = np.stack(out_pred, axis=0)
+    
+        # out_true: (num_graphs, num_channels)
+        out_true = values_true
+        if self.importance_mode == 'regression':
+            
+            # Here we actually deviate from the original MEGAN implementation a little bit. In the original 
+            # the explanation co-training loss for regression tasks is again an MSE loss that tries to interpolate 
+            # the exact ground truth value from the pooled mask. However, it turns out that casting this into a 
+            # classification problem and using BCE loss works better (cleaner explanation masks).
+            # So here we construct the "true" labels simply as a binary decision problem of samples being either 
+            # "positive" or "negative".
+            
+            regression_lo = np.quantile(out_true, 0.5)
+            regression_hi = np.quantile(out_true, 0.5)
+            
+            out_true = np.concatenate([
+                # (out_true < (regression_reference - self.regression_margin)), 
+                # (out_true > (regression_reference + self.regression_margin)),
+                out_true < regression_lo,
+                out_true > regression_hi,
+            ], 
+            axis=1)
+            
+        return out_true, out_pred
+    
     def configure_optimizers(self):
         """
         This method returns the optimizer to be used for the training of the model.
@@ -1282,8 +1545,25 @@ class Megan(AbstractGraphModel):
         :returns: A ``torch.optim.Optimizer`` instance
         """
         optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate)
-        #optimizer = torch.optim.NAdam(self.parameters(), lr=self.learning_rate)
-        return optimizer
+        #optimizer = torch.optim.AdamW(self.parameters(), lr=1)
+
+        config = {
+            'optimizer': optimizer,
+        }
+        
+        if self.lr_scheduler == 'cyclic':
+
+            scheduler = torch.optim.lr_scheduler.CyclicLR(
+                optimizer,
+                base_lr=self.learning_rate,
+                max_lr=self.learning_rate * 20,
+                step_size_up=10,
+                cycle_momentum=False,
+                mode='triangular2',
+            )
+            config['lr_scheduler'] = scheduler
+    
+        return config
     
     def leave_one_out_deviations(self,
                                  graphs: t.List[tv.GraphDict],
@@ -1339,3 +1619,203 @@ class Megan(AbstractGraphModel):
             index += _batch_size
                     
         return result
+    
+    
+    
+class MeganEnsemble(AbstractGraphModel, UncertaintyEstimatorMixin):
+    
+    def __init__(self,
+                 models: List[Megan],
+                 combine_importances_strategy: str = 'mean',
+                 **kwargs,
+                 ):
+        AbstractGraphModel.__init__(self)
+        UncertaintyEstimatorMixin.__init__(self)
+        
+        # All the models in the ensemble must have the same prediction mode (regression / classification)
+        # otherwise it doesn't make sense to form an ensemble.
+        prediction_modes = set([model.prediction_mode for model in models])
+        assert len(prediction_modes) == 1, 'All models in the ensemble must have the same prediction mode!'
+        self.prediction_mode = prediction_modes.pop()
+        
+        self.models = models
+        self.combine_importances_strategy = combine_importances_strategy
+        
+        self.hparams.update({
+            'combine_importances_strategy': combine_importances_strategy, 
+        })
+        
+        self.module_list = nn.ModuleList(models)
+        self.calibration_model: Optional[IsotonicRegression] = None
+        self.stack_model: Optional[None] = None
+        
+    def forward(self, data: Data, *args, **kwargs) -> Dict[str, torch.Tensor]:
+        
+        # ~ ensemble prediction
+        # The forward pass of the ensemble model is quite simple. We simply iterate over all the individual
+        # models in the ensemble and collect their predictions. The final prediction of the ensemble is then
+        # the mean of all the individual predictions.
+        results_list: List[Dict[str, torch.Tensor]] = []
+        for model in self.module_list:
+            results = model.forward(data)
+            results_list.append(results)
+            
+        graph_output_stack = torch.stack([result['graph_output'] for result in results_list], dim=-1)
+        graph_output_mean = graph_output_stack.mean(dim=-1)
+        graph_output_std = graph_output_stack.std(dim=-1)
+        # The base version of the graph uncertainty estimation is simply the standard deviation over the 
+        # individual predictions of the ensemble.
+        graph_uncertainty = graph_output_std
+        
+        # ~ mve uncertainty
+        # Optionally it is possible that each of the individual models acts as an mean variance estimator
+        # and predicts the variance of the target value distribution directly itself. In this case we want 
+        # to calculate the overall predicted uncertainty as the mean of the individual variance estimations 
+        # and the ensmeble uncertainty.
+        graph_variance_list = [
+            result['graph_variance'] 
+            for result, model in zip(results_list, self.module_list)
+            if 'graph_variance' in result and model.mve_active
+        ]
+        if graph_variance_list:
+            graph_variance_stack = torch.stack(graph_variance_list, dim=-1)
+            graph_std_stack = torch.sqrt(graph_variance_stack)
+            graph_std_mean = graph_std_stack.mean(dim=-1)
+            graph_uncertainty = 0.5 * (graph_output_std + graph_std_mean)
+        
+        # ~ combined explanations
+        # ``_combine_importances`` takes a list of importance tensors (can be node or edge based) and then 
+        # combines them into a single tensor according to the strategy that has been determined in the constructor.
+        # Returns a tuple of three values (combined tensor, mean tensor, std tensor).
+        node_importance, _, node_importance_std = self._combine_importances(
+            [result['node_importance'] for result in results_list],
+            strategy=self.combine_importances_strategy,
+        )
+        edge_importance, _, edge_importance_std = self._combine_importances(
+            [result['edge_importance'] for result in results_list],
+            strategy=self.combine_importances_strategy,
+        )
+        
+        result = {
+            # First of all we need to add all the standard stuff to comply with the normal MEGAN interface. In the end, the 
+            # ensemble model should be usable in the same way as an individual model.
+            'graph_output': graph_output_mean,
+            'node_importance': node_importance,
+            'edge_importance': edge_importance,
+            # Then we add the standard deviation over the output as the uncertainty estimate.
+            'graph_uncertainty': graph_uncertainty,
+            # And finally we can add the additional information about the standard deviation over the importance explanations 
+            # as additional outputs as well for the optional case than one of the downstream applications can make 
+            # use of those
+            'graph_output_stack': graph_output_stack,
+            'node_importance_std': node_importance_std,
+            'edge_importance_std': edge_importance_std,
+        }
+        if graph_variance_list: 
+            result['graph_variance_stack'] = graph_variance_stack
+            
+        return result
+        
+    def forward_graphs(self, graphs: List[dict], **kwargs) -> List[dict]:
+        results: list[Dict] = super().forward_graphs(graphs, **kwargs)
+
+        # ~ uncertainty calibration
+        # If the model has already been calibrated, we will apply the calibration to the raw uncertainty 
+        # estimates.
+        if self.is_uncertainty_calibrated():
+            for result in results:
+                result['graph_uncertainty'] = self.calibration_model.predict(result['graph_uncertainty'])
+        
+        # ~ model stacking
+        # If model stacking has been applied to the ensemble, we will apply the stacked model (meta learner)
+        # to the outputs of the individual models to obtain the overall ensemble prediction.
+        if self.is_prediction_stacked():
+            for result in results:
+                result['graph_output'] = self.stack_model.predict(result['graph_output_stack'].reshape(1, -1))[0]
+                #print(result['graph_output'])
+                pass
+        
+        return results
+        
+    # ~ model stacking
+    
+    def stack_predictions(self,
+                          graphs: List[tv.GraphDict],
+                          values: np.ndarray,
+                          ) -> None:
+        
+        # values: (num_graphs, num_outputs)
+        
+        results: List[dict] = self.forward_graphs(graphs)
+        
+        # graph_outputs: (num_graphs, num_outputs, num_models)
+        graph_outputs = np.stack([result['graph_output_stack'] for result in results], axis=0)
+        graph_outputs = graph_outputs.reshape(graph_outputs.shape[0], -1)
+        
+        if self.prediction_mode == 'regression':
+            self.stack_model = LinearRegression()
+            self.stack_model.fit(graph_outputs, values)
+        
+    def is_prediction_stacked(self) -> bool:
+        return self.stack_model is not None
+        
+    # ~ uncertainty calibration
+        
+    def calibrate_uncertainty(self, 
+                              graphs: List[tv.GraphDict],
+                              errors: np.ndarray,
+                              ) -> None:
+        
+        results: List[dict] = self.forward_graphs(graphs)
+        
+        uncertainty_pred = np.array([float(result['graph_uncertainty']) for result in results])
+        uncertainty_true = np.array([float(value) for value in errors])
+        
+        self.calibration_model = IsotonicRegression(
+            #y_min=np.min(uncertainty_true) - 1,
+            #y_max=np.max(uncertainty_true) + 1,
+            out_of_bounds='clip',
+            #increasing='auto',
+        )
+        self.calibration_model.fit(uncertainty_pred, uncertainty_true)
+    
+    def is_uncertainty_calibrated(self) -> bool:
+        return self.calibration_model is not None
+        
+    # ~ model saving and loading
+    # Overwriting the default save and load functions to and from the disk.
+    
+    def save(self, path: str):
+        
+        os.mkdir(path)
+        
+        ensemble_path = os.path.join(path, 'ensemble.ckpt')
+        torch.save({
+            'num_models': len(self.models),
+            'hyper_parameters': self.hparams,
+            'pytorch-lightning_version': pl.__version__,
+            # 31.08.24: Adding the version of the package to the saved model so that 
+            #           during loading we can provide this information to the user in case 
+            #           the loading process fails due to a version mismatch...
+            'version': get_version(),
+        }, ensemble_path)
+        
+        for i, model in enumerate(self.models):
+            model_path = os.path.join(path, f'model_{i}.ckpt')
+            model.save(model_path)
+            
+    @classmethod
+    def load(cls, path: str):
+        
+        assert os.path.isdir(path), f'The given path needs to be a folder in order to load an ensemble!'
+        
+        ensemble_path = os.path.join(path, 'ensemble.ckpt')
+        ensemble = torch.load(ensemble_path)
+        
+        models: List[Megan] = []
+        for i in range(ensemble['num_models']):
+            model_path = os.path.join(path, f'model_{i}.ckpt')
+            model = Megan.load(model_path)
+            models.append(model)
+        
+        return cls(models=models, **ensemble['hyper_parameters'])

@@ -3,9 +3,10 @@ import os
 import tempfile
 
 import torch
+import numpy as np
 
 from graph_attention_student.testing import set_environ
-from graph_attention_student.torch.model import AbstractGraphModel
+from graph_attention_student.torch.model import AbstractGraphModel, UncertaintyEstimatorMixin
 
 
 # Simple mock implementation of the AbstractGraphModel interface for the testing of the 
@@ -78,3 +79,70 @@ class TestAbstractGraphModel:
                 model = GraphModel.load(model_path)
                 assert 'WARNING' in str(exc)
                 assert 'version' in str(exc)
+
+
+class UncertaintyEstimatorModel(AbstractGraphModel, UncertaintyEstimatorMixin):
+    """
+    Simple mock model that implements both the AbstractGraphModel and the UncertaintyEstimatorMixin
+    for testing purposes.
+    """
+    def __init__(self):
+        super().__init__()
+
+    def forward_graphs(self, graphs):
+        # Mock implementation that returns a constant uncertainty for each graph.
+        results = []
+        for i in range(len(graphs)):
+            results.append({'graph_uncertainty': torch.tensor([float(i)])})
+        return results
+
+    def forward(self, data):
+        raise NotImplementedError()
+
+
+class TestUncertaintyEstimatorMixin:
+    
+    def test_estimate_uncertainty_graphs(self):
+        """
+        Test that the estimate_uncertainty_graphs method returns the correct uncertainties.
+        """
+        model = UncertaintyEstimatorModel()
+        graphs = [{} for _ in range(5)]  # Create 5 dummy graphs
+        uncertainties = model.estimate_uncertainty_graphs(graphs)
+        
+        expected_uncertainties = [float(i) for i in range(5)]
+        assert all(uncertainties == expected_uncertainties), f"Expected {expected_uncertainties}, but got {uncertainties}"
+
+    def test_combine_importances_discount(self):
+        """
+        Test the combine_importances method with the discount strategy.
+        """
+        model = UncertaintyEstimatorModel()
+        importances = [
+            np.array([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]]),
+            np.array([[0.2, 0.3, 0.4], [0.5, 0.6, 0.7]]),
+            np.array([[0.3, 0.4, 0.5], [0.6, 0.7, 0.8]])
+        ]
+        
+        combined, mean, std = model.combine_importances(importances, strategy='discount')
+        
+        assert combined.shape == (2, 3)
+        assert mean.shape == (2, 3)
+        assert std.shape == (2, 3)
+        
+    def test_combine_importances_mean(self):
+        """
+        Test the combine_importances method with the mean strategy.
+        """
+        model = UncertaintyEstimatorModel()
+        importances = [
+            np.array([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]]),
+            np.array([[0.2, 0.3, 0.4], [0.5, 0.6, 0.7]]),
+            np.array([[0.3, 0.4, 0.5], [0.6, 0.7, 0.8]])
+        ]
+        
+        combined, mean, std = model.combine_importances(importances, strategy='mean')
+        
+        assert combined.shape == (2, 3)
+        assert mean.shape == (2, 3)
+        assert std.shape == (2, 3)

@@ -14,7 +14,7 @@ from graph_attention_student.visualization import plot_leave_one_out_analysis
 from graph_attention_student.testing import get_mock_graphs
 from graph_attention_student.torch.data import data_list_from_graphs
 from graph_attention_student.torch.model import AbstractGraphModel
-from graph_attention_student.torch.megan import Megan
+from graph_attention_student.torch.megan import Megan, MeganEnsemble
 
 from .util import ARTIFACTS_PATH
 
@@ -312,3 +312,175 @@ def test_megan_basically_works(num_graphs, node_dim, edge_dim, num_channels):
     out_pred = model.predict_graphs(graphs)
     assert isinstance(out_pred, np.ndarray)
     assert out_pred.shape == (num_graphs, output_dim)
+
+
+class TestMeganEnsemble:
+    """
+    Tests for the MeganEnsemble class, which can be used to bundle multiple individual Megan models into 
+    an ensemble to get uncertainty estimates.
+    """
+    
+    def test_saving_loading_megan_ensemble_works(self):
+        """
+        MeganEnsemble.save should save the ensemble model to the given path as a torch archive file,
+        and it should be possible to reconstruct the model from the saved file.
+        Additionally, it checks if the forward pass results are the same before saving and after loading.
+        """
+        # Create mock Megan models
+        model1 = Megan(node_dim=3, edge_dim=3, units=[32, 32, 32], num_channels=2, final_units=[32, 1])
+        model2 = Megan(node_dim=3, edge_dim=3, units=[32, 32, 32], num_channels=2, final_units=[32, 1])
+
+        # Create MeganEnsemble
+        ensemble_model = MeganEnsemble(models=[model1, model2])
+
+        # Create a dummy graph for testing
+        graphs = get_mock_graphs(num=1, num_node_attributes=3, num_edge_attributes=3)
+        
+        # Perform a forward pass before saving
+        ensemble_model.eval()
+        before_save_result = ensemble_model.forward_graphs(graphs)[0]['graph_output']
+
+        with tempfile.TemporaryDirectory() as path:
+            model_path = os.path.join(path, 'megan_ensemble.ckpt')
+            ensemble_model.save(model_path)
+            assert os.path.exists(model_path)
+
+            # Load the model
+            loaded_ensemble_model = MeganEnsemble.load(model_path)
+            assert loaded_ensemble_model is not None
+            assert isinstance(loaded_ensemble_model, MeganEnsemble)
+
+            # Perform a forward pass after loading
+            loaded_ensemble_model.eval()
+            after_load_result = loaded_ensemble_model.forward_graphs(graphs)[0]['graph_output']
+            
+
+        # Compare the results before saving and after loading
+        assert np.allclose(before_save_result, after_load_result), \
+            "The forward pass results are different before saving and after loading."
+
+    @pytest.mark.parametrize('num_graphs, node_dim, edge_dim', [(10, 3, 3)])
+    def test_megan_ensemble_forward_graphs_works(self, num_graphs, node_dim, edge_dim):
+        """
+        MeganEnsemble.forward_graphs should execute the forward pass for a list of graphs without errors
+        and return a list of dictionaries containing the results.
+        """
+        # Create mock Megan models
+        model1 = Megan(node_dim=node_dim, edge_dim=edge_dim, units=[32, 32, 32], num_channels=2, final_units=[32, 1])
+        model2 = Megan(node_dim=node_dim, edge_dim=edge_dim, units=[32, 32, 32], num_channels=2, final_units=[32, 1])
+
+        # Create MeganEnsemble
+        ensemble_model = MeganEnsemble(models=[model1, model2])
+
+        # Create mock graphs
+        graphs = get_mock_graphs(num=num_graphs, num_node_attributes=node_dim, num_edge_attributes=edge_dim)
+
+        # Execute forward_graphs
+        results = ensemble_model.forward_graphs(graphs)
+
+        # Assertions
+        assert isinstance(results, list)
+        assert len(results) == num_graphs
+        for result in results:
+            assert isinstance(result, dict)
+            assert 'graph_output' in result
+            assert 'node_importance' in result
+            assert 'edge_importance' in result
+            assert 'graph_uncertainty' in result
+            assert 'node_importance_std' in result
+            assert 'edge_importance_std' in result
+
+    def test_megan_ensemble_forward_captures_mve_status(self):
+        """
+        Test that MeganEnsemble.forward correctly captures the MVE status of individual member models
+        when calculating uncertainty.
+        """
+        # Create mock Megan models with MVE status
+        model1 = Megan(node_dim=3, edge_dim=3, units=[32, 32, 32], num_channels=2, final_units=[32, 1])
+        model2 = Megan(node_dim=3, edge_dim=3, units=[32, 32, 32], num_channels=2, final_units=[32, 1])
+        model1.mve_active = True
+        model2.mve_active = True
+
+        # Create MeganEnsemble
+        ensemble_model = MeganEnsemble(models=[model1, model2])
+
+        # Create a dummy graph for testing
+        graphs = get_mock_graphs(num=1, num_node_attributes=3, num_edge_attributes=3)
+
+        # Perform a forward pass
+        ensemble_model.eval()
+        results = ensemble_model.forward_graphs(graphs)
+
+        # basic Assertions
+        assert isinstance(results, list)
+        assert len(results) == 1
+        result = results[0]
+        assert 'graph_output' in result
+        assert 'graph_uncertainty' in result
+        assert result['graph_uncertainty'] is not None
+        
+        # Now, the results should also contain the "graph_variance_stack" property which should consist of 
+        # exactly two tensors that are stacked since there are two members in the ensemble here.
+        assert 'graph_variance_stack' in result
+        assert isinstance(result['graph_variance_stack'], np.ndarray)
+        assert result['graph_variance_stack'].shape[-1] == 2
+        
+    def test_megan_ensemble_forward_works_without_mve(self):
+        # Create mock Megan models with MVE status
+        model1 = Megan(node_dim=3, edge_dim=3, units=[32, 32, 32], num_channels=2, final_units=[32, 1])
+        model2 = Megan(node_dim=3, edge_dim=3, units=[32, 32, 32], num_channels=2, final_units=[32, 1])
+        # NOTE: We explicitly set the MVE status to False here!
+        model1.mve_active = False
+        model2.mve_active = False
+
+        # Create MeganEnsemble
+        ensemble_model = MeganEnsemble(models=[model1, model2])
+
+        # Create a dummy graph for testing
+        graphs = get_mock_graphs(num=1, num_node_attributes=3, num_edge_attributes=3)
+
+        # Perform a forward pass
+        ensemble_model.eval()
+        results = ensemble_model.forward_graphs(graphs)
+
+        # basic Assertions
+        assert isinstance(results, list)
+        assert len(results) == 1
+        result = results[0]
+        assert 'graph_output' in result
+        assert 'graph_uncertainty' in result
+        assert result['graph_uncertainty'] is not None
+        
+        # Now - without mve capable members - this property should also not be included in the 
+        # results here! 
+        assert 'graph_variance_stack' not in result
+
+
+class TestMegan:
+    
+    @pytest.mark.parametrize('num_graphs, node_dim, edge_dim, num_channels', [(10, 3, 3, 2)])
+    def test_predict_graphs_approximate_works(self, num_graphs, node_dim, edge_dim, num_channels):
+        """
+        Test that the _predict_graphs_approximate method returns the correct shapes and types.
+        """
+        # Create a Megan model
+        model = Megan(node_dim=node_dim, edge_dim=edge_dim, units=[32, 32, 32], num_channels=num_channels, final_units=[32, 1], importance_mode='regression')
+
+        # Create mock graphs
+        graphs = get_mock_graphs(num=num_graphs, num_node_attributes=node_dim, num_edge_attributes=edge_dim)
+
+        # Create mock labels
+        labels = np.random.uniform(-3, 3, size=(num_graphs, 1))
+
+        # Call the method
+        out_true, out_pred = model._predict_graphs_approximate(graphs, labels)
+        
+        # Compute the accuracy
+        accuracy = np.mean((np.round(out_pred) == out_true))
+        print(f"Accuracy: {accuracy}")
+
+        # Assertions
+        assert isinstance(out_true, np.ndarray)
+        assert isinstance(out_pred, np.ndarray)
+        assert out_true.shape == (num_graphs, num_channels)
+        assert out_pred.shape == (num_graphs, num_channels)

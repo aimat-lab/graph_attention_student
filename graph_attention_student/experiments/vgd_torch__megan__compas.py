@@ -76,7 +76,7 @@ PROJECTION_UNITS: t.List[int] = [64, 128, 256]
 #       in that layer of the prediction network.
 #       Note that the last value of this list determines the output shape of the entire network and 
 #       therefore has to match the number of target values given in the dataset.
-FINAL_UNITS: t.List[int] = [128, 1]
+FINAL_UNITS: t.List[int] = [128, 64, 1]
 # :param NUM_CHANNELS:
 #       The number of explanation channels for the model.
 NUM_CHANNELS: int = 2
@@ -90,7 +90,7 @@ IMPORTANCE_FACTOR: float = 1.0
 #       be considered as active. The higher this value, the less sparse the explanations will be.
 #       Typical values range from 0.2 - 2.0 but also depend on the graph size and the specific problem at 
 #       hand. This is a parameter with which one has to experiment until a good trade-off is found!
-IMPORTANCE_OFFSET: float = 0.5
+IMPORTANCE_OFFSET: float = 0.2
 # :param SPARSITY_FACTOR:
 #       This is the coefficient that is used to scale the explanation sparsity loss during training.
 #       The higher this value the more explanation sparsity (less and more discrete explanation masks)
@@ -118,7 +118,7 @@ ATTENTION_AGGREGATION: str = 'max'
 #       explanation co-training, this determines the margin for the thresholding. Instead of using the regression
 #       reference as a hard threshold, values have to be at least this margin value lower/higher than the 
 #       regression reference to be considered a class sample.
-REGRESSION_MARGIN: t.Optional[float] = +0.1
+REGRESSION_MARGIN: t.Optional[float] = -0.1
 # :param CONTRASTIVE_FACTOR:
 #       This is the factor of the contrastive representation learning loss of the network. If this value is 0 
 #       the contrastive repr. learning is completely disabled (increases computational efficiency). The higher 
@@ -146,9 +146,9 @@ CONTRASTIVE_BETA: float = 1.0
 
 DO_CLUSTERING = True
 
-EPOCHS: int = 15
-BATCH_SIZE: int = 100
-LEARNING_RATE = 1e-4
+EPOCHS: int = 100
+BATCH_SIZE: int = 32
+LEARNING_RATE = 1e-5
 
 __DEBUG__ = True
 __TESTING__ = False

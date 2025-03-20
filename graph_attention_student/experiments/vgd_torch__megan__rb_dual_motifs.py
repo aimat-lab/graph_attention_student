@@ -66,7 +66,7 @@ TARGET_NAMES: t.Dict[int, str] = {
 #       This list determines the layer structure of the model's graph encoder part. Each element in 
 #       this list represents one layer, where the integer value determines the number of hidden units 
 #       in that layer of the encoder network.
-UNITS: t.List[int] = [64, 64]
+UNITS: t.List[int] = [64, 64, 64]
 # :param HIDDEN_UNITS:
 #       This integer value determines the number of hidden units in the model's graph attention layer's
 #       transformative dense networks that are used for example to perform the message update and to 
@@ -80,7 +80,7 @@ IMPORTANCE_UNITS: t.List[int] = [ ]
 #       This list determines the layer structure of the MLP's that act as the channel-specific projections.
 #       Each element in this list represents one layer where the integer value determines the number of hidden
 #       units in that layer.
-PROJECTION_UNITS: t.List[int] = [64, 128, 128]
+PROJECTION_UNITS: t.List[int] = [64, 128, 256]
 #PROJECTION_UNITS = []
 # :param FINAL_UNITS:
 #       This list determines the layer structure of the model's final prediction MLP. Each element in 
@@ -120,7 +120,7 @@ FIDELITY_FACTOR: float = 0.1
 #       explanation co-training, this determines the margin for the thresholding. Instead of using the regression
 #       reference as a hard threshold, values have to be at least this margin value lower/higher than the 
 #       regression reference to be considered a class sample.
-REGRESSION_MARGIN: t.Optional[float] = -0.3
+REGRESSION_MARGIN: t.Optional[float] = -0.1 # -0.2
 # :param NORMALIZE_EMBEDDING:
 #       This boolean value determines whether the graph embeddings are normalized to a unit length or not.
 #       If this is true, the embedding of each individual explanation channel will be L2 normalized such that 
@@ -173,10 +173,10 @@ EPOCHS: int = 100
 #       The batch size to use while training. This is the number of elements from the dataset that are 
 #       presented to the model at the same time to estimate the gradient direction for the stochastic gradient 
 #       descent optimization.
-BATCH_SIZE: int = 100
+BATCH_SIZE: int = 64
 # :param LEARNING_RATE:
 #       This float determines the learning rate of the optimizer.
-LEARNING_RATE: float = 1e-4
+LEARNING_RATE: float = 1e-6
 
 REPETITIONS = 1
 

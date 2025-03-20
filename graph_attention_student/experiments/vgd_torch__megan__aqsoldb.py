@@ -43,7 +43,7 @@ USE_BOOTSTRAPPING: bool = False
 #       This integer determines how many elements to sample from the test set elements to act as 
 #       examples for the evaluation process. These examples will be visualized together with their
 #       predictions.
-NUM_EXAMPLES: int = 100
+NUM_EXAMPLES: int = 5
 # :param TARGET_NAMES:
 #       This dictionary structure can be used to define the human readable names for the various 
 #       target values that are part of the dataset. The keys of this dict have to be integer indices 
@@ -60,7 +60,7 @@ TARGET_NAMES: t.Dict[int, str] = {
 #       This list determines the layer structure of the model's graph encoder part. Each element in 
 #       this list represents one layer, where the integer value determines the number of hidden units 
 #       in that layer of the encoder network.
-UNITS: t.List[int] = [64, 64, 64, 64]
+UNITS: t.List[int] = [64, 64, 64]
 # :param HIDDEN_UNITS:
 #       This integer value determines the number of hidden units in the model's graph attention layer's
 #       transformative dense networks that are used for example to perform the message update and to 
@@ -81,7 +81,7 @@ PROJECTION_UNITS: t.List[int] = [64, 128, 256]
 #       in that layer of the prediction network.
 #       Note that the last value of this list determines the output shape of the entire network and 
 #       therefore has to match the number of target values given in the dataset.
-FINAL_UNITS: t.List[int] = [64, 1]
+FINAL_UNITS: t.List[int] = [128, 64, 1]
 # :param NUM_CHANNELS:
 #       The number of explanation channels for the model.
 NUM_CHANNELS: int = 2
@@ -95,7 +95,7 @@ IMPORTANCE_FACTOR: float = 1.0
 #       be considered as active. The higher this value, the less sparse the explanations will be.
 #       Typical values range from 0.2 - 2.0 but also depend on the graph size and the specific problem at 
 #       hand. This is a parameter with which one has to experiment until a good trade-off is found!
-IMPORTANCE_OFFSET: float = 1.0
+IMPORTANCE_OFFSET: float = 1.5
 # :param FIDELITY_FACTOR:
 #       This parameter controls the coefficient of the explanation fidelity loss during training. The higher
 #       this value, the more the model will be trained to create explanations that actually influence the
@@ -118,12 +118,12 @@ ATTENTION_AGGREGATION: str = 'max'
 #       explanation co-training, this determines the margin for the thresholding. Instead of using the regression
 #       reference as a hard threshold, values have to be at least this margin value lower/higher than the 
 #       regression reference to be considered a class sample.
-REGRESSION_MARGIN: t.Optional[float] = +0.2
+REGRESSION_MARGIN: t.Optional[float] = -0.1
 # :param CONTRASTIVE_FACTOR:
 #       This is the factor of the contrastive representation learning loss of the network. If this value is 0 
 #       the contrastive repr. learning is completely disabled (increases computational efficiency). The higher 
 #       this value the more the contrastive learning will influence the network during training.
-CONTRASTIVE_FACTOR: float = 0.0
+CONTRASTIVE_FACTOR: float = 0.01
 # :param CONTRASTIVE_NOISE:
 #       This float value determines the noise level that is applied when generating the positive augmentations 
 #       during the contrastive learning process.
@@ -143,10 +143,21 @@ CONTRASTIVE_TEMP: float = 1.0
 #       This is the float value from the paper about the hard negative mining called the concentration 
 #       parameter. It determines how much the contrastive loss is focused on the hardest negative samples.
 CONTRASTIVE_BETA: float = 1.0
+# :param TRAIN_MVE:
+#       This boolean determines whether or not the (regression) model should be trained as a mean variance estimator
+#       (MVE) model. This would mean that the model predicts the mean and the variance of the target value distribution
+#       instead of just the mean. This is useful for regression tasks where the target values are not deterministic
+#       but have a certain variance/noise.
+TRAIN_MVE: bool = False
+# :param MVE_WARMUP_EPOCHS:
+#       This integer determines how many epochs the model should be trained normally (MSE loss) before switching on 
+#       the NLL loss to train the variance as well. In general it is recommended to fully converge a model on the 
+#       normal loss before switching to the NLL loss.
+MVE_WARMUP_EPOCHS: int = 50
 
-EPOCHS: int = 100
-BATCH_SIZE: int = 100
-LEARNING_RATE = 1e-4
+EPOCHS: int = 150
+BATCH_SIZE: int = 16
+LEARNING_RATE = 1e-5
 
 __DEBUG__ = True
 __TESTING__ = False

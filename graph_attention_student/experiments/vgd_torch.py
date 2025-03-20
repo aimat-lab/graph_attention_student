@@ -18,6 +18,7 @@ import json
 import random
 import typing as t
 from collections import defaultdict
+from typing import Union, Dict
 
 import pandas as pd
 import numpy as np
@@ -49,6 +50,21 @@ from graph_attention_student.torch.model import AbstractGraphModel
 from graph_attention_student.torch.megan import Megan
 from graph_attention_student.torch.data import data_list_from_graphs
 
+
+# == EXPERIMENT PARAMETERS ==
+# The following parameters are for the experiment in general.
+
+# :param IDENTIFIER:
+#       A unique string name which will act like a tag and help to later identify which group
+#       the experiment belongs to. This is useful for grouping experiments together in the
+#       analysis phase or when doing sweeps.
+IDENTIFIER: str = 'default'
+# :param SEED_TEST:
+#       The random seed that is used to determine the test split of the dataset. Note that 
+#       this will be overwritten when explicit test indices are supplied.
+SEED: int = 42
+
+
 # == DATASET PARAMETERS ==
 # The following parameters determine the dataset and how to handle said dataset.
 
@@ -72,13 +88,29 @@ TEST_INDICES_PATH: t.Optional[str] = None
 #       This integer number defines how many elements of the dataset are supposed to be sampled 
 #       for the unseen test set on which the model will be evaluated. This parameter will be ignored 
 #       if a test_indices file path is given.
-NUM_TEST: int = 1000
+#       This may either be an absolute number of elements or a float value between 0 and 1 which
+#       determines the fraction of the dataset to be used as test set.
+NUM_TEST: Union[int, float] = 0.1
+# :param NUM_VAL:
+#       The integer number of elements to sample from the dataset to act as the validation set.
+#       The validation set is sampled from the elements that remain *after* the test set has been 
+#       sampled.
+#       This may either be an absolute number of elements or a float value between 0 and 1 which  
+#       determines the fraction of the dataset to be used as validation set.
+NUM_VAL: Union[int, float] = 0.1
+# :param NUM_TRAIN:
+#       An optional parameter which can be used to subsample the training set. This can be used to 
+#       reduce the size of the train set for large dataset for example. If the value is None, the whole 
+#       training set will be used.
+#       Otherwise this may either be an absolute number of elements or a float value between 0 and 1
+#       which determines the fraction of the dataset to be used as training set.
+NUM_TRAIN: Union[None, int, float] = None
 # :param USE_BOOTSTRAPPING:
 #       This flag determines whether to use bootstrapping with the training elements of the dataset.
 #       If enabled, the training samples will be subsampled with the possibility of duplicates. This 
 #       method can introduce diversity in the input data distribution between different trained models
 #       even though they have the same train-test split.
-USE_BOOTSTRAPPING: bool = False
+USE_BOOTSTRAPPING: bool = True
 # :param NUM_EXAMPLES:
 #       This integer determines how many elements to sample from the test set elements to act as 
 #       examples for the evaluation process. These examples will be visualized together with their
@@ -97,6 +129,12 @@ TARGET_NAMES: t.Dict[int, str] = defaultdict(str)
 #       The class label-based oversampling will only be applied to the training set after the train test 
 #       split has been determined and therefore does not affect the test dataset.
 CLASS_OVERSAMPLING: bool = False
+# :param OVERSAMPLING_FACTORS:
+#       Optionally, this may be a dictionary structure that defines the oversampling factor for each class
+#       label of the dataset. The keys of this dict have to be the integer class labels and the corresponding
+#       values have to be the float oversampling factor for that class.
+#       This oversampling will be applied ADDITIONALLY ON TOP of the CLASS_OVERSAMPLING flag!
+OVERSAMPLING_FACTORS: Dict[int, float] = None
 
 # == MODEL PARAMETERS ==
 # The following parameters configure the model architecture.
@@ -224,12 +262,11 @@ def load_model(e: Experiment,
 
 @experiment.hook('train_test_split', default=False, replace=False)
 def train_test_split(e: Experiment,
-                     rep: int,
                      indices: list[int],
                      index_data_map: dict[int, dict]
-                     ) -> tuple[list, list]:
+                     ) -> tuple[list, list, list]:
     """
-    This hook is supposed to determine the split of the indices into the training and testing set. 
+    This hook is supposed to determine the split of the indices into the training, validation and testing set. 
     The function is supposed to return a tuple (train_indices, test_indices) where both are the lists 
     of integer indices for the train and test set respectively.
     
@@ -238,6 +275,9 @@ def train_test_split(e: Experiment,
     of that list as the test indices. Otherwise it will sample random test elements from the indices
     list (using NUM_TEST elements) and use the rest for training.
     """
+    
+    # ~ test indices
+    # we first sample the test indices from the list of all indices.
     if e.TEST_INDICES_PATH is not None:
         assert os.path.exists(e.TEST_INDICES_PATH), 'test_indices path not valid / does not exist!'
         assert e.TEST_INDICES_PATH.endswith('.json'), 'test_indices must be JSON file!'
@@ -248,19 +288,48 @@ def train_test_split(e: Experiment,
             test_indices = json.loads(content)
             
     else:
-        e.log('sampling random test elements...')
-        test_indices = random.sample(indices, k=e.NUM_TEST)
+        random.seed(e.SEED)
+        num_test = e.NUM_TEST
+        if isinstance(e.NUM_TEST, float):
+            num_test = int(e.NUM_TEST * len(indices))
         
-    # The train indices can very simply be derived as all those indices which are not already part of 
-    # the test set!
-    train_indices = list(set(indices).difference(set(test_indices)))
+        e.log(f'sampling {num_test} random test elements...')
+        test_indices = random.sample(indices, k=num_test)
         
-    return train_indices, test_indices
+    indices = list(set(indices) - set(test_indices))
+        
+    # ~ validation indices
+    # Then from the set of remaining indices we sample the validation set
+    random.seed(e.SEED)
+    num_val = e.NUM_VAL
+    if isinstance(e.NUM_VAL, float):
+        num_val = int(e.NUM_VAL * len(indices))
+        
+    e.log(f'sampling {num_val} random validation elements...')
+    val_indices = random.sample(indices, k=num_val)
+    indices = list(set(indices) - set(val_indices))
+        
+    # ~ train indices
+    # finally the train indices are simply all the remaining indices that are not part of either 
+    # the test or validation set.
+    
+    # Optionally, we also want to supsample the train set here
+    if e.NUM_TRAIN is not None:
+        num_train = e.NUM_TRAIN
+        if isinstance(e.NUM_TRAIN, float):
+            num_train = int(e.NUM_TRAIN * len(indices))
+        
+        e.log(f'sampling {num_train} random training elements...')
+        random.seed() # release the seed
+        train_indices = random.sample(indices, k=num_train)
+    else:
+        train_indices = indices
+        
+    return train_indices, val_indices, test_indices
 
 
 @experiment.hook('filter_train_indices', default=False, replace=False)
 def filter_train_indices(e: Experiment,
-                         rep: int,
                          train_indices: list[int],
                          index_data_map: dict[int, dict]
                          ) -> list[int]:
@@ -280,13 +349,14 @@ def filter_train_indices(e: Experiment,
     # When bootstrapping is enabled, we simply sample the training indices with replacement which 
     # introduces duplicates in the training set.
     if e.USE_BOOTSTRAPPING:
-        e.log('sub-sampling the training elements for bootstrapping...')    
+        e.log('sub-sampling the training elements for bootstrapping...')
+        random.seed()
         train_indices = random.choices(train_indices, k=len(train_indices))
         
     # Exspecially for classification tasks it is possible that the training set is imbalance in terms of
     # the class distribution. In this case it can be useful to oversample the training elements of the
     # minority class to counter the class imbalance.
-    if e.CLASS_OVERSAMPLING:
+    if e.CLASS_OVERSAMPLING or e.OVERSAMPLING_FACTORS:
         e.log('oversampling the training elements to counter class imbalance...')
 
         # First of all we want to determine the class label for every index of the train set. For this we 
@@ -304,7 +374,20 @@ def filter_train_indices(e: Experiment,
         num_max = max([len(indices) for indices in class_indices_map.values()])
         train_indices_sampled = []
         for label, indices in class_indices_map.items():
-            indices_ = random.choices(indices, k=num_max)
+            
+            # Here we calculate the number of elements to be sampled for each class. In the first instance 
+            # if the CLASS_OVERSAMPLING flag is set, we sample exactly the same number of elements as the
+            # largest class. 
+            # On top of that, the OVERSAMPLING_FACTORS dict can be used to define a custom oversampling factor
+            # for each class label.
+            num = len(indices)
+            if e.CLASS_OVERSAMPLING:
+                num = num_max
+            if e.OVERSAMPLING_FACTORS:
+                num = int(e.OVERSAMPLING_FACTORS.get(label, 1) * num)
+                
+            e.log(f' * class: {label} - {len(indices)} elements > {num} oversampled')
+            indices_ = random.choices(indices, k=num)
             train_indices_sampled += indices_
             
         train_indices = train_indices_sampled
@@ -314,7 +397,6 @@ def filter_train_indices(e: Experiment,
 
 @experiment.hook('train_model', default=True)
 def train_model(e: Experiment,
-                rep: int,
                 index_data_map: dict,
                 train_indices: t.List[int],
                 test_indices: t.List[int],
@@ -346,7 +428,7 @@ def train_model(e: Experiment,
     )
     
     e.log(f'starting model training with {e.EPOCHS} epochs...')
-    logger = CSVLogger(e[f'path/{rep}'], name='logs')
+    logger = CSVLogger(e.path, name='logs')
     trainer = pl.Trainer(
         max_epochs=e.EPOCHS,
         logger=logger,
@@ -363,7 +445,6 @@ def train_model(e: Experiment,
 def evaluate_model(e: Experiment,
                     model: AbstractGraphModel,
                     trainer: pl.Trainer,
-                    rep: int,
                     index_data_map: dict,
                     train_indices: t.List[int],
                     test_indices: t.List[int],
@@ -384,11 +465,10 @@ def evaluate_model(e: Experiment,
     with some information about the node embeddings of those graphs into PDF file.
     """
     e.log('evaluating model prediction performance...')
-    archive_path = e[f'path/{rep}']
 
     graphs_test = [index_data_map[i]['metadata']['graph'] for i in test_indices]
     
-    example_indices = e[f'example_indices/{rep}']
+    example_indices = e['indices/example']
     metadatas_example = [index_data_map[i]['metadata'] for i in example_indices]
     graphs_example = [metadata['graph'] for metadata in metadatas_example]
     
@@ -408,7 +488,7 @@ def evaluate_model(e: Experiment,
         metadata['graph']['graph_output'] = out
         metadatas.append(metadata)
 
-    csv_path = os.path.join(e[f'path/{rep}'], 'test.csv')
+    csv_path = os.path.join(e.path, 'test.csv')
     export_metadatas_csv(metadatas, csv_path)
     
     # ~ task specific metrics
@@ -431,14 +511,14 @@ def evaluate_model(e: Experiment,
             
             values_true = out_true[:, target_index]
             values_pred = out_pred[:, target_index]
-            e[f'out/true/{rep}'] = values_true
-            e[f'out/pred/{rep}'] = values_pred
+            e[f'out/true'] = values_true
+            e[f'out/pred'] = values_pred
             
             r2_value = r2_score(values_true, values_pred)
             mse_value = mean_squared_error(values_true, values_pred)
             mae_value = mean_absolute_error(values_true, values_pred)
-            e[f'r2/{target_index}/{rep}'] = r2_value
-            e[f'mae/{target_index}/{rep}'] = mae_value
+            e[f'metrics/r2/{target_index}'] = r2_value
+            e[f'metrics/mae/{target_index}'] = mae_value
             
             plot_regression_fit(
                 values_true, values_pred,
@@ -452,8 +532,8 @@ def evaluate_model(e: Experiment,
                     f' - mse: {mse_value:.3f}'
                     f' - mae: {mae_value:.3f}')
             
-        fig.savefig(os.path.join(archive_path, 'regression.pdf'))
-        fig.savefig(os.path.join(archive_path, 'regression.png'), dpi=200)
+        fig.savefig(os.path.join(e.path, 'regression.pdf'))
+        fig.savefig(os.path.join(e.path, 'regression.png'), dpi=200)
         plt.close(fig)
     
     elif e.DATASET_TYPE == 'classification':
@@ -468,7 +548,7 @@ def evaluate_model(e: Experiment,
         labels_pred = np.argmax(out_pred, axis=-1)
         
         acc_value = accuracy_score(labels_true, labels_pred)
-        e[f'acc/{rep}'] = acc_value
+        e[f'metrics/acc'] = acc_value
         e.log(f' * acc: {acc_value:.3f}')
         
         e.log('plotting confusion matrix...')
@@ -487,19 +567,19 @@ def evaluate_model(e: Experiment,
             yticklabels=ticklabels,
             linewidths=0,
         )
-        fig.savefig(os.path.join(e[f'path/{rep}'], 'confusion_matrix.pdf'))
+        fig.savefig(os.path.join(e.path, 'confusion_matrix.pdf'))
         plt.close(fig)
         
         # Only if the classification has exactly 2 clases we can calculate additional metrics for 
         # binary classification as well, such as the AUROC score and the F1 metric.
         if num_classes == 2:
             
-            f1_value = f1_score(labels_true, labels_pred)
-            e[f'f1/{rep}'] = f1_value
+            f1_value = f1_score(labels_true, labels_pred, average='macro')
+            e[f'metrics/f1'] = f1_value
             e.log(f' * f1: {f1_value:.3f}')
         
             auc_value = roc_auc_score(out_true[:, 1], out_pred[:, 1])
-            e[f'auc/{rep}'] = auc_value
+            e[f'metrics/auc'] = auc_value
             e.log(f' * auc: {auc_value:.3f}')
             
             e.log('plotting the AUC curve...')
@@ -521,12 +601,12 @@ def evaluate_model(e: Experiment,
             ax.set_xlabel('False Positive Rate')
             ax.set_ylabel('True Positive Rate')
             ax.legend()
-            fig.savefig(os.path.join(e[f'path/{rep}'], 'auc.pdf'))
+            fig.savefig(os.path.join(e.path, 'auc.pdf'))
             plt.close(fig)
         
     # ~ plotting loss over epochs
     
-    logs_path = os.path.join(e[f'path/{rep}'], 'logs', 'version_0', 'metrics.csv')
+    logs_path = os.path.join(e.path, 'logs', 'version_0', 'metrics.csv')
     if os.path.exists(logs_path):
         e.log('reading the training logs and plotting the loss...')
         df = pd.read_csv(logs_path)
@@ -549,7 +629,7 @@ def evaluate_model(e: Experiment,
         ax.set_title('Loss over Training')
         ax.set_ylabel('Loss')
         ax.set_xlabel('Epoch')
-        fig.savefig(os.path.join(e[f'path/{rep}'], 'loss.pdf'))
+        fig.savefig(os.path.join(e.path, 'loss.pdf'))
         
     # ~ visualizing examples
     # In this section we want to visualize the graph visualizations of the example elements
@@ -557,7 +637,7 @@ def evaluate_model(e: Experiment,
     e.log('visualizing examples...')
     infos_example = model.forward_graphs(graphs_example)
     
-    pdf_path = os.path.join(e[f'path/{rep}'], 'example_graphs.pdf')
+    pdf_path = os.path.join(e.path, 'example_graphs.pdf')
     with PdfPages(pdf_path) as pdf:
         
         for index, metadata, info in zip(example_indices, metadatas_example, infos_example):
@@ -600,11 +680,11 @@ def evaluate_model(e: Experiment,
 @experiment
 def experiment(e: Experiment):
     
-    @e.testing
-    def testing(e: Experiment):
-        e.EPOCHS = 3
-        e.REPETITIONS = 1
-        e.NUM_EXAMPLES = 5
+    # @e.testing
+    # def testing(e: Experiment):
+    #     e.EPOCHS = 3
+    #     e.REPETITIONS = 1
+    #     e.NUM_EXAMPLES = 5
     
     e.log('starting experiment...')
     
@@ -658,116 +738,101 @@ def experiment(e: Experiment):
         'after_dataset',
         index_data_map=index_data_map,
     )
+    e['_index_data_map'] = index_data_map
     
-    # ~ setting up default hooks
-    # In the following section all the default hook implementations are defined which will be needed 
-    # in the main training loop later on.
+    # ~ train-test split
+    # For each repetition of the model training we potentially want to pick a different train-test split.
+    # Only if a path to a test_indices file has been given we use that one instead. Otherwise we choose 
+    # as many random test elements as defined in NUM_TEST parameter and use the rest for training.
     
-    # ~ main training loop
+    e.log('determining train-test split...')
     
-    e.log('starting trainig loop...')
-    for rep in range(e.REPETITIONS):
+    # :hook train_test_split:
+    #       This hook receives the repetition index, the full list of indices of the dataset and the
+    #       index_data_map of the dataset. The hook is supposed to return a tuple (train_indices, test_indices)
+    #       where both are lists of integer indices for the train and test set respectively.
+    train_indices, val_indices, test_indices = e.apply_hook(
+        'train_test_split',
+        indices=indices,
+        index_data_map=index_data_map,
+    )
         
-        e.log(f'REP ({rep+1}/{e.REPETITIONS})')
+    e.log(f' * {len(train_indices)} train')
+    e.log(f' * {len(val_indices)} val')
+    e.log(f' * {len(test_indices)} test')
         
-        # ~ archive folder for current repetition
-        archive_path = os.path.join(e.path, f'rep{rep:02d}')
-        os.mkdir(archive_path)
-        e[f'path/{rep}'] = archive_path
+    # ~ example indices
+    # The example indices will be randomly chosen from the test indices and these will be the elements 
+    # that we will later on use to visualize the model predictions / explanations on.
+    num_examples = min(e.NUM_EXAMPLES, len(test_indices))
+    example_indices = random.sample(test_indices, k=num_examples)
+    e.log(f'using {len(test_indices)} test elements and {len(train_indices)} train_elements')
+    
+    e[f'indices/train'] = train_indices
+    e[f'indices/val'] = val_indices
+    e[f'indices/test'] = test_indices
+    e[f'indices/example'] = example_indices
+    
+    # :hook filter_train_indices:
+    #       This hook receives the repetition index, the train_indices list and the index_data_map of the dataset.
+    #       The hook is supposed to return the modified train_indices list. This can be useful to remove certain
+    #       elements from the training set that should not be part of the training process. Otherwise this hook 
+    #       can also apply bootstrapping to the training indices or to oversample in case of class imbalance.
+    train_indices = e.apply_hook(
+        'filter_train_indices',
+        train_indices=train_indices,
+        index_data_map=index_data_map,
+        default=train_indices
+    )
+    e[f'indices/train_filtered'] = train_indices
+    
+    # We also want to save the test indices that were chosen as an individual json file as an artifact 
+    # so that it will be easy to reproduce the experiment with the same indices in subsequent runs.
+    e.commit_json('test_indices.json', test_indices)
+    e.commit_json('validation_indices.json', val_indices)
         
-        # ~ train-test split
-        # For each repetition of the model training we potentially want to pick a different train-test split.
-        # Only if a path to a test_indices file has been given we use that one instead. Otherwise we choose 
-        # as many random test elements as defined in NUM_TEST parameter and use the rest for training.
-        
-        e.log('determining train-test split...')
-        
-        # :hook train_test_split:
-        #       This hook receives the repetition index, the full list of indices of the dataset and the
-        #       index_data_map of the dataset. The hook is supposed to return a tuple (train_indices, test_indices)
-        #       where both are lists of integer indices for the train and test set respectively.
-        train_indices, test_indices = e.apply_hook(
-            'train_test_split',
-            rep=rep,
-            indices=indices,
-            index_data_map=index_data_map,
-        )
-            
-        # the training indices is just all the rest of the elements that were NOT chosen as the
-        # Despite the conversion from list to set and back, this implementation is still the fastest when 
-        # compared to using a list comprehension for example. This is actually a performance bottleneck for 
-        # very large datasets in the millions of elements!
-        train_indices = list(set(indices).difference(set(test_indices)))
-        num_examples = min(e.NUM_EXAMPLES, len(test_indices))
-        example_indices = random.sample(test_indices, k=num_examples)
-        e.log(f'using {len(test_indices)} test elements and {len(train_indices)} train_elements')
-        
-        # :hook filter_train_indices:
-        #       This hook receives the repetition index, the train_indices list and the index_data_map of the dataset.
-        #       The hook is supposed to return the modified train_indices list. This can be useful to remove certain
-        #       elements from the training set that should not be part of the training process. Otherwise this hook 
-        #       can also apply bootstrapping to the training indices or to oversample in case of class imbalance.
-        train_indices = e.apply_hook(
-            'filter_train_indices',
-            rep=rep,
-            train_indices=train_indices,
-            index_data_map=index_data_map,
-            default=train_indices
-        )
-        
-        e[f'test_indices/{rep}'] = test_indices
-        e[f'train_indices/{rep}'] = train_indices
-        e[f'example_indices/{rep}'] = example_indices
-        
-        # We also want to save the test indices that were chosen as an individual json file as an artifact 
-        # so that it will be easy to reproduce the experiment with the same indices in subsequent runs.
-        indices_path = os.path.join(archive_path, 'test_indices.json')
-        with open(indices_path, mode='w') as file:
-            content = json.dumps(test_indices)
-            file.write(content)
-            
-        # ~ training the model
-        # After all the models have been set up, the model has to be trained.
-        
-        # :hook train_model:
-        #       This hook receives the full dataset in the form of the index_data_map and the train_indices 
-        #       and test_indices lists. The hook is expected to construct the model, train the model according 
-        #       to the experiment configuration and then return a tuple (model, trainer) consisting of the 
-        #       now trained model instance and the pl.Trainer instance that was used for the training.
-        model, trainer = e.apply_hook(
-            'train_model',
-            rep=rep,
-            index_data_map=index_data_map,
-            train_indices=train_indices,
-            test_indices=test_indices,
-        )
-        
-        # ~ evaluating the model
-        # After the model training is completed we can evaluate the model performance on the test set 
-        # and generate the corresponding model evaluation artifacts
-        # :hook evaluate_model:
-        #       This hook receives the trained model, the current repetition index, the index_data_map and 
-        #       and the train_indices and test_indices lists. This hooks should implement the evaluation of 
-        #       the model on the test set and should generate the evaluation plots in the archive folder.
-        #       The evaluation metrics should also be saved to the experiment storage so that they are accessible 
-        #       later on in the experiment analysis as well.
-        e.apply_hook(
-            'evaluate_model',
-            model=model,
-            trainer=trainer,
-            rep=rep,
-            index_data_map=index_data_map,
-            train_indices=train_indices,
-            test_indices=test_indices,
-        )
-        
-        # ~ saving the model
-        # After the model has been trained we also want to save a persistent version of the model
-        # (= model checkpoint) to the archive folder so that it can be used in the future.
-        e.log('saving the model to the disk...')
-        model_path = os.path.join(archive_path, 'model.ckpt')
-        # trainer.save_checkpoint(model_path)
-        model.save(model_path)
+    # ~ training the model
+    # After all the models have been set up, the model has to be trained.
+    
+    # :hook train_model:
+    #       This hook receives the full dataset in the form of the index_data_map and the train_indices 
+    #       and test_indices lists. The hook is expected to construct the model, train the model according 
+    #       to the experiment configuration and then return a tuple (model, trainer) consisting of the 
+    #       now trained model instance and the pl.Trainer instance that was used for the training.
+    model, trainer = e.apply_hook(
+        'train_model',
+        index_data_map=index_data_map,
+        train_indices=train_indices,
+        val_indices=val_indices,
+        test_indices=test_indices,
+    )
+    e['_model'] = model
+    
+    # ~ evaluating the model
+    # After the model training is completed we can evaluate the model performance on the test set 
+    # and generate the corresponding model evaluation artifacts
+    # :hook evaluate_model:
+    #       This hook receives the trained model, the current repetition index, the index_data_map and 
+    #       and the train_indices and test_indices lists. This hooks should implement the evaluation of 
+    #       the model on the test set and should generate the evaluation plots in the archive folder.
+    #       The evaluation metrics should also be saved to the experiment storage so that they are accessible 
+    #       later on in the experiment analysis as well.
+    e.apply_hook(
+        'evaluate_model',
+        model=model,
+        trainer=trainer,
+        index_data_map=index_data_map,
+        train_indices=train_indices,
+        test_indices=test_indices,
+    )
+    
+    # ~ saving the model
+    # After the model has been trained we also want to save a persistent version of the model
+    # (= model checkpoint) to the archive folder so that it can be used in the future.
+    e.log('saving the model to the disk...')
+    model_path = os.path.join(e.path, 'model.ckpt')
+    # trainer.save_checkpoint(model_path)
+    model.save(model_path)
     
 
 @experiment.analysis
@@ -778,7 +843,7 @@ def analysis(e: Experiment):
     # ~ loading the dataset
     # Here we load the dataset from the disk again. This is easily done by just using the hook implementation
     # of this process.
-    
+    return
     e.log('loading the dataset...')
     index_data_map = e.apply_hook(
         'load_dataset',
@@ -786,7 +851,7 @@ def analysis(e: Experiment):
     )
     e['_index_data_map'] = index_data_map
     e.log(f'loaded dataset with {len(index_data_map)} elements')
-    
+
     # ~ updating the paths
     # Here we update the absolute path strings that are stored in the experiment storage because there is the 
     # chance that the archive folder has been moved from its original location which would invalidate the 

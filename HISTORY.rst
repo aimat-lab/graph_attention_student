@@ -285,3 +285,11 @@ running the model in eval mode versus in
 - using the Ruff Linter now
 - added the ``ruff.toml`` configuration file
 - removed various unused imports
+
+0.18.4 - 16.10.2024
+-------------------
+
+- Added the ``torch/advanced.py`` module to contain the advanced functionality that builds on top of the basic 
+  model functionality.
+  - the ``explain_value`` function directly plots the explanation masks given a domain specific graph representation 
+    and a model instance.

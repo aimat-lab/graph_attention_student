@@ -31,7 +31,7 @@ TEST_INDICES_PATH: t.Optional[str] = None
 #       This integer number defines how many elements of the dataset are supposed to be sampled 
 #       for the unseen test set on which the model will be evaluated. This parameter will be ignored 
 #       if a test_indices file path is given.
-NUM_TEST: int = 650
+NUM_TEST: int = 0.1
 # :param TEST_INDICES_PATH:
 #       Optionally, this may be an absolute string path to a JSON file containing the specific indices 
 #       to be used for the test set instead of the random test split. The file should be a single list 
@@ -65,7 +65,7 @@ TARGET_NAMES: t.Dict[int, str] = {
 #       This list determines the layer structure of the model's graph encoder part. Each element in 
 #       this list represents one layer, where the integer value determines the number of hidden units 
 #       in that layer of the encoder network.
-UNITS: t.List[int] = [64, 64, 64, 64]
+UNITS: t.List[int] = [64, 64, 64]
 # :param HIDDEN_UNITS:
 #       This integer value determines the number of hidden units in the model's graph attention layer's
 #       transformative dense networks that are used for example to perform the message update and to 
@@ -97,15 +97,15 @@ CHANNEL_INFOS: dict = {
 #       This list determines the layer structure of the MLP's that act as the channel-specific projections.
 #       Each element in this list represents one layer where the integer value determines the number of hidden
 #       units in that layer.
-PROJECTION_UNITS: t.List[int] = [64, 32, 8, 3]
-PROJECTION_UNITS = [64, 128, 256]
+#PROJECTION_UNITS: t.List[int] = [64, 32, 8, 3]
+PROJECTION_UNITS: t.List[int] = [64, 128, 256]
 # :param FINAL_UNITS:
 #       This list determines the layer structure of the model's final prediction MLP. Each element in 
 #       this list represents one layer, where the integer value determines the number of hidden units 
 #       in that layer of the prediction network.
 #       Note that the last value of this list determines the output shape of the entire network and 
 #       therefore has to match the number of target values given in the dataset.
-FINAL_UNITS: t.List[int] = [64, 2]
+FINAL_UNITS: t.List[int] = [128, 64, 2]
 # :param OUTPUT_NORM:
 #       Optionally, for a classification logits, this parameter can be set to a float value and in that 
 #       case the output logits vector of the model will be projected onto a unit sphere with that given 
@@ -131,7 +131,7 @@ IMPORTANCE_FACTOR: float = 1.0
 #       be considered as active. The higher this value, the less sparse the explanations will be.
 #       Typical values range from 0.2 - 2.0 but also depend on the graph size and the specific problem at 
 #       hand. This is a parameter with which one has to experiment until a good trade-off is found!
-IMPORTANCE_OFFSET: float = 2.0
+IMPORTANCE_OFFSET: float = 1.0
 # :param SPARSITY_FACTOR:
 #       This is the coefficient that is used to scale the explanation sparsity loss during training.
 #       The higher this value the more explanation sparsity (less and more discrete explanation masks)
@@ -195,18 +195,24 @@ PREDICTION_FACTOR: float = 1.0
 # These parameters configure the training process itself, such as how many epochs to train 
 # for and the batch size of the training
 
+# :param BATCH_ACCUMULATE:
+#       This integer determines how many batches will be used to accumulate the training gradients 
+#       before applying an optimization step. Batch gradient accumulation is a method to simulate 
+#       a larger batch size if there isn't enough memory available to increase the batch size 
+#       itself any further. The effective batch size will be BATCH_SIZE * BATCH_ACCUMULATE.
+BATCH_ACCUMULATE: int = 1
 # :param EPOCHS:
 #       The integer number of epochs to train the dataset for. Each epoch means that the model is trained 
 #       once on the entire training dataset.
-EPOCHS: int = 100
+EPOCHS: int = 200
 # :param BATCH_SIZE:
 #       The batch size to use while training. This is the number of elements from the dataset that are 
 #       presented to the model at the same time to estimate the gradient direction for the stochastic gradient 
 #       descent optimization.
-BATCH_SIZE: int = 120
+BATCH_SIZE: int = 30
 # :param LEARNING_RATE:
 #       This float determines the learning rate of the optimizer.
-LEARNING_RATE: float = 1e-4
+LEARNING_RATE: float = 1e-5
 
 __DEBUG__ = True
 __TESTING__ = False
@@ -218,10 +224,10 @@ experiment = Experiment.extend(
     glob=globals(),
 )
 
-@experiment.testing
-def testing(e: Experiment):
-    e.log('TESTING MODE')
-    e.NUM_EXAMPLE = 10
-    e.EPOCHS = 3
+# @experiment.testing
+# def testing(e: Experiment):
+#     e.log('TESTING MODE')
+#     e.NUM_EXAMPLE = 10
+#     e.EPOCHS = 3
 
 experiment.run_if_main()

@@ -4,6 +4,9 @@ import contextlib
 import random
 import numpy as np
 
+from visual_graph_datasets.processing.base import ProcessingBase
+from graph_attention_student.torch.megan import Megan
+
 
 @contextlib.contextmanager
 def set_environ(data: dict):
@@ -68,3 +71,38 @@ def get_mock_graphs(num: int,
         graphs.append(graph)
 
     return graphs
+
+
+def model_from_processing(processing: ProcessingBase,
+                          prediction_mode = 'regression',
+                          num_outputs: int = 1,
+                          num_channels: int = 2,
+                          **kwargs,
+                          ) -> Megan:
+    """
+    Given a Processing instance, this function creates a Megan model that is compatible with the graphs created 
+    by that processing instance. This is useful to quickly create a model for testing.
+    
+    :param processing: an instance of a BaseProcessing subclass.
+    :param prediction_mode: the prediction mode of the model (regresssion, classification)
+    :param out_dim: the output dimension of the models last layer.
+
+    :returns: a Megan model instance.
+    """
+    # The number of node and edge features can be derived from the processing instance.
+    node_dim = processing.get_num_node_attributes()
+    edge_dim = processing.get_num_edge_attributes()
+    
+    model = Megan(
+        node_dim=node_dim,
+        edge_dim=edge_dim,
+        units=[16, 16, 16],
+        hidden_units=32,
+        num_channels=num_channels,
+        prediction_mode=prediction_mode,
+        final_units=[16, num_outputs],
+        attention_aggregation='max',
+        **kwargs,
+    )
+    
+    return model

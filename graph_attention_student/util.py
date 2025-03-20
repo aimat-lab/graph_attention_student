@@ -132,6 +132,18 @@ def load_processing(path: str) -> typ.Any:
     return module.processing
 
 
+def np_array(data: t.Union[t.List, np.ndarray]) -> np.ndarray:
+    
+    if isinstance(data, np.ndarray):
+        return data
+    elif isinstance(data, list):
+        if isinstance(data[0], np.ndarray):
+            return np.concatenate(data, axis=0)
+        else:
+            return np.array(data)
+
+
+
 # == GENERAL GRAPH OPERATIONS ===============================================================================
 
 def export_metadatas_csv(metadatas: t.List[dict],
