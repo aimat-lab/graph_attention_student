@@ -101,47 +101,48 @@ class AbstractGraphModel(pl.LightningModule):
         """
         loader = self._loader_from_graphs(graphs, batch_size)
         
-        # This will be the data structure that holds all the results of the inference process. Each element 
-        # in this list will be a dictionary holding all the information for one graph in the given list of 
-        # graphs - having the same order as that list.
-        results: List[dict] = []
-        for data in loader:
-            # This is the actual size of the CURRENT batch. Usually this will be the same as the given batch 
-            # size, but if the number of graphs is not exactly divisible by that number, it CAN be different!
-            _batch_size = np.max(data.batch.numpy()) + 1
-            
-            # This line ultimately invokes the "forward" method of the class which returns a dictionary structure 
-            # that contains all the various bits of information about the prediction process.
-            info: dict = self.forward(data)
+        with torch.no_grad():
+            # This will be the data structure that holds all the results of the inference process. Each element 
+            # in this list will be a dictionary holding all the information for one graph in the given list of 
+            # graphs - having the same order as that list.
+            results: List[dict] = []
+            for data in loader:
+                # This is the actual size of the CURRENT batch. Usually this will be the same as the given batch 
+                # size, but if the number of graphs is not exactly divisible by that number, it CAN be different!
+                _batch_size = np.max(data.batch.numpy()) + 1
                 
-            for index in range(_batch_size):
-                
-                node_mask = (data.batch == index)
-                edge_mask = node_mask[data.edge_index[0]] & node_mask[data.edge_index[1]]
-                
-                result = {}
-                for key, value in info.items():
+                # This line ultimately invokes the "forward" method of the class which returns a dictionary structure 
+                # that contains all the various bits of information about the prediction process.
+                info: dict = self.forward(data)
                     
-                    # Here we apply a bit of magic: Depending on the prefix of the string name of the attribute 
-                    # we are going to dynamically treat the corresponding values (=tensors) differently, since 
-                    # the names tell us in regard to what graph element those values are defined. For example for 
-                    # "graph" global properties we do not have to do any different processing, we can simply get 
-                    # the element with the correct index from the tensor. However, for node and edge based attributes 
-                    # we first have to construct the appropriate access mask to aggregate the correct values from 
-                    # the tensor.
+                for index in range(_batch_size):
                     
-                    if key.startswith('graph'):
-                        result[key] = value[index].detach().numpy()
+                    node_mask = (data.batch == index)
+                    edge_mask = node_mask[data.edge_index[0]] & node_mask[data.edge_index[1]]
+                    
+                    result = {}
+                    for key, value in info.items():
                         
-                    elif key.startswith('node'):
-                        array = value[node_mask].detach().numpy()
-                        result[key] = array
+                        # Here we apply a bit of magic: Depending on the prefix of the string name of the attribute 
+                        # we are going to dynamically treat the corresponding values (=tensors) differently, since 
+                        # the names tell us in regard to what graph element those values are defined. For example for 
+                        # "graph" global properties we do not have to do any different processing, we can simply get 
+                        # the element with the correct index from the tensor. However, for node and edge based attributes 
+                        # we first have to construct the appropriate access mask to aggregate the correct values from 
+                        # the tensor.
                         
-                    elif key.startswith('edge'):
-                        array = value[edge_mask].detach().numpy()
-                        result[key] = array
-                    
-                results.append(result)
+                        if key.startswith('graph'):
+                            result[key] = value[index].detach().numpy()
+                            
+                        elif key.startswith('node'):
+                            array = value[node_mask].detach().numpy()
+                            result[key] = array
+                            
+                        elif key.startswith('edge'):
+                            array = value[edge_mask].detach().numpy()
+                            result[key] = array
+                        
+                    results.append(result)
                 
         return results
     
@@ -200,7 +201,10 @@ class AbstractGraphModel(pl.LightningModule):
         return prediction
     
     @classmethod
-    def load(cls, path: str) -> 'AbstractGraphModel':
+    def load(cls, 
+             path: str, 
+             current_version: str = get_version(),
+             ) -> 'AbstractGraphModel':
         """
         Loads the model from a persistent CKPT path at the given absolute ``path``. Returns the 
         reconstructed model instance.
@@ -219,7 +223,7 @@ class AbstractGraphModel(pl.LightningModule):
             # a backward-incompatible way. In this case, we give a meaningful error message to inform the user 
             # that downgrading the package might be required.
             info = torch.load(path)
-            current_version = get_version()
+            #current_version = get_version()
             
             # The first possibility is that the exported model doesnt even contain the model version information 
             # since that was only added at a later version as well. So we first check for that and give a slightly 

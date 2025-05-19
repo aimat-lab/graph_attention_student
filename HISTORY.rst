@@ -293,3 +293,11 @@ running the model in eval mode versus in
   model functionality.
   - the ``explain_value`` function directly plots the explanation masks given a domain specific graph representation 
     and a model instance.
+
+
+0.18.5 - 19.05.2025
+-------------------
+
+- Added the ``torch/_legacy.py`` module which contains an older version of the Megan model which needs to 
+  be supported to enable backwards compatibility for the aggregation prediction model.
+

@@ -16,6 +16,7 @@ graph_attention_student/examples/__pycache__/*
 graph_attention_student/models/__pycache__/*
 
 # results
+graph_attention_student/experiments/_*
 results/*
 graph_attention_student/experiments/assets/*
 graph_attention_student/experiments/results/*
@@ -24,5 +25,11 @@ graph_attention_student/examples/assets/*
 
 tests/artifacts/*
 
+graph_attention_student/scripts/*
+lightning_logs/
+
 # slurm logs
 slurm-*
+.slurm*
+
+*.egg-info 

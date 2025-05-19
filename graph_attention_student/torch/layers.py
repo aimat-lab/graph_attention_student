@@ -344,6 +344,7 @@ class GraphAttentionLayerV2(AbstractAttentionLayer):
             edge_dim=edge_dim,
             aggr='sum',
         )
+        
         self.message_dim = (3 * in_dim) + edge_dim
         
         self.lay_message = nn.Sequential(
@@ -353,8 +354,9 @@ class GraphAttentionLayerV2(AbstractAttentionLayer):
             nn.LeakyReLU(),
             nn.Linear(in_features=hidden_dim,
                       out_features=out_dim),
-            nn.BatchNorm1d(out_dim, momentum=bn_momentum),
-            nn.LeakyReLU(),
+            #nn.BatchNorm1d(out_dim, momentum=bn_momentum),
+            #nn.LeakyReLU(),
+            #nn.LayerNorm(out_dim),
         )
         
         self.lay_attention = nn.Sequential(
@@ -362,10 +364,12 @@ class GraphAttentionLayerV2(AbstractAttentionLayer):
                       out_features=hidden_dim),
             nn.BatchNorm1d(hidden_dim, momentum=bn_momentum),
             nn.LeakyReLU(),
+            #nn.SiLU(),
             nn.Linear(in_features=hidden_dim,
                       out_features=hidden_dim),
             nn.BatchNorm1d(hidden_dim, momentum=bn_momentum),
             nn.LeakyReLU(),
+            #nn.SiLU(),
             nn.Linear(in_features=hidden_dim,
                       out_features=1),
         )
@@ -377,10 +381,12 @@ class GraphAttentionLayerV2(AbstractAttentionLayer):
                       out_features=hidden_dim),
             nn.BatchNorm1d(hidden_dim, momentum=bn_momentum),
             nn.LeakyReLU(),
+            #nn.LayerNorm(hidden_dim),
             nn.Linear(in_features=hidden_dim,
                       out_features=out_dim),
             nn.BatchNorm1d(out_dim, momentum=bn_momentum),
             nn.LeakyReLU(),
+            #nn.LayerNorm(out_dim),
         )
         
         self.lay_neighbors = SumNeighbors()

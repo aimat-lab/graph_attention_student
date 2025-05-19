@@ -43,7 +43,7 @@ USE_BOOTSTRAPPING: bool = False
 #       This integer determines how many elements to sample from the test set elements to act as 
 #       examples for the evaluation process. These examples will be visualized together with their
 #       predictions.
-NUM_EXAMPLES: int = 5
+NUM_EXAMPLES: int = 25
 # :param TARGET_NAMES:
 #       This dictionary structure can be used to define the human readable names for the various 
 #       target values that are part of the dataset. The keys of this dict have to be integer indices 
@@ -60,7 +60,7 @@ TARGET_NAMES: t.Dict[int, str] = {
 #       This list determines the layer structure of the model's graph encoder part. Each element in 
 #       this list represents one layer, where the integer value determines the number of hidden units 
 #       in that layer of the encoder network.
-UNITS: t.List[int] = [64, 64, 64]
+UNITS: t.List[int] = [128, 128, 128]
 # :param HIDDEN_UNITS:
 #       This integer value determines the number of hidden units in the model's graph attention layer's
 #       transformative dense networks that are used for example to perform the message update and to 
@@ -74,7 +74,7 @@ IMPORTANCE_UNITS: t.List[int] = [ ]
 #       This list determines the layer structure of the MLP's that act as the channel-specific projections.
 #       Each element in this list represents one layer where the integer value determines the number of hidden
 #       units in that layer.
-PROJECTION_UNITS: t.List[int] = [64, 128, 256]
+PROJECTION_UNITS: t.List[int] = [64, 128]
 # :param FINAL_UNITS:
 #       This list determines the layer structure of the model's final prediction MLP. Each element in 
 #       this list represents one layer, where the integer value determines the number of hidden units 
@@ -95,7 +95,7 @@ IMPORTANCE_FACTOR: float = 1.0
 #       be considered as active. The higher this value, the less sparse the explanations will be.
 #       Typical values range from 0.2 - 2.0 but also depend on the graph size and the specific problem at 
 #       hand. This is a parameter with which one has to experiment until a good trade-off is found!
-IMPORTANCE_OFFSET: float = 1.5
+IMPORTANCE_OFFSET: float = 2.0
 # :param FIDELITY_FACTOR:
 #       This parameter controls the coefficient of the explanation fidelity loss during training. The higher
 #       this value, the more the model will be trained to create explanations that actually influence the
@@ -107,7 +107,7 @@ FIDELITY_FACTOR: float = 0.1
 #       This boolean value determines whether the graph embeddings are normalized to a unit length or not.
 #       If this is true, the embedding of each individual explanation channel will be L2 normalized such that 
 #       it is projected onto the unit sphere.
-NORMALIZE_EMBEDDING: bool = True
+NORMALIZE_EMBEDDING: bool = False
 # :param ATTENTION_AGGREGATION:
 #       This string literal determines the strategy which is used to aggregate the edge attention logits over 
 #       the various message passing layers in the graph encoder part of the network. This may be one of the 
@@ -123,7 +123,7 @@ REGRESSION_MARGIN: t.Optional[float] = -0.1
 #       This is the factor of the contrastive representation learning loss of the network. If this value is 0 
 #       the contrastive repr. learning is completely disabled (increases computational efficiency). The higher 
 #       this value the more the contrastive learning will influence the network during training.
-CONTRASTIVE_FACTOR: float = 0.01
+CONTRASTIVE_FACTOR: float = 0.00
 # :param CONTRASTIVE_NOISE:
 #       This float value determines the noise level that is applied when generating the positive augmentations 
 #       during the contrastive learning process.
@@ -156,7 +156,7 @@ TRAIN_MVE: bool = False
 MVE_WARMUP_EPOCHS: int = 50
 
 EPOCHS: int = 150
-BATCH_SIZE: int = 16
+BATCH_SIZE: int = 32
 LEARNING_RATE = 1e-5
 
 __DEBUG__ = True

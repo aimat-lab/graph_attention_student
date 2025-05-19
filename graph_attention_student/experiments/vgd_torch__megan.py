@@ -161,7 +161,7 @@ REGRESSION_MARGIN: t.Optional[float] = 0.0
 #       This boolean value determines whether the graph embeddings are normalized to a unit length or not.
 #       If this is true, the embedding of each individual explanation channel will be L2 normalized such that 
 #       it is projected onto the unit sphere.
-NORMALIZE_EMBEDDING: bool = True
+NORMALIZE_EMBEDDING: bool = False
 # :param ATTENTION_AGGREGATION:
 #       This string literal determines the strategy which is used to aggregate the edge attention logits over 
 #       the various message passing layers in the graph encoder part of the network. This may be one of the 
@@ -626,7 +626,7 @@ def evaluate_model(e: Experiment,
     
     last_layer = model.dense_layers[-1]
     e.log('final layer info:')
-    e.log(f' * final layer bias value: {last_layer.bias.detach().numpy()}')
+    # e.log(f' * final layer bias value: {last_layer.bias.detach().numpy()}')
     e.log(f' * regression reference: {model.regression_reference}')
     
     e.log('evaluating Megan explanations...')

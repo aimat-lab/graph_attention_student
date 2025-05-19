@@ -42,7 +42,13 @@ TEST_INDICES_PATH: t.Optional[str] = None
 #       If enabled, the training samples will be subsampled with the possibility of duplicates. This 
 #       method can introduce diversity in the input data distribution between different trained models
 #       even though they have the same train-test split.
-USE_BOOTSTRAPPING: bool = False
+USE_BOOTSTRAPPING: bool = True
+# :param TRAIN_MVE:
+#       This boolean determines whether or not the (regression) model should be trained as a mean variance estimator
+#       (MVE) model. This would mean that the model predicts the mean and the variance of the target value distribution
+#       instead of just the mean. This is useful for regression tasks where the target values are not deterministic
+#       but have a certain variance/noise.
+TRAIN_MVE: bool = False
 # :param NUM_EXAMPLES:
 #       This integer determines how many elements to sample from the test set elements to act as 
 #       examples for the evaluation process. These examples will be visualized together with their
@@ -98,7 +104,7 @@ CHANNEL_INFOS: dict = {
 #       Each element in this list represents one layer where the integer value determines the number of hidden
 #       units in that layer.
 #PROJECTION_UNITS: t.List[int] = [64, 32, 8, 3]
-PROJECTION_UNITS: t.List[int] = [64, 128, 256]
+PROJECTION_UNITS: t.List[int] = [64, 128]
 # :param FINAL_UNITS:
 #       This list determines the layer structure of the model's final prediction MLP. Each element in 
 #       this list represents one layer, where the integer value determines the number of hidden units 
@@ -155,7 +161,7 @@ REGRESSION_REFERENCE: t.Optional[float] = None
 #       This boolean value determines whether the graph embeddings are normalized to a unit length or not.
 #       If this is true, the embedding of each individual explanation channel will be L2 normalized such that 
 #       it is projected onto the unit sphere.
-NORMALIZE_EMBEDDING: bool = True
+NORMALIZE_EMBEDDING: bool = False
 # :param ATTENTION_AGGREGATION:
 #       This string literal determines the strategy which is used to aggregate the edge attention logits over 
 #       the various message passing layers in the graph encoder part of the network. This may be one of the 
@@ -204,12 +210,12 @@ BATCH_ACCUMULATE: int = 1
 # :param EPOCHS:
 #       The integer number of epochs to train the dataset for. Each epoch means that the model is trained 
 #       once on the entire training dataset.
-EPOCHS: int = 200
+EPOCHS: int = 100
 # :param BATCH_SIZE:
 #       The batch size to use while training. This is the number of elements from the dataset that are 
 #       presented to the model at the same time to estimate the gradient direction for the stochastic gradient 
 #       descent optimization.
-BATCH_SIZE: int = 30
+BATCH_SIZE: int = 32
 # :param LEARNING_RATE:
 #       This float determines the learning rate of the optimizer.
 LEARNING_RATE: float = 1e-5

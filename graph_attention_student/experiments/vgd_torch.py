@@ -25,6 +25,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pytorch_lightning as pl
+from rich.pretty import pprint
 from matplotlib.backends.backend_pdf import PdfPages
 from sklearn.metrics import r2_score
 from sklearn.metrics import mean_absolute_error
@@ -295,6 +296,7 @@ def train_test_split(e: Experiment,
         
         e.log(f'sampling {num_test} random test elements...')
         test_indices = random.sample(indices, k=num_test)
+        pprint(test_indices, max_length=10)
         
     indices = list(set(indices) - set(test_indices))
         
@@ -307,6 +309,7 @@ def train_test_split(e: Experiment,
         
     e.log(f'sampling {num_val} random validation elements...')
     val_indices = random.sample(indices, k=num_val)
+    pprint(val_indices, max_length=10)
     indices = list(set(indices) - set(val_indices))
         
     # ~ train indices
