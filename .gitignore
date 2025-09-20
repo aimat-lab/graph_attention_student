@@ -17,11 +17,13 @@ graph_attention_student/models/__pycache__/*
 
 # results
 graph_attention_student/experiments/_*
-results/*
+**/results/*
 graph_attention_student/experiments/assets/*
 graph_attention_student/experiments/results/*
 graph_attention_student/examples/results/*
 graph_attention_student/examples/assets/*
+
+**/reports/*
 
 tests/artifacts/*
 
@@ -33,3 +35,7 @@ slurm-*
 .slurm*
 
 *.egg-info 
+
+**/__pycache__/*
+*.pyc
+**/.aslurm/*
