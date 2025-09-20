@@ -26,11 +26,15 @@ VERSION_PATH = os.path.join(PATH, 'VERSION')
 
 DATASETS_FOLDER = os.path.join(PATH, 'datasets')
 EXAMPLES_FOLDER = os.path.join(PATH, 'examples')
-TEMPLATES_FOLDER = os.path.join(PATH, 'templates')
 EXAMPLES_PATH = EXAMPLES_FOLDER
 EXPERIMENTS_PATH = os.path.join(PATH, 'experiments')
 ASSETS_PATH = os.path.join(PATH, 'assets')
 
+# --- jinja2 templates ---
+# This package uses j2 templates for various tasks such as creating reports 
+# in latex or html format. The templates are all stored in the templates folder.
+# and are globally accessible via the TEMPLATE_ENV variable.
+TEMPLATES_FOLDER = os.path.join(PATH, 'templates')
 TEMPLATE_ENV = j2.Environment(
     loader=j2.FileSystemLoader(TEMPLATES_FOLDER),
     autoescape=j2.select_autoescape(),

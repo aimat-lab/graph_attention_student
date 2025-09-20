@@ -1,0 +1,177 @@
+<html>
+<head>
+    <style>
+
+    /* Add your CSS styles here */
+
+    @page { size: A4; margin: 0.5cm }
+
+    body {
+        font-size: 0.85em;
+        font-family: 'Roboto Condensed', Roboto, 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        line-height: 1.6;
+        margin: 0;
+        padding: 20px;
+    }
+
+    h2 {
+        padding-left: 10px;
+        border-left: 8px solid #9bacfa;
+        border-bottom: 3px solid #9bacfa;
+        color: #3f465c;
+    }
+
+    .explanation-visualization-container {
+        display: flex;
+        flex-direction: row;
+        gap: 20px;
+        margin-top: 20px;
+        justify-content: space-around;
+    }
+
+    .explanation-visualization {
+        max-width: 75%;
+    }
+
+    .code {
+        font-size: 0.8em;
+        font-family: monospace;
+        background-color: #e7e2e2;
+        color: #434350;
+        padding: 2px 4px;
+        border-radius: 4px;
+    }
+
+    .prediction-info-container {
+        margin-top: 10px;
+        font-size: 1.1em;
+    }
+
+    .model-info-container {
+        margin-top: 10px;
+        color: #333;
+        font-size: 0.9em;
+    }
+
+    .explanation-channel-header {
+        display: flex;
+        flex-direction: row;
+        justify-content: space-between;
+        margin-top: 5px;
+        margin-bottom: 0px;
+        font-size: 1.1em;
+    }
+
+    .explanation-channel-details {
+        padding-left: 45px;
+        margin-bottom: 0px;
+        color: gray;
+        line-height: 1.4;
+    }
+
+    .explanation-channel-detail {
+        display: flex;
+        flex-direction: row;
+        justify-content: space-between;
+    }
+
+    .colored-circle {
+        display: inline-block;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        margin-right: 8px;
+        margin-top: -4px;
+        vertical-align: middle;
+        background-color: #333;
+    }
+
+    .model-info-container {
+        display: flex;
+        flex-direction: row;
+        justify-content: space-between;
+        margin-top: 0px;
+        margin-bottom: 0px;
+    }
+
+    </style>
+</head>
+<body>
+    
+    <!-- Prediction Section
+    This section display the information about the prediction of the model. -->
+    <h2>Prediction</h2>
+
+    <div class="prediction-info-container">
+        {% if prediction.mode == 'classification' %}
+            <div>Predicted Class: <span class="code">\< class {{ prediction.class }}\></span></div>
+            <div>Confidence: {{ (prediction.confidence * 100) | round(2) }}%</div>
+        {% elif prediction.mode == 'regression' %}
+            <div>Predicted Value: <strong>{{ prediction.value | round(4) }}</strong>{% if prediction.unit %} prediction.unit {% endif %}</div>
+        {% endif %}
+    </div>
+    
+
+    <!-- Explanation Section
+    This section displays the attributional explanation itself as well as some 
+    additional statistics on the explanation. -->
+    <h2>Explanation</h2>
+    <div class="explanation-visualization-container">
+        <div class="explanation-visualization">
+            <img 
+                src="file://{{ explanation.image_path }}"
+                alt="{{ explanation.image_path }}" 
+                style="max-width: 100%; height: auto;">
+        </div>
+        {# <div class="explanation-bars">
+            placeholder
+        </div> #}
+    </div>
+    <div class="explanation-statistics-container">
+        {% for channel in model.channels %}
+        <div class="explanation-channel-statistics">
+            <div class="explanation-channel-header">
+                <div><span class="colored-circle" style="background-color: {{ model.colors[channel] }};"></span> <em>Channel {{ channel }}:</div>
+                <div>🔹 contributes:    <strong>{{ explanation.contribution[channel] | round(3)}}</strong> </div>
+            </div>
+            <div class="explanation-channel-details">
+                <div class="explanation-channel-detail">
+                    <div>Node</div>
+                    <div>·</div>
+                    <div>Min: {{ explanation.statistics[channel].node.min | round(3) }}</div>
+                    <div>·</div>
+                    <div>Mean: {{ explanation.statistics[channel].node.mean | round(3) }}</div>
+                    <div>·</div>
+                    <div>Max: {{ explanation.statistics[channel].node.max | round(3) }}</div>
+                </div>
+                <div class="explanation-channel-detail">
+                    <div>Edge</div>
+                    <div>·</div>
+                    <div>Min: {{ explanation.statistics[channel].edge.min | round(3) }}</div>
+                    <div>·</div>
+                    <div>Mean: {{ explanation.statistics[channel].edge.mean | round(3) }}</div>
+                    <div>·</div>
+                    <div>Max: {{ explanation.statistics[channel].edge.max | round(3) }}</div>
+                </div>
+            </div>
+
+        </div>
+        {% endfor %}
+    </div>
+
+    <!-- Model Section
+    This section shows information about the model that was used to generate 
+    the explanation -->
+    <h2>Model</h2>
+
+    <div class="model-info-container">
+        <div>Name: <span class="code">{{ model.name }}</span></div>
+        <div>Package Version: <span class="code">{{ model.version }}</span></div>
+    </div>
+    <div class="model-info-container">
+        <div>Num Parameters: {{ model.num_parameters }}</div>
+        <div>Size: {{ model.size }} MB</div>
+        <div>Inference Time: {{ model.inference_time }} ms</div>
+    </div>
+
+</html>

@@ -355,7 +355,14 @@ class UncertaintyEstimatorMixin:
         """
         
         if isinstance(importances, list):
-            importances = torch.stack(importances, dim=0)
+            # Convert numpy arrays to torch tensors if needed
+            tensor_importances = []
+            for imp in importances:
+                if isinstance(imp, np.ndarray):
+                    tensor_importances.append(torch.from_numpy(imp).float())
+                else:
+                    tensor_importances.append(imp)
+            importances = torch.stack(tensor_importances, dim=0)
         
         # At first we are going to compute the mean and the standard variation for the importance
         # values. These will be the two aggregations that we always compute and return regardless of 

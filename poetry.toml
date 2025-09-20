@@ -1,4 +1,0 @@
-cache-dir = "./.cache"
-
-[virtualenvs]
-create = false

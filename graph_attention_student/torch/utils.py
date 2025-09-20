@@ -38,6 +38,64 @@ def torch_gauss(size: tuple,
     return torch.normal(tens_mean, tens_std)
 
 
+def asym_binary_cross_entropy(inputs: torch.Tensor,
+                              targets: torch.Tensor,
+                              weight_0: float = 1.5,
+                              weight_1: float = 1.0,
+                              reduction: str = 'mean'
+                              ) -> torch.Tensor:
+    """
+    Calculates asymmetric binary cross entropy loss with different weights for positive and negative samples.
+    By default assigns 50% more weight to the "0" class (negative samples).
+
+    :param inputs: Predicted logits/probabilities
+    :param targets: Ground truth binary labels (0 or 1)
+    :param weight_0: Weight for class 0 (negative samples), default 1.5
+    :param weight_1: Weight for class 1 (positive samples), default 1.0
+    :param reduction: Reduction method ('mean', 'sum', or 'none')
+    :returns: Computed asymmetric BCE loss
+    """
+    # Convert logits to probabilities if needed
+    probs = torch.sigmoid(inputs)
+
+    # Calculate BCE for each sample
+    bce_0 = -targets * torch.log(probs + 1e-8)  # Loss for class 1
+    bce_1 = -(1 - targets) * torch.log(1 - probs + 1e-8)  # Loss for class 0
+
+    # Apply asymmetric weights
+    weighted_loss = weight_1 * bce_0 + weight_0 * bce_1
+
+    if reduction == 'mean':
+        return torch.mean(weighted_loss)
+    elif reduction == 'sum':
+        return torch.sum(weighted_loss)
+    else:
+        return weighted_loss
+
+
+def binary_entropy_reg(x, p=0.5):
+    # H(x) = -x*log(x) - (1-x)*log(1-x)
+    # Maximum at x=0.5, minimum at x=0 or x=1
+    
+    return (x.abs() + 1e-8).pow(p)
+
+def hoyer_square_reg(x, epsilon=1e-8):
+    
+    # Flatten the tensor
+    x_flat = x.view(-1)
+    
+    # Mean of absolute values
+    l1_mean = torch.mean(torch.abs(x_flat))
+    
+    # Mean of squares
+    l2_mean_squared = torch.mean(x_flat ** 2) + epsilon
+    
+    # Mean-based Hoyer-Square
+    hs_mean = (l1_mean ** 2) / l2_mean_squared
+    
+    return hs_mean
+
+
 class SwaCallback(pl.Callback):
     
     def __init__(self,

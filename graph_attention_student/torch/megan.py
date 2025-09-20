@@ -5,7 +5,6 @@ from typing import List, Dict, Optional, Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torch_scatter
 import pytorch_lightning as pl
 import numpy as np
 import visual_graph_datasets.typing as tv
@@ -16,10 +15,13 @@ from torch_geometric.nn.aggr import SumAggregation
 from torch_geometric.nn.aggr import MeanAggregation
 from torch_geometric.nn.aggr import MaxAggregation
 from torch_geometric.data import Data
+from torch_geometric.utils import scatter
+
 
 from graph_attention_student.utils import get_version
 from graph_attention_student.torch.utils import torch_gauss
 from graph_attention_student.torch.utils import EvidentialLoss
+from graph_attention_student.torch.utils import hoyer_square_reg
 from graph_attention_student.torch.model import AbstractGraphModel
 from graph_attention_student.torch.model import UncertaintyEstimatorMixin
 from graph_attention_student.torch.layers import ParallelHeadAttention
@@ -217,13 +219,13 @@ class Megan(MveMixin, AbstractGraphModel):
                  # encoder-related
                  node_dim: int = 3,
                  edge_dim: int = 1,
-                 units: t.List[int] = [16, 16, 16],
+                 units: t.List[int] = [64, 64, 64],
                  hidden_units: int = 128,
                  encoder_dropout_rate: float = 0.0,
                  layer_version: t.Literal['v1', 'v2'] = 'v2',
                  # explanation-related
-                 importance_units: t.List[int] = [16, ],
-                 projection_units: t.List[int] = [],
+                 importance_units: t.List[int] = [ ],
+                 projection_units: t.List[int] = [64, ],
                  num_channels: int = 2,
                  importance_mode: t.Optional[str] = None,
                  importance_factor: float = 0.0,
@@ -232,8 +234,8 @@ class Megan(MveMixin, AbstractGraphModel):
                  regression_reference: float = 0.0,
                  regression_margin: float = 0.0,
                  sparsity_factor: float = 0.0,
-                 attention_aggregation: t.Literal['sum', 'min', 'max'] = 'sum',
-                 normalize_embedding: bool = True,
+                 attention_aggregation: t.Literal['sum', 'min', 'max'] = 'max',
+                 normalize_embedding: bool = False,
                  fidelity_factor: float = 0.0,
                  # contrastive representation related
                  contrastive_factor: float = 0.0,
@@ -242,7 +244,6 @@ class Megan(MveMixin, AbstractGraphModel):
                  contrastive_beta: float = 1.0,
                  contrastive_tau: float = 0.1,
                  contrastive_units: int = 1028,
-                 #contrastive_units: int = 2048,
                  # prediction-related
                  final_units: t.List[int] = [16, 1],
                  final_dropout_rate: float = 0.0,
@@ -731,7 +732,8 @@ class Megan(MveMixin, AbstractGraphModel):
          
         # We need the scatter functionality to find the maximum value across a graph!
         # max_values: (B, K)
-        max_values = torch_scatter.scatter_max(node_importance, data.batch, dim=0)[0]
+        #max_values = torch_scatter.scatter_max(node_importance, data.batch, dim=0)[0]
+        max_values = scatter(node_importance, data.batch, dim=0, reduce='max')
         # max_values: (B, )
         max_values = torch.amax(max_values, dim=-1, keepdim=True)
         max_values = torch.where(max_values < 0.01, torch.ones_like(max_values) * 1e9, max_values)
@@ -748,7 +750,8 @@ class Megan(MveMixin, AbstractGraphModel):
         # but maintain their relative scale. We also apply a thresholding where all values below 0.25 are effectively set to zero.
 
         # max_edge_values: (B, K)
-        max_edge_values = torch_scatter.scatter_max(edge_importance, data.batch[edge_index[0]], dim=0)[0]
+        #max_edge_values = torch_scatter.scatter_max(edge_importance, data.batch[edge_index[0]], dim=0)[0]
+        max_edge_values = scatter(edge_importance, data.batch[edge_index[0]], dim=0, reduce='max')
         # max_edge_values: (B, )
         max_edge_values = torch.amax(max_edge_values, dim=-1, keepdim=True)
         max_edge_values = torch.where(max_edge_values < 0.01, torch.ones_like(max_edge_values) * 1e9, max_edge_values)
@@ -912,16 +915,16 @@ class Megan(MveMixin, AbstractGraphModel):
         # they by themselves will already be maximally informative towards solving the main prediction problem 
         # without taking the actual features into account.
         
-        loss_expl = 0.0
+        loss_expl = torch.tensor(0.0, device=data.y.device)
         if self.importance_factor != 0:
-            # The "training_explanation" method will calculate the loss for the explanation co-training 
+            # The "training_explanation" method will calculate the loss for the explanation co-training
             # procedure.
             loss_expl = self.training_explanation(
                 data=data,
                 info=info,
                 batch_size=batch_size,
             )
-        
+
         self.log(
             'loss_expl', loss_expl.detach().cpu(),
             prog_bar=True,
@@ -947,9 +950,14 @@ class Megan(MveMixin, AbstractGraphModel):
         #     torch.mean(torch.log(1 - info['node_importance'] + 1e-9))
         # )
         
-        #loss_spar = (info['node_importance_norm'] - 0.5).pow(2).mean()
-        ni = info['node_importance_norm']
-        loss_spar = torch.mean(torch.abs(ni))
+        loss_spar = torch.tensor(0.0, device=data.y.device)
+        if self.sparsity_factor != 0:
+            #loss_spar = (info['node_importance_norm'] - 0.5).pow(2).mean()
+            ni = info['node_importance_norm']
+            ei = info['edge_importance_norm']
+            #loss_spar = torch.mean(torch.abs(ni))
+            #loss_spar = (ni.abs() + 1e-8).pow(0.5).mean()
+            loss_spar = hoyer_square_reg(ni)
         
         self.log(
             'loss_spar', loss_spar.detach().cpu(),
@@ -984,15 +992,15 @@ class Megan(MveMixin, AbstractGraphModel):
         )
         
         # ~ fidelity loss
-        
-        loss_fid = 0.0
+
+        loss_fid = torch.tensor(0.0, device=data.y.device)
         if self.fidelity_factor != 0:
             loss_fid = self.training_fidelity(
                 data=data,
                 info=info,
                 batch_size=batch_size,
             )
-            
+
         self.log(
             'loss_fid', loss_fid.detach().cpu(),
             prog_bar=True,
@@ -1267,8 +1275,18 @@ class Megan(MveMixin, AbstractGraphModel):
             Neg = torch.clamp(Neg, min=N*np.e**(-1/self.contrastive_temp))
             Neg = sim_neg_exp.sum(dim=-1)
             
+            z_1 = F.normalize(graph_embedding_1, p=2, dim=-1)
+            z_2 = F.normalize(graph_embedding_2, p=2, dim=-1)
+            
+            c = torch.mm(z_2, z_1.t())
+            eye = torch.eye(c.size(0), device=self.device).float()
+            
+            l_pos = (1.0 - (c * eye)).pow(2).mean()
+            l_neg = torch.max(torch.zeros_like(eye, device=self.device), c * (1.0 - eye)).pow(2).mean()
+            
             #loss_cont += (1 / self.num_channels) * torch.mean(-torch.log((sim_pos_exp) / (sim_pos_exp + Neg)))
-            loss_cont += (1 / self.num_channels) * torch.mean(-torch.log((sim_pos_exp) / (Neg)))
+            #loss_cont += (1 / self.num_channels) * torch.mean(-torch.log((sim_pos_exp) / (Neg)))
+            loss_cont += (1 / self.num_channels) * (l_pos + 0.25 * l_neg)
                      
         self.log('sim_pos', sim_pos_comb.detach().cpu(), prog_bar=True, on_epoch=True, on_step=False, batch_size=batch_size)
         self.log('sim_neg', sim_neg_comb.detach().cpu(), prog_bar=True, on_epoch=True, on_step=False, batch_size=batch_size)
@@ -1376,7 +1394,9 @@ class Megan(MveMixin, AbstractGraphModel):
             # for each *node* these are attention values in the range [0, 1]
             node_importance = info['node_importance']
             
-            max_values = torch_scatter.scatter_max(node_importance, data.batch, dim=0)[0]
+            #max_values = torch_scatter.scatter_max(node_importance, data.batch, dim=0)[0]
+            num_graphs = data.batch.max().item() + 1
+            max_values = scatter(node_importance, data.batch, dim=0, reduce='max', dim_size=num_graphs)
             max_values = torch.amax(max_values, dim=-1, keepdim=True)
             max_values = torch.where(max_values < 0.01, torch.ones_like(max_values) * 1e9, max_values)
             #print(max_values.shape, edge_importance.shape)
@@ -1403,7 +1423,9 @@ class Megan(MveMixin, AbstractGraphModel):
             # edge_input: (B * E, M + 2N)
             edge_input = torch.cat([data.edge_attr, data.x[data.edge_index[0]], data.x[data.edge_index[1]]], dim=-1)
             
-            max_values = torch_scatter.scatter_max(edge_importance, data.batch[data.edge_index[0]], dim=0)[0]
+            #max_values = torch_scatter.scatter_max(edge_importance, data.batch[data.edge_index[0]], dim=0)[0]
+            num_graphs = data.batch.max().item() + 1
+            max_values = scatter(edge_importance, data.batch[data.edge_index[0]], dim=0, reduce='max', dim_size=num_graphs)
             max_values = torch.amax(max_values, dim=-1, keepdim=True)
             max_values = torch.where(max_values < 0.01, torch.ones_like(max_values) * 1e9, max_values)
             #print(max_values.shape, edge_importance.shape)
@@ -1447,10 +1469,15 @@ class Megan(MveMixin, AbstractGraphModel):
             
             # values_pred: (B, K)
             #values_pred = torch.sigmoid(scaling * (pooled_importance - offset))
-            values_pred = torch.tanh(0.1 * pooled_importance)
-            values_true *= 0.9
             
-            loss_expl = F.binary_cross_entropy(values_pred, values_true, )
+            values_pred = torch.tanh(0.1 * pooled_importance)
+            values_true = values_true * 0.9
+            loss_expl += F.binary_cross_entropy(values_pred, values_true)
+            
+            values_pred_ = info['edge_importance']
+            values_true_ = values_true[data.batch[data.edge_index[0]]]
+            #loss_expl = asym_binary_cross_entropy(values_pred, values_true)
+            #loss_expl += F.binary_cross_entropy(values_pred_, values_true_)
             
         elif self.importance_mode == 'classification':
             
@@ -1532,6 +1559,7 @@ class Megan(MveMixin, AbstractGraphModel):
     
         # out_true: (num_graphs, num_channels)
         out_true = values_true
+        
         if self.importance_mode == 'regression':
             
             # Here we actually deviate from the original MEGAN implementation a little bit. In the original 

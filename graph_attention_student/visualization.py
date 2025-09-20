@@ -34,6 +34,21 @@ reds_cmap: mcolors.Colormap = mcolors.LinearSegmentedColormap.from_list(
     ]
 )
 
+positive_cmap: mcolors.Colormap = mcolors.LinearSegmentedColormap.from_list(
+    'positive',
+    [
+        '#FFFFFF',
+        '#F55C5C',
+    ]
+)
+negative_cmap: mcolors.Colormap = mcolors.LinearSegmentedColormap.from_list(
+    'negative',
+    [
+        '#FFFFFF',
+        '#5C70F5'
+    ]
+)
+
 def truncate_colormap(original_cmap, minval=0.0, maxval=1.0, n=100):
     """
     Given an original matplotlib Colormap instance, this function will truncate that colormap so 
