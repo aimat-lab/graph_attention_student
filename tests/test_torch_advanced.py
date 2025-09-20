@@ -1,6 +1,7 @@
 import os
 import tempfile
 
+import weasyprint as wp
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
@@ -9,6 +10,7 @@ from visual_graph_datasets.data import VisualGraphDatasetReader
 from graph_attention_student.testing import model_from_processing
 from graph_attention_student.torch.advanced import explain_graph_split
 from graph_attention_student.torch.advanced import explain_graph_joint
+from graph_attention_student.torch.advanced import megan_prediction_report
 from graph_attention_student.torch.advanced import explain_value
 
 from .util import ARTIFACTS_PATH
@@ -173,3 +175,25 @@ def test_explain_graph_split_basically_works():
     # Save the figure for visual inspection
     fig_path = os.path.join(ARTIFACTS_PATH, 'test_explain_graph_split_basically_works.pdf')
     fig.savefig(fig_path)
+    
+    
+def test_megan_prediction_report_basically_works():
+    """
+    The ``megan_prediction_report`` function should create a html report for MEGAN predictions.
+    """
+    processing = MoleculeProcessing()
+    model = model_from_processing(
+        processing=processing,
+        num_outputs=1,
+        num_channels=2,
+        prediction_mode='regression',
+    )
+    
+    # saving the png file for visual inspection
+    pdf_path = os.path.join(ARTIFACTS_PATH, 'test_megan_prediction_report_basically_works.pdf')
+    megan_prediction_report(
+        value='C1=CC=CC=C1CCN',
+        model=model,
+        processing=processing,
+        output_path=pdf_path,
+    )

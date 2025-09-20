@@ -26,6 +26,8 @@ def test_model_from_processing_basically_works():
     
     # The model should be able to process a graph that was created from that processing object
     # graph with 8 atoms/nodes.
+    # Set model to evaluation mode to avoid BatchNorm issues with single samples
+    model.eval()
     graph = processing.process('CCCC=CCCN')
     info = model.forward_graph(graph)
     assert isinstance(info, dict)

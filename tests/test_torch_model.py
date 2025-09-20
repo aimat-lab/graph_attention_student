@@ -124,7 +124,7 @@ class TestUncertaintyEstimatorMixin:
             np.array([[0.3, 0.4, 0.5], [0.6, 0.7, 0.8]])
         ]
         
-        combined, mean, std = model.combine_importances(importances, strategy='discount')
+        combined, mean, std = model._combine_importances(importances, strategy='discount')
         
         assert combined.shape == (2, 3)
         assert mean.shape == (2, 3)
@@ -141,7 +141,7 @@ class TestUncertaintyEstimatorMixin:
             np.array([[0.3, 0.4, 0.5], [0.6, 0.7, 0.8]])
         ]
         
-        combined, mean, std = model.combine_importances(importances, strategy='mean')
+        combined, mean, std = model._combine_importances(importances, strategy='mean')
         
         assert combined.shape == (2, 3)
         assert mean.shape == (2, 3)
