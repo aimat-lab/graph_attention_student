@@ -89,13 +89,19 @@ NUM_CHANNELS: int = 2
 #       This is the coefficient that is used to scale the explanation co-training loss during training.
 #       Roughly, the higher this value, the more the model will prioritize the explanations during training.
 IMPORTANCE_FACTOR: float = 1.0
+# :param SPARSITY_FACTOR:
+#       DEPRECATED
+#       This is the coefficient that is used to scale the explanation sparsity loss during training.
+#       The higher this value the more explanation sparsity (less and more discrete explanation masks)
+#       is promoted.
+SPARSITY_FACTOR: float = 1.0
 # :param IMPORTANCE_OFFSET:
 #       This parameter controls the sparsity of the explanation masks even more so than the sparsity factor.
 #       It basically provides the upper limit of how many nodes/edges need to be activated for a channel to 
 #       be considered as active. The higher this value, the less sparse the explanations will be.
 #       Typical values range from 0.2 - 2.0 but also depend on the graph size and the specific problem at 
 #       hand. This is a parameter with which one has to experiment until a good trade-off is found!
-IMPORTANCE_OFFSET: float = 2.0
+IMPORTANCE_OFFSET: float = 0.5
 # :param FIDELITY_FACTOR:
 #       This parameter controls the coefficient of the explanation fidelity loss during training. The higher
 #       this value, the more the model will be trained to create explanations that actually influence the
@@ -118,12 +124,12 @@ ATTENTION_AGGREGATION: str = 'max'
 #       explanation co-training, this determines the margin for the thresholding. Instead of using the regression
 #       reference as a hard threshold, values have to be at least this margin value lower/higher than the 
 #       regression reference to be considered a class sample.
-REGRESSION_MARGIN: t.Optional[float] = -0.1
+REGRESSION_MARGIN: t.Optional[float] = -0.0
 # :param CONTRASTIVE_FACTOR:
 #       This is the factor of the contrastive representation learning loss of the network. If this value is 0 
 #       the contrastive repr. learning is completely disabled (increases computational efficiency). The higher 
 #       this value the more the contrastive learning will influence the network during training.
-CONTRASTIVE_FACTOR: float = 0.00
+CONTRASTIVE_FACTOR: float = 1.0
 # :param CONTRASTIVE_NOISE:
 #       This float value determines the noise level that is applied when generating the positive augmentations 
 #       during the contrastive learning process.
@@ -156,7 +162,7 @@ TRAIN_MVE: bool = False
 MVE_WARMUP_EPOCHS: int = 50
 
 EPOCHS: int = 150
-BATCH_SIZE: int = 32
+BATCH_SIZE: int = 64
 LEARNING_RATE = 1e-5
 
 __DEBUG__ = True

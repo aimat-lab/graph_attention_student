@@ -102,12 +102,12 @@ IMPORTANCE_FACTOR: float = 1.0
 #       be considered as active. The higher this value, the less sparse the explanations will be.
 #       Typical values range from 0.2 - 2.0 but also depend on the graph size and the specific problem at 
 #       hand. This is a parameter with which one has to experiment until a good trade-off is found!
-IMPORTANCE_OFFSET: float = 2.5
+IMPORTANCE_OFFSET: float = 1.9
 # :param SPARSITY_FACTOR:
 #       This is the coefficient that is used to scale the explanation sparsity loss during training.
 #       The higher this value the more explanation sparsity (less and more discrete explanation masks)
 #       is promoted.
-SPARSITY_FACTOR: float = 0.1
+SPARSITY_FACTOR: float = 1.0
 # :param FIDELITY_FACTOR:
 #       This parameter controls the coefficient of the explanation fidelity loss during training. The higher
 #       this value, the more the model will be trained to create explanations that actually influence the
@@ -120,7 +120,7 @@ FIDELITY_FACTOR: float = 0.1
 #       explanation co-training, this determines the margin for the thresholding. Instead of using the regression
 #       reference as a hard threshold, values have to be at least this margin value lower/higher than the 
 #       regression reference to be considered a class sample.
-REGRESSION_MARGIN: t.Optional[float] = -0.1 # -0.2
+REGRESSION_MARGIN: t.Optional[float] = -0.3 # -0.2
 # :param NORMALIZE_EMBEDDING:
 #       This boolean value determines whether the graph embeddings are normalized to a unit length or not.
 #       If this is true, the embedding of each individual explanation channel will be L2 normalized such that 
@@ -135,7 +135,7 @@ ATTENTION_AGGREGATION: str = 'max'
 #       This is the factor of the contrastive representation learning loss of the network. If this value is 0 
 #       the contrastive repr. learning is completely disabled (increases computational efficiency). The higher 
 #       this value the more the contrastive learning will influence the network during training.
-CONTRASTIVE_FACTOR: float = 0.0
+CONTRASTIVE_FACTOR: float = 1.0
 # :param CONTRASTIVE_NOISE:
 #       This float value determines the noise level that is applied when generating the positive augmentations 
 #       during the contrastive learning process.
@@ -168,7 +168,7 @@ PREDICTION_FACTOR: float = 1.0
 # :param EPOCHS:
 #       The integer number of epochs to train the dataset for. Each epoch means that the model is trained 
 #       once on the entire training dataset.
-EPOCHS: int = 130
+EPOCHS: int = 150
 # :param BATCH_SIZE:
 #       The batch size to use while training. This is the number of elements from the dataset that are 
 #       presented to the model at the same time to estimate the gradient direction for the stochastic gradient 

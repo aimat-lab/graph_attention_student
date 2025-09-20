@@ -90,12 +90,12 @@ IMPORTANCE_FACTOR: float = 1.0
 #       be considered as active. The higher this value, the less sparse the explanations will be.
 #       Typical values range from 0.2 - 2.0 but also depend on the graph size and the specific problem at 
 #       hand. This is a parameter with which one has to experiment until a good trade-off is found!
-IMPORTANCE_OFFSET: float = 0.2
+IMPORTANCE_OFFSET: float = 0.5
 # :param SPARSITY_FACTOR:
 #       This is the coefficient that is used to scale the explanation sparsity loss during training.
 #       The higher this value the more explanation sparsity (less and more discrete explanation masks)
 #       is promoted.
-SPARSITY_FACTOR: float = 0.0
+SPARSITY_FACTOR: float = 1.0
 # :param FIDELITY_FACTOR:
 #       This parameter controls the coefficient of the explanation fidelity loss during training. The higher
 #       this value, the more the model will be trained to create explanations that actually influence the
@@ -147,7 +147,7 @@ CONTRASTIVE_BETA: float = 1.0
 DO_CLUSTERING = True
 
 EPOCHS: int = 100
-BATCH_SIZE: int = 32
+BATCH_SIZE: int = 64
 LEARNING_RATE = 1e-5
 
 __DEBUG__ = True

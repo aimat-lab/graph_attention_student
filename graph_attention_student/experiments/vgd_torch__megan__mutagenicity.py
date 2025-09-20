@@ -137,12 +137,12 @@ IMPORTANCE_FACTOR: float = 1.0
 #       be considered as active. The higher this value, the less sparse the explanations will be.
 #       Typical values range from 0.2 - 2.0 but also depend on the graph size and the specific problem at 
 #       hand. This is a parameter with which one has to experiment until a good trade-off is found!
-IMPORTANCE_OFFSET: float = 1.0
+IMPORTANCE_OFFSET: float = 0.5
 # :param SPARSITY_FACTOR:
 #       This is the coefficient that is used to scale the explanation sparsity loss during training.
 #       The higher this value the more explanation sparsity (less and more discrete explanation masks)
 #       is promoted.
-SPARSITY_FACTOR: float = 0.1
+SPARSITY_FACTOR: float = 1.0
 # :param FIDELITY_FACTOR:
 #       This parameter controls the coefficient of the explanation fidelity loss during training. The higher
 #       this value, the more the model will be trained to create explanations that actually influence the
@@ -171,7 +171,7 @@ ATTENTION_AGGREGATION: str = 'max'
 #       This is the factor of the contrastive representation learning loss of the network. If this value is 0 
 #       the contrastive repr. learning is completely disabled (increases computational efficiency). The higher 
 #       this value the more the contrastive learning will influence the network during training.
-CONTRASTIVE_FACTOR: float = 0.0
+CONTRASTIVE_FACTOR: float = 1.0
 # :param CONTRASTIVE_NOISE:
 #       This float value determines the noise level that is applied when generating the positive augmentations 
 #       during the contrastive learning process.
@@ -181,7 +181,7 @@ CONTRASTIVE_NOISE: float = 0.1
 #       This value should be chosen as roughly the inverse of the number of expected concepts. So as an example 
 #       if it is expected that each explanation consists of roughly 10 distinct concepts, this should be chosen 
 #       as 1/10 = 0.1
-CONTRASTIVE_TAU: float = 0.01
+CONTRASTIVE_TAU: float = 0.1
 # :param CONTRASTIVE_TEMP:
 #       This float value is a hyperparameter that controls the "temperature" of the contrastive learning loss.
 #       The higher this value, the more the contrastive learning will be smoothed out. The lower this value,
@@ -215,7 +215,7 @@ EPOCHS: int = 100
 #       The batch size to use while training. This is the number of elements from the dataset that are 
 #       presented to the model at the same time to estimate the gradient direction for the stochastic gradient 
 #       descent optimization.
-BATCH_SIZE: int = 32
+BATCH_SIZE: int = 64
 # :param LEARNING_RATE:
 #       This float determines the learning rate of the optimizer.
 LEARNING_RATE: float = 1e-5

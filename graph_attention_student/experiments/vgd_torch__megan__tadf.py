@@ -55,12 +55,19 @@ TARGET_NAMES: t.Dict[int, str] = {
 
 # == MODEL PARAMETERS ==
 # The following parameters configure the model architecture.
+# == MODEL PARAMETERS ==
+# The following parameters configure the model architecture.
 
 # :param UNITS:
 #       This list determines the layer structure of the model's graph encoder part. Each element in 
 #       this list represents one layer, where the integer value determines the number of hidden units 
 #       in that layer of the encoder network.
-UNITS: t.List[int] = [64, 64, 64, 64]
+UNITS: t.List[int] = [128, 128, 128]
+# :param HIDDEN_UNITS:
+#       This integer value determines the number of hidden units in the model's graph attention layer's
+#       transformative dense networks that are used for example to perform the message update and to 
+#       derive the attention logits.
+HIDDEN_UNITS: int = 128
 # :param IMPORTANCE_UNITS:
 #       This list determines the layer structure of the importance MLP which determines the node importance 
 #       weights from the node embeddings of the graph. 
@@ -91,11 +98,6 @@ IMPORTANCE_FACTOR: float = 1.0
 #       Typical values range from 0.2 - 2.0 but also depend on the graph size and the specific problem at 
 #       hand. This is a parameter with which one has to experiment until a good trade-off is found!
 IMPORTANCE_OFFSET: float = 1.0
-# :param SPARSITY_FACTOR:
-#       This is the coefficient that is used to scale the explanation sparsity loss during training.
-#       The higher this value the more explanation sparsity (less and more discrete explanation masks)
-#       is promoted.
-SPARSITY_FACTOR: float = 0.1
 # :param FIDELITY_FACTOR:
 #       This parameter controls the coefficient of the explanation fidelity loss during training. The higher
 #       this value, the more the model will be trained to create explanations that actually influence the
@@ -103,18 +105,11 @@ SPARSITY_FACTOR: float = 0.1
 #       If this value is set to 0.0, the explanation fidelity loss is completely disabled (==higher computational
 #       efficiency).
 FIDELITY_FACTOR: float = 0.1
-# :param REGRESSION_REFERENCE:
-#       When dealing with regression tasks, an important hyperparameter to set is this reference value in the 
-#       range of possible target values, which will determine what part of the dataset is to be considered as 
-#       negative / positive in regard to the negative and the positive explanation channel. A good first choice 
-#       for this parameter is the average target value of the training dataset. Depending on the results for 
-#       that choice it is possible to adjust the value to adjust the explanations.
-REGRESSION_REFERENCE: t.Optional[float] = 0.0
 # :param NORMALIZE_EMBEDDING:
 #       This boolean value determines whether the graph embeddings are normalized to a unit length or not.
 #       If this is true, the embedding of each individual explanation channel will be L2 normalized such that 
 #       it is projected onto the unit sphere.
-NORMALIZE_EMBEDDING: bool = True
+NORMALIZE_EMBEDDING: bool = False
 # :param ATTENTION_AGGREGATION:
 #       This string literal determines the strategy which is used to aggregate the edge attention logits over 
 #       the various message passing layers in the graph encoder part of the network. This may be one of the 
@@ -125,7 +120,7 @@ ATTENTION_AGGREGATION: str = 'max'
 #       explanation co-training, this determines the margin for the thresholding. Instead of using the regression
 #       reference as a hard threshold, values have to be at least this margin value lower/higher than the 
 #       regression reference to be considered a class sample.
-REGRESSION_MARGIN: t.Optional[float] = 0.0
+REGRESSION_MARGIN: t.Optional[float] = -0.1
 # :param CONTRASTIVE_FACTOR:
 #       This is the factor of the contrastive representation learning loss of the network. If this value is 0 
 #       the contrastive repr. learning is completely disabled (increases computational efficiency). The higher 
@@ -134,13 +129,13 @@ CONTRASTIVE_FACTOR: float = 0.0
 # :param CONTRASTIVE_NOISE:
 #       This float value determines the noise level that is applied when generating the positive augmentations 
 #       during the contrastive learning process.
-CONTRASTIVE_NOISE: float = 0.2
+CONTRASTIVE_NOISE: float = 0.1
 # :param CONTRASTIVE_TAU:
 #       This float value is a hyperparameters of the de-biasing improvement of the contrastive learning loss. 
 #       This value should be chosen as roughly the inverse of the number of expected concepts. So as an example 
 #       if it is expected that each explanation consists of roughly 10 distinct concepts, this should be chosen 
 #       as 1/10 = 0.1
-CONTRASTIVE_TAU: float = 0.05
+CONTRASTIVE_TAU: float = 0.1
 # :param CONTRASTIVE_TEMP:
 #       This float value is a hyperparameter that controls the "temperature" of the contrastive learning loss.
 #       The higher this value, the more the contrastive learning will be smoothed out. The lower this value,
@@ -150,6 +145,21 @@ CONTRASTIVE_TEMP: float = 1.0
 #       This is the float value from the paper about the hard negative mining called the concentration 
 #       parameter. It determines how much the contrastive loss is focused on the hardest negative samples.
 CONTRASTIVE_BETA: float = 1.0
+# :param TRAIN_MVE:
+#       This boolean determines whether or not the (regression) model should be trained as a mean variance estimator
+#       (MVE) model. This would mean that the model predicts the mean and the variance of the target value distribution
+#       instead of just the mean. This is useful for regression tasks where the target values are not deterministic
+#       but have a certain variance/noise.
+TRAIN_MVE: bool = False
+# :param MVE_WARMUP_EPOCHS:
+#       This integer determines how many epochs the model should be trained normally (MSE loss) before switching on 
+#       the NLL loss to train the variance as well. In general it is recommended to fully converge a model on the 
+#       normal loss before switching to the NLL loss.
+MVE_WARMUP_EPOCHS: int = 50
+
+EPOCHS: int = 25
+BATCH_SIZE: int = 64
+LEARNING_RATE = 1e-5
 
 # == VISUALIZATION PARAMETERS ==
 # The following parameters configure the visualization of the model and the dataset.
@@ -159,9 +169,6 @@ CONTRASTIVE_BETA: float = 1.0
 #       be performed or not. If this is set to False, the clustering analysis will be skipped. When setting this 
 #       to True, be aware that the clustering analysis will take a lot of time and memory for large datasets!
 DO_CLUSTERING: bool = False
-
-EPOCHS: int = 15
-BATCH_SIZE: int = 100
 
 __DEBUG__ = True
 __TESTING__ = False

@@ -135,7 +135,7 @@ IMPORTANCE_OFFSET: float = 0.8
 #       This is the coefficient that is used to scale the explanation sparsity loss during training.
 #       The higher this value the more explanation sparsity (less and more discrete explanation masks)
 #       is promoted.
-SPARSITY_FACTOR: float = 0.0
+SPARSITY_FACTOR: float = 1.0
 # :param FIDELITY_FACTOR:
 #       This parameter controls the coefficient of the explanation fidelity loss during training. The higher
 #       this value, the more the model will be trained to create explanations that actually influence the
@@ -528,7 +528,7 @@ def train_model(e: Experiment,
         num_channels=e.NUM_CHANNELS,
         importance_factor=e.IMPORTANCE_FACTOR,
         importance_offset=e.IMPORTANCE_OFFSET,
-        importance_target='edge',
+        importance_target='node',
         sparsity_factor=e.SPARSITY_FACTOR,
         fidelity_factor=e.FIDELITY_FACTOR,
         regression_reference=e.REGRESSION_REFERENCE,
@@ -852,7 +852,6 @@ def analysis(e: Experiment):
     This analysis
     """
     e.log('running MEGAN specific analysis...')
-    return
     
     # In the analysis routine of the parent experiment, the index data map is loaded from the disk 
     # already and stored in this experiment storage entry, so that it can be reused here.
@@ -869,71 +868,70 @@ def analysis(e: Experiment):
     
     e.log('Clustering the latent space...')
     min_samples = 5
-    for rep in range(e.REPETITIONS):
-        
-        e.log(f'> REP {rep}')
-        test_indices = e[f'test_indices/{rep}']
-        graphs_test = [index_data_map[index]['metadata']['graph'] for index in test_indices]
-        
-        model = e[f'_model/{rep}']
-        infos = model.forward_graphs(graphs)
-        
-        for k in range(e.NUM_CHANNELS):
-            
-            # graph_embeddings_k: (B, D)
-            graph_embeddings_k = np.array([info['graph_embedding'][:, k] for info in infos])
 
-            clusterer = hdbscan.HDBSCAN(min_samples=min_samples)
-            cluster_labels = clusterer.fit_predict(graph_embeddings_k)
-            cluster_indices = list(set(cluster_labels))
-            num_clusters = len(cluster_indices) - 1
-            e.log(f' * channel {k} - num clusters: {num_clusters}')
+        
+    test_indices = e[f'indices/test']
+    graphs_test = [index_data_map[index]['metadata']['graph'] for index in test_indices]
+    
+    model = e[f'_model']
+    infos = model.forward_graphs(graphs)
+    
+    for k in range(e.NUM_CHANNELS):
+        
+        # graph_embeddings_k: (B, D)
+        graph_embeddings_k = np.array([info['graph_embedding'][:, k] for info in infos])
+
+        clusterer = hdbscan.HDBSCAN(min_samples=min_samples)
+        cluster_labels = clusterer.fit_predict(graph_embeddings_k)
+        cluster_indices = list(set(cluster_labels))
+        num_clusters = len(cluster_indices) - 1
+        e.log(f' * channel {k} - num clusters: {num_clusters}')
+        
+        with PdfPages(os.path.join(e.path, f'cluster__ch{k:02d}.pdf')) as pdf:
             
-            with PdfPages(os.path.join(e[f'path/{rep}'], f'cluster__ch{k:02d}.pdf')) as pdf:
+            for cluster_index in cluster_indices:
                 
-                for cluster_index in cluster_indices:
+                fig, rows = plt.subplots(
+                    ncols=10, 
+                    nrows=1, 
+                    figsize=(50, 5),
+                    squeeze=False,
+                )
+                
+                cluster_centroid = np.mean(graph_embeddings_k[cluster_labels == cluster_index], axis=0, keepdims=True)
+                cosine_distances = pairwise_distances(graph_embeddings_k, cluster_centroid, metric='cosine')
+                cosine_distances = cosine_distances.flatten()
+                closest_indices = np.argsort(cosine_distances)[:10]
+
+                for i, j in enumerate(closest_indices):
                     
-                    fig, rows = plt.subplots(
-                        ncols=10, 
-                        nrows=1, 
-                        figsize=(50, 5),
-                        squeeze=False,
+                    info = infos[j]
+                    index = indices[j]
+                    ax = rows[0][i]
+                    graph = index_data_map[index]['metadata']['graph']
+                    draw_image(
+                        ax=ax,
+                        image_path=index_data_map[index]['image_path']
                     )
-                    
-                    cluster_centroid = np.mean(graph_embeddings_k[cluster_labels == cluster_index], axis=0, keepdims=True)
-                    cosine_distances = pairwise_distances(graph_embeddings_k, cluster_centroid, metric='cosine')
-                    cosine_distances = cosine_distances.flatten()
-                    closest_indices = np.argsort(cosine_distances)[:10]
-
-                    for i, j in enumerate(closest_indices):
-                        
-                        info = infos[j]
-                        index = indices[j]
-                        ax = rows[0][i]
-                        graph = index_data_map[index]['metadata']['graph']
-                        draw_image(
-                            ax=ax,
-                            image_path=index_data_map[index]['image_path']
-                        )
-                        node_importance = info['node_importance'] / np.max(info['node_importance'])
-                        edge_importance = info['edge_importance'] / np.max(info['edge_importance'])
-                        plot_node_importances_background(
-                            ax=ax,
-                            g=graph,
-                            node_positions=graph['node_positions'],
-                            node_importances=node_importance[:, k],
-                            radius=50,
-                        )
-                        plot_edge_importances_background(
-                            ax=ax,
-                            g=graph,
-                            node_positions=graph['node_positions'],
-                            edge_importances=edge_importance[:, k],
-                            thickness=10,
-                        )
-                
-                    pdf.savefig(fig)
-                    plt.close(fig)
+                    node_importance = info['node_importance'] / np.max(info['node_importance'])
+                    edge_importance = info['edge_importance'] / np.max(info['edge_importance'])
+                    plot_node_importances_background(
+                        ax=ax,
+                        g=graph,
+                        node_positions=graph['node_positions'],
+                        node_importances=node_importance[:, k],
+                        radius=50,
+                    )
+                    plot_edge_importances_background(
+                        ax=ax,
+                        g=graph,
+                        node_positions=graph['node_positions'],
+                        edge_importances=edge_importance[:, k],
+                        thickness=10,
+                    )
+            
+                pdf.savefig(fig)
+                plt.close(fig)
             
 
 experiment.run_if_main()

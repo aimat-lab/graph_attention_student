@@ -1,0 +1,4 @@
+extend: vgd_torch__megan_ensemble.py
+parameters:
+  IMPORTANCE_OFFSET: 1.0
+  BASE_EXPERIMENT: vgd_torch__megan__aqsoldb.py

@@ -1,0 +1,3 @@
+extend: vgd_torch__megan_ensemble.py
+parameters:
+  BASE_EXPERIMENT: vgd_torch__megan__mutagenicity.py
