@@ -203,7 +203,7 @@ def plot_embeddings_3d(embeddings: np.ndarray,
 
 def create_embeddings_pdf(embeddings: np.ndarray,
                           output_path: str,
-                          title: t.Optional[str | list] = None,
+                          title: t.Optional[t.Union[str, list]] = None,
                           colors: t.Optional[list] = None,
                           color_map: t.Optional[mcolors.Colormap] = None,
                           logger: logging.Logger = NULL_LOGGER,

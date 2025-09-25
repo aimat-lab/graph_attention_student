@@ -280,6 +280,7 @@ def test_megan_basically_works(num_graphs, node_dim, edge_dim, num_channels):
         node_dim=node_dim,
         edge_dim=edge_dim,
         units=[32, 32, embedding_dim],
+        projection_units=[embedding_dim, ],
         num_channels=num_channels,
         importance_units=[32],
         final_units=[32, 1],

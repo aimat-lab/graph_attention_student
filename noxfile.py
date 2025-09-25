@@ -8,8 +8,9 @@ import nox
 nox.options.default_venv_backend = "uv"
 
 # Python versions to test against
-PYTHON_VERSIONS = ["3.9", "3.10", "3.11", "3.12"]
+PYTHON_VERSIONS = ["3.8", "3.9", "3.10", "3.11", "3.12"]
 LATEST_PYTHON = "3.12"
+
 
 
 def get_wheel_path(path: str = 'dist') -> str:

@@ -1,4 +1,4 @@
-|made-with-python| |made-with-kgcnn| |python-version| |os-linux|
+|made-with-python| |made-with-pytorch| |python-version| |os-linux|
 
 .. |os-linux| image:: https://img.shields.io/badge/os-linux-orange.svg
    :target: https://www.python.org/
@@ -6,8 +6,8 @@
 .. |python-version| image:: https://img.shields.io/badge/Python-3.8.0-green.svg
    :target: https://www.python.org/
 
-.. |made-with-kgcnn| image:: https://img.shields.io/badge/Made%20with-KGCNN-blue.svg
-   :target: https://github.com/aimat-lab/gcnn_keras
+.. |made-with-pytorch| image:: https://img.shields.io/badge/Made%20with-PyTorch-orange.svg
+   :target: https://pytorch.org/
 
 .. |made-with-python| image:: https://img.shields.io/badge/Made%20with-Python-1f425f.svg
    :target: https://www.python.org/
@@ -34,20 +34,30 @@ with human intuition, opening the way to learning from our model in less well-un
 🔔 News
 -------
 
-- **March 2023** - The `paper`_ was accepted at the `1st xAI world conference <https://xaiworldconference.com/2023/>`_
+- **September 2025** - Version `1.0.0` of the package has finally been released!
+- **April 2024** - The follow-up paper about *global concept explanations using an extension of MEGAN* is now available on arxiv: https://arxiv.org/abs/2404.16532 
+- **October 2023** - The `paper`_ is published with Springer in the xAI conference proceedings: https://link.springer.com/chapter/10.1007/978-3-031-44067-0_18
 - **June 2023** - Check out the `MeganExplains`_ web interface @ https://megan.aimat.science/. The interface allows to query MEGAN models trained on 
   different graph prediction tasks and to visualize the corresponding explanations provided by the model.
-- **October 2023** - The `paper`_ is published with Springer in the xAI conference proceedings: https://link.springer.com/chapter/10.1007/978-3-031-44067-0_18
-- **April 2024** - The follow-up paper about *global concept explanations using an extension of MEGAN* is now available on arxiv: https://arxiv.org/abs/2404.16532 
+- **March 2023** - The `paper`_ was accepted at the `1st xAI world conference <https://xaiworldconference.com/2023/>`_
 
 📦 Package Dependencies
 -----------------------
 
-- The package is designed to run in an environment ``3.10 <= python <= 3.11``. 
+- The package is designed to run in an environment `3.8 <= python <= 3.13`. 
 - A graphics card with CUDA support (cuDNN) is recommended for model training.
-- A **Linux** operating system is recommended for development. Development on Windows works, but isn't 
-  actively tested and might run into additional issues during project setup.
+- A **Linux** operating system is recommended for development.
  
+📦 Installation by Package
+--------------------------
+
+The package is also published as a library on PyPi and can be installed like this:
+
+.. code-block:: shell
+
+     uv pip install graph_attention_student
+
+
 📦 Installation from Source
 ---------------------------
 
@@ -57,222 +67,218 @@ Clone the repository from github:
 
     git clone https://github.com/aimat-lab/graph_attention_student
 
-Due to a problem with the ``torch-scatter`` package, the ``torch`` package has to be installed first.
-
-.. code-block:: shell
-
-    pip install torch==2.1.2
-
-Then in the main folder run a ``pip install``:
+Then in the main folder run a `pip install`:
 
 .. code-block:: shell
 
     cd graph_attention_student
-    pip install -e .
+    uv pip install -e .
 
-⚠️ Warning For Windows Users
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. warning::
+   **Warning For Windows Users**
 
-The required library ``cairosvg`` is known to cause problems on Windows systems. If you are on Windows, there might 
-be additional steps required to properly install the project dependencies.
+   The required library ``cairosvg`` is known to cause problems on Windows systems. If you are on Windows, there might
+   be additional steps required to properly install the project dependencies.
 
-See this `issue <https://github.com/aimat-lab/graph_attention_student/issues/2>`_ for additional information.
+   See this `issue <https://github.com/aimat-lab/graph_attention_student/issues/2>`_ for additional information.
 
-
-📦 Installation by Package
---------------------------
-
-The package is also published as a library on PyPi and can be installed like this:
-
-.. code-block:: shell
-
-    pip install torch==2.1.2
-    pip install graph_attention_student
-
-📦 CPU-only Installation
-------------------------
-
-Sometimes one needs to install the package for a CPU-only environment. This could be because the CUDA toolkit is not
-installed on the machine or because the machine does not have a GPU at all. In this case, the package can be installed
-with the following commands that require the manual installation of the torch related libraries before installing 
-the main package.
-
-.. code-block:: shell
-
-    pip install torch==2.2.0+cpu --index-url https://download.pytorch.org/whl/cpu
-    pip install torch-scatter -f https://data.pyg.org/whl/torch-2.2.0+cpu.html
-    pip install torch-geometric>=2.4.0 -f https://data.pyg.org/whl/torch-2.2.0+cpu.html
-    pip install graph_attention_student
 
 🚀 Quickstart
 -------------
 
-This package provides some functionality to load a pre-trained MEGAN model from the disk. The following code will illustrate 
-this for the example of predicting a molecular graph's water solubility using the default MEGAN model that is included in the 
-package for this task.
+This example demonstrates the complete workflow for creating, training, and using a MEGAN model to predict molecular properties with explanations. The following code shows how to set up a model, train it, and make predictions for a single SMILES string:
 
 .. code-block:: python
 
-    import os
-    import typing as t
+    from visual_graph_datasets.processing.molecules import MoleculeProcessing
+    from graph_attention_student import Megan, SmilesDataset
+    from graph_attention_student.torch.advanced import megan_prediction_report
+    from torch_geometric.loader import DataLoader
+    import pytorch_lightning as pl
 
-    import tensorflow as tf
-    import tensorflow.keras as ks
-    from visual_graph_datasets.util import dynamic_import
-    from graph_attention_student.utils import ASSETS_PATH
-    from graph_attention_student.models import load_model
+    # Initialize molecule processing
+    processing = MoleculeProcessing()
 
-    # We want to predict the water solubility for the molecule represented as this SMILES code
-    SMILES = 'CN1C=NC2=C1C(=O)N(C(=O)N2C)C'
+    # Create and configure the MEGAN model
+    model = Megan(
+        node_dim=processing.get_num_node_attributes(),
+        edge_dim=processing.get_num_edge_attributes(),
+        units=[64, 64, 64],
+        final_units=[64, 32, 1],
+        prediction_mode='regression',
+        learning_rate=1e-4,
+        importance_factor=1.0,  # Enable explanations
+        sparsity_factor=0.5,
+    )
 
-    # Loading the model
-    model_path = os.path.join(ASSETS_PATH, 'models', 'aqsoldb')
-    model = load_model(model_path)
+    # Train the model (assuming you have a dataset CSV file)
+    dataset = SmilesDataset(
+        dataset="your_dataset.csv",
+        smiles_column='smiles',
+        target_columns=['value'],
+        processing=processing,
+        reservoir_sampling=True
+    )
+    loader = DataLoader(dataset, batch_size=64, num_workers=4)
+    trainer = pl.Trainer(max_epochs=150, accelerator='auto')
+    trainer.fit(model, train_dataloaders=loader)
+    model.eval()
 
-    # For the inference we have to convert the SMILES string into the proper molecular graph
-    module = dynamic_import(os.path.join(model_path, 'process.py'))
-    processing = module.processing
+    # Make predictions with explanations
+    SMILES = 'CN1C=NC2=C1C(=O)N(C(=O)N2C)C'  # Caffeine
     graph = processing.process(SMILES)
-    
-    # THe model outputs the node and edge explanation masks directly alongside the main target value prediction
-    out_pred, ni_pred, ei_pred = model.predict_graphs([graph])[0]
-    print(f'Solubility: {out_pred[0]:.2f}')
+    results = model.forward_graph(graph)
+
+    print(f"Predicted value: {results['graph_output'].item():.3f}")
+
+    # Generate explanation report
+    megan_prediction_report(
+        value=SMILES,
+        model=model,
+        processing=processing,
+        output_path="explanation_report.pdf"
+    )
 
 
-.. _kgcnn: https://github.com/aimat-lab/gcnn_keras
-.. _examples/solubility_regression.py: https://github.com/aimat-lab/graph_attention_student/tree/master/graph_attention_student/examples/solubility_regression.py
 .. _`GATv2`: https://github.com/tech-srl/how_attentive_are_gats
 
 🤖 Training a Custom MEGAN Model
 --------------------------------
 
-If you are interested in training a custom MEGAN model for your own graph dataset, then you can do that as well. The easiest way to do this 
-generally consists of the following two steps:
+This section provides a detailed guide for training a custom MEGAN model on your own molecular dataset using the modern PyTorch Lightning-based API.
 
-1. Convert your custom dataset into the `visual graph dataset`_ (VGD) format.
-2. Create a new sub-experiment module which then uses that VGD to train the model for you.
+Dataset Preparation
+-------------------
 
-Converting the Dataset
-----------------------
+The MEGAN model can be trained directly on CSV files containing SMILES strings and target values. Your dataset should be structured as follows:
 
-The existing MEGAN training implementations are based on the `visual graph dataset`_ (VGD) format. In this format a dataset of graph elements is given as a 
-folder that represents each element as one JSON file containing all the canonical graph structure, and a PNG file showing the canonical graph visualization.
-You can learn more about the VGD format in this repository: https://github.com/aimat-lab/visual_graph_datasets
+.. code-block:: text
 
-The VGD repository offers convenient pre-defined methods to directly convert datasets from various application domains. Perhaps most notably, there is the 
-option to directly convert a dataset of molecular graphs given as *a CSV of SMILES codes* into the VGD format. For further details regarding this please refer 
-to the following documentation: https://github.com/aimat-lab/visual_graph_datasets#-converting-datasets
+    smiles,value
+    CCO,1.23
+    CCN,2.45
+    CCC,0.89
+    ...
 
-Sub Experiment for Training
----------------------------
+For molecular datasets, the package uses the `SmilesDataset` class which handles the conversion from SMILES to graph representations automatically.
 
-All of the computational experiments in this repository are implemented with the PyComex_ microframework. This framework enforces a common structure to all the 
-experiment modules, but offers some convenient features in return. One of those features is *experiment inheritance* which allows to define a sub-experiment in 
-a similar way in which sub-classes are created in object oriented programming. These sub-experiments inherit the majority of the of the code from the base experiment 
-but are able to modify the experiment parameters and inject custom code via a hook system.
-You can learn more about the PyComex framework in general here: https://github.com/the16thpythonist/pycomex
+Model Configuration and Training
+---------------------------------
 
-To train a custom MEGAN model it is advised to extend on the ``vgd_single__megan2.py`` base experiment, which uses the most recent version of the MEGAN model.
-In this module, it is only necessary to customize the values of the global experiment parameters, after which the module can be executed to start the model 
-training process.
+Here's a complete example of how to train a custom MEGAN model:
 
 .. code-block:: python
 
-    """new file: vgd_single__megan2__custom.py"""
-    import os
-    import typing as t
+    import pytorch_lightning as pl
+    from torch_geometric.loader import DataLoader
+    from visual_graph_datasets.processing.molecules import MoleculeProcessing
+    from graph_attention_student import Megan, SmilesDataset
 
-    import tensorflow as tf
-    from pycomex.functional.experiment import Experiment
-    from pycomex.utils import file_namespace, folder_path
+    # Initialize molecule processing
+    processing = MoleculeProcessing()
 
-    from graph_attention_student.utils import EXPERIMENTS_PATH
-
-    # == CUSTOMIZE HERE ==
-
-    # -- DATASET CONFIGURATION --
-    # Fill in the path to your dataset here
-    VISUAL_GRAPH_DATASET_PATH: str = '../path/to/your/vgd'
-    # The type of dataset it is
-    DATASET_TYPE: str = 'regression'  # or 'classification'
-    # The number of target labels that the dataset has
-    NUM_TARGETS: int = 1
-    # the ratio of the dataset to be used for training (rest is test set)
-    TRAIN_RATIO: float = 0.8
-    # The number of randomly chosen example elements from the test set to be 
-    # plotting the explanations for.
-    NUM_EXAMPLES: int = 100
-
-    NODE_IMPORTANCES_KEY: t.Optional[str] = None  # dont modify
-    EDGE_IMPORTANCES_KEY: t.Optional[str] = None  # dont modify
-
-    # -- MODEL CONFIGURATION --
-    # the numbers of hidden units in the gnn layers
-    UNITS = [32, 32, 32]
-    # the number of units in the projection layers
-    EMBEDDING_UNITS = [32, 64]
-    # the number of units in the final prediction mlp layers
-    FINAL_UNITS = [32, NUM_TARGETS]
-    # Choose the correct activation for regression(linear) vs classification(softmax) 
-    FINAL_ACTIVATION: str = 'linear'
-    # Configure the training process
-    BATCH_SIZE: int = 32
-    EPOCHS: int = 10
-    DEVICE: str = 'cpu:0'
-
-    # -- EXPLANATION CONFIGURATION --
-    # The number of distinct explanations to be created
-    IMPORTANCE_CHANNELS: int = 2
-    # the weight of the explanation training loss
-    IMPORTANCE_FACTOR: float = 1.0
-    # the weight of the fidelity training loss
-    FIDELITY_FACTOR: float = 0.1
-    # the weight of the sparsity training loss
-    SPARSITY_FACTOR: float = 1.0
-    # the fidelity functionals
-    FIDELITY_FUNCS = [
-        lambda org, mod: tf.nn.relu(mod - org),
-        lambda org, mod: tf.nn.relu(org - mod),
-    ]
-    # Choose "None" in case of classification
-    REGRESSION_REFERENCE: float = 0.0
-
-    # == DO NOT MODIFY ==
-
-    __DEBUG__ = False
-    __TESTING__ = False
-    experiment = Experiment.extend(
-        os.path.join(EXPERIMENTS_PATH, 'vgd_single__megan2.py'),
-        base_path=folder_path(__file__),
-        namespace=file_namespace(__file__),
-        glob=globals()
+    # Create the dataset
+    dataset = SmilesDataset(
+        dataset="path/to/your/dataset.csv",
+        smiles_column='smiles',  # Name of SMILES column
+        target_columns=['value'],  # Name of target column(s)
+        processing=processing,
+        reservoir_sampling=True,  # Enables shuffling
     )
 
-    experiment.run_if_main()
+    # Create data loader
+    loader_train = DataLoader(
+        dataset,
+        batch_size=64,
+        drop_last=True,
+        num_workers=4,
+        prefetch_factor=2,
+    )
 
-**Configuring the MEGAN model.** Much of the configuration that has to be done for the training process is similar to 
-"normal" neural network configuration, such as the choice of each layers hidden units, the final activation function, the training 
-batch size and epochs etc. It is generally recommended to leave these parameters at their default values at first and only 
-adjust them when a problem becomes apparent such as a clear over- or under-fitting.
+    # Configure the MEGAN model
+    model = Megan(
+        # --- Graph Architecture ---
+        node_dim=processing.get_num_node_attributes(),
+        edge_dim=processing.get_num_edge_attributes(),
+        units=[64, 64, 64],  # GNN layer sizes
+        final_units=[64, 32, 1],  # Final MLP layers
 
-Aside from the normal parameters, notably some configuration is also necessary for the *explanation* aspect of the model.
-These parameters have only marginal impact on the final precition performance of the model but will determine how usable the 
-resulting explanations will be. Some of these parameters will be discussed there briefly, but to get a better understanding of 
-the purpose of these parameters it is recommended to read the `paper`_
+        # --- Task Configuration ---
+        prediction_mode='regression',  # or 'bce' for binary, 'classification' for multi-class
+        learning_rate=1e-4,
 
-- *Number or importance channels.* One of MEGAN's distinct features is that the number of explanations that is generated for each 
-  prediction is a hyperparameter ``IMPORTANCE_CHANNELS`` of the model instead of depending on the task specifications. 
-  However, to properly make use of the explanations the following restrictions currently apply: For a classification problem 
-  choose ``IMPORTANCE_CHANNELS`` same as the number of possible output classes. For regression tasks, currently only single-value 
-  regression problems are supported, in which case choose ``IMPORTANCE_CHANNELS = 2``. In this case, the first channel (index 0) will represent the 
-  negatively influencing structures and the second channel (index 1) will represent the positively influencing structures.
-- *Regression Reference.* One particularly important parameter for regression tasks is ``REGRESSION_REFERENCE``. This value determines 
-  which kinds of target values are even considered "negative" vs "positive". Therefore this parameter strongly influences how the 
-  explanations will turn out. A good starting point for this parameter is to choose it as the average value over the target labels of 
-  the given dataset. Depending on how the explanations turn out, it may have to be adjusted afterwards.
-- *Loss Weights.* During training, a MEGAN model is subject to various different loss terms whose weights can be set using the 
-  parameters ``IMPORTANCE_FACTOR``, ``FIDELITY_FACTOR`` and ``SPARSITY_FACTOR``. It is generally recommended to leave them at 
-  their default value, but depending on the circumstances it might be necessary to adjust them.
+        # --- Explanation Configuration ---
+        importance_mode='regression',  # Match your prediction mode
+        importance_factor=1.0,  # Weight of explanation loss (0.0 disables explanations)
+        sparsity_factor=0.5,  # Encourages sparse explanations
+        importance_offset=1.0,  # Controls explanation sparsity threshold
+    )
+
+    # Configure trainer
+    trainer = pl.Trainer(
+        max_epochs=150,
+        accelerator='auto',  # Uses GPU if available
+        devices='auto',
+        # Optional: add callbacks for checkpointing, early stopping, etc.
+    )
+
+    # Train the model
+    trainer.fit(model, train_dataloaders=loader_train)
+
+    # Important: Switch to evaluation mode
+    model.eval()
+
+    # Save the trained model
+    model.save("trained_model.ckpt")
+
+Model Configuration Options
+---------------------------
+
+**Architecture Parameters:**
+
+- ``units``: List defining the hidden dimensions of the GNN layers (e.g., ``[64, 64, 64]``)
+- ``final_units``: List defining the final MLP structure. Last value must match the number of targets
+- ``node_dim/edge_dim``: Input feature dimensions (automatically determined by processing)
+
+**Training Parameters:**
+
+- ``prediction_mode``: Task type - ``'regression'``, ``'bce'`` (binary classification), or ``'classification'``
+- ``learning_rate``: Learning rate for the Adam optimizer
+- ``batch_size``: Training batch size (set in DataLoader)
+
+**Explanation Parameters:**
+
+- ``importance_factor``: Weight of the explanation consistency loss (1.0 = explanations enabled)
+- ``sparsity_factor``: Weight of the sparsity loss encouraging focused explanations
+- ``importance_offset``: Threshold controlling explanation sparsity (higher = more sparse)
+- ``importance_mode``: Should match your ``prediction_mode``
+
+Loading and Using Trained Models
+---------------------------------
+
+.. code-block:: python
+
+    # Load a previously trained model
+    model = Megan.load("trained_model.ckpt")
+    model.eval()
+
+    # Make predictions
+    graph = processing.process("CCO")  # Convert SMILES to graph
+    results = model.forward_graph(graph)
+
+    predicted_value = results['graph_output'].item()
+    node_importance = results['node_importance']  # Explanation scores
+    edge_importance = results['edge_importance']
+
+    # Generate explanation visualization
+    from graph_attention_student.torch.advanced import megan_prediction_report
+
+    megan_prediction_report(
+        value="CCO",
+        model=model,
+        processing=processing,
+        output_path="prediction_report.pdf"
+    )
 
 🔍 Examples
 -----------
@@ -358,19 +364,20 @@ If you use, extend or otherwise mention or work, please cite the `paper`_ as fol
 Credits
 ------------
 
-* PyComex_ is a micro framework which simplifies the setup, processing and management of computational
-  experiments. It is also used to auto-generate the command line interface that can be used to interact
-  with these experiments.
+* **PyTorch Lightning** provides the high-level training framework that powers the modern MEGAN implementation,
+  offering easy GPU acceleration, distributed training, and experiment management.
+* **PyTorch Geometric** supplies the fundamental graph neural network building blocks and efficient graph data handling
+  that enable MEGAN's attention mechanisms and message passing operations.
 * VisualGraphDataset_ is a library which aims to establish a special dataset format specifically for graph
   XAI applications with the aim of streamlining the visualization of graph explanations and to make them
   more comparable by packaging canonical graph visualizations directly with the dataset.
-* KGCNN_ Is a library for the creation of graph neural networks based on the RaggedTensor feature of the
-  Tensorflow/Keras machine learning framework.
+* PyComex_ is a micro framework which simplifies the setup, processing and management of computational
+  experiments. It is also used to auto-generate the command line interface that can be used to interact
+  with these experiments.
 
 .. _PyComex: https://github.com/the16thpythonist/pycomex
 .. _VisualGraphDataset: https://github.com/aimat-lab/visual_graph_datasets
 .. _MEGAN: https://github.com/aimat-lab/graph_attention_student
-.. _KGCNN: https://github.com/aimat-lab/gcnn_keras
 
 .. _`ERASER`: https://www.eraserbenchmark.com/
 .. _`GLOVE`: https://nlp.stanford.edu/projects/glove/

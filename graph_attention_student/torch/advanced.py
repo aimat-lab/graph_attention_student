@@ -54,10 +54,10 @@ def megan_prediction_report(
     processing: ProcessingBase,
     figsize: tuple[int, int] = (10, 10),
     output_path: str = tempfile.tempdir,
-    color_maps: list[str] = [positive_cmap, negative_cmap],
+    color_maps: list[str] = [negative_cmap, positive_cmap],
     vis_width: int = 1000,
     vis_height: int = 1000,
-    unit: str | None = None,
+    unit: typ.Optional[str] = None,
 ) -> tuple[str, dict, dict]:
     """Generate a comprehensive PDF prediction report for a MEGAN model.
 

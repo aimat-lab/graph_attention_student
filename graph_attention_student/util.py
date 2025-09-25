@@ -35,6 +35,7 @@ ASSETS_PATH = os.path.join(PATH, 'assets')
 # in latex or html format. The templates are all stored in the templates folder.
 # and are globally accessible via the TEMPLATE_ENV variable.
 TEMPLATES_FOLDER = os.path.join(PATH, 'templates')
+TEMPLATE_PATH = TEMPLATES_FOLDER
 TEMPLATE_ENV = j2.Environment(
     loader=j2.FileSystemLoader(TEMPLATES_FOLDER),
     autoescape=j2.select_autoescape(),

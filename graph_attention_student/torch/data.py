@@ -104,7 +104,7 @@ class SmilesDataset(IterableDataset):
     """
 
     def __init__(self,
-                 dataset: pl.DataFrame | pd.DataFrame | list[dict] | str,
+                 dataset: t.Union[pl.DataFrame, pd.DataFrame, list[dict], str],
                  smiles_column: str = 'smiles',
                  target_columns: list[str] = ['value'],
                  processing=MoleculeProcessing(),

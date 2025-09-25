@@ -69,22 +69,6 @@ dependencies = [
     "weasyprint >=57.1",
 ]
 
-
-# --- Fixing torch_scatter ---
-# Torch scatter is a very particular dependency since for it to be installed correctly, pytorch
-# needs to be installed on the system already, but it does not declare torch as a dependency 
-# itself.
-[tool.uv]
-no-build-isolation-package = ["torch_scatter"]
-
-[tool.uv.extra-build-dependencies]
-torch_scatter = [{ requirement = "torch", match-runtime = true }]
-
-[[tool.uv.dependency-metadata]]
-name = "torch_scatter"
-version = "2.1.2"
-requires-dist = ["torch"]
-
 # --- Executable scripts ----
 [project.scripts]
 # graph_attention_student = "graph_attention_student.cli:cli"
@@ -130,3 +114,26 @@ ignore = [
 [tool.ruff.format]
 quote-style = "single"
 indent-style = "space"
+
+# --- bumpversion configuration ---
+[tool.bumpversion]
+current_version = "0.18.5"
+parse = "(?<![=<>])(?P<major>\\d+)\\.(?P<minor>\\d+)\\.(?P<patch>\\d+)"
+serialize = ["{major}.{minor}.{patch}"]
+search = "{current_version}"
+replace = "{new_version}"
+regex = true
+ignore_missing_version = true
+tag = false
+sign_tags = false
+tag_name = "v{new_version}"
+tag_message = "Bump version: {current_version} → {new_version}"
+allow_dirty = true
+commit = false
+message = "Bump version: {current_version} → {new_version}"
+commit_args = ""
+files = [
+    { filename = "pyproject.toml", search = "version = \"{current_version}\"", replace = "version = \"{new_version}\"" },
+    { filename = "README.rst" },
+    { filename = "graph_attention_student/VERSION" },
+]
