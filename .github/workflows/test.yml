@@ -43,14 +43,14 @@ jobs:
       if: runner.os == 'Windows'
       shell: powershell
       run: |
-        # 1. Use the CORRECT package name: 'gtk3-runtime'
+        # 1. Use the CORRECT package name: 'gtk-runtime'
         # This package contains the GTK3 DLLs and dependencies like Cairo.
-        choco install gtk3-runtime -y
+        choco install gtk-runtime -y
         
         # 2. Locate the GTK3 bin folder installed by Chocolatey.
         # We use Get-ChildItem and a wildcard (*) because the path often contains a version number,
-        # e.g., 'gtk3-runtime.3.24.38.2'.
-        $gtk_runtime_path = "C:\ProgramData\chocolatey\lib\gtk3-runtime\*"
+        # e.g., 'gtk-runtime.3.24.38.2'.
+        $gtk_runtime_path = "C:\ProgramData\chocolatey\lib\gtk-runtime\*"
         $gtk_bin_path = Get-ChildItem -Path $gtk_runtime_path -Directory | 
                         Select-Object -ExpandProperty FullName | 
                         Where-Object { $_ -like "*\tools" } | 
@@ -65,7 +65,7 @@ jobs:
             Write-Error "GTK3 runtime installation failed or bin directory not found."
             exit 1
         }
-        
+
     # --- install package dependencies ---
 
     - name: Install package in development mode
