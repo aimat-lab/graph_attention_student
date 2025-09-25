@@ -74,8 +74,9 @@ Then in the main folder run a `pip install`:
     cd graph_attention_student
     uv pip install -e .
 
-> [!WARNING]
-> **Warning For Windows Users** The required library ``cairosvg`` is known to cause problems on Windows systems. If you are on Windows, there might be additional steps required to properly install the project dependencies. See this `issue <https://github.com/aimat-lab/graph_attention_student/issues/2>`_ for additional information.
+<div style="border: 1px solid #FFA500; padding: 10px; background-color: #FFF8DC;">
+⚠️ <strong>Warning for Windows Users</strong> The required library ``cairosvg`` is known to cause problems on Windows systems. If you are on Windows, there might be additional steps required to properly install the project dependencies. See this `issue <https://github.com/aimat-lab/graph_attention_student/issues/2>`_ for additional information.
+</div>
 
 
 🚀 Quickstart
