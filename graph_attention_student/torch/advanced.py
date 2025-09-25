@@ -420,7 +420,7 @@ def explain_graph_joint(
     fig_size: int = 10,
     radius: int = 50,
     thickness: int = 20,
-    color_maps: List[plt.Colormap] = ['Reds', 'Blues'],
+    color_maps: List[str] = ['Reds', 'Blues'],
 ) -> Tuple[plt.Figure, List[plt.Axes], Dict]:
     """
     Given a graph dict representation ``graph``, an absolute ``image_path`` to the graph's visualization

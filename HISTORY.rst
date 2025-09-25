@@ -302,7 +302,7 @@ running the model in eval mode versus in
   be supported to enable backwards compatibility for the aggregation prediction model.
 
 
-0.19.0 - 20.09.2025
+1.0.0 - 25.09.2025
 -------------------
 
 Packaging
@@ -312,14 +312,20 @@ Packaging
   package now with a single pip install operation.
 - Added the `weasyprint` dependency for the generation of PDF reports
 - Added the `polars` dependency for fast and lazy data frame operations
+- bumped the required version for `pycomex` to `0.21.0` as this is the only recent version with backward compatbility to python 3.8
+- bumped the required version for `visual_graph_datasets` to `0.17.0` as this is the only recent version with backward compatibility to python 3.8
 
 Functionality
 
 - Changed the default constructor parameters of the `Megan` model.
 - Added the `SmilesDataset` class which allows a custom processing based torch Dataset based on 
-  a CSV / data frame of SMILES strings and target values for easier training.
+  a CSV / data frame of SMILES strings and target values for easier training. This class implements a 
+  streaming data loading scheme which makes it possible to handle arbitrarily large datasets with a minimal 
+  memory footprint.
 
 Documentation
 
-- Added the `00_basic_usage.ipynb` tutorial notebook
-
+- Added the `00_basic_usage.ipynb` tutorial notebook. Illustrates a basic workflow with model training 
+  and inference of the trained model.
+- Added the `01_full_example.ipynb` tutorial notebook. Illustrates a more involved workflow with train test splitting,
+  performance evaluations and manual explanation visualizations.

@@ -39,3 +39,6 @@ slurm-*
 **/__pycache__/*
 *.pyc
 **/.aslurm/*
+
+*.sh
+*.pdf

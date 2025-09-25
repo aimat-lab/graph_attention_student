@@ -74,13 +74,8 @@ Then in the main folder run a `pip install`:
     cd graph_attention_student
     uv pip install -e .
 
-.. warning::
-   **Warning For Windows Users**
-
-   The required library ``cairosvg`` is known to cause problems on Windows systems. If you are on Windows, there might
-   be additional steps required to properly install the project dependencies.
-
-   See this `issue <https://github.com/aimat-lab/graph_attention_student/issues/2>`_ for additional information.
+> [!WARNING]
+> **Warning For Windows Users** The required library ``cairosvg`` is known to cause problems on Windows systems. If you are on Windows, there might be additional steps required to properly install the project dependencies. See this `issue <https://github.com/aimat-lab/graph_attention_student/issues/2>`_ for additional information.
 
 
 🚀 Quickstart
@@ -141,6 +136,46 @@ This example demonstrates the complete workflow for creating, training, and usin
 
 
 .. _`GATv2`: https://github.com/tech-srl/how_attentive_are_gats
+
+💻 Command Line Interface
+-------------------------
+
+Once installed, the package exposes the `megan` command line interface which can be used to train models and generate predictions without the need to write additional code.
+
+**Training Models**
+
+Train MEGAN models directly from CSV datasets containing SMILES strings and target values:
+
+.. code-block:: bash
+
+    # Train a regression model (creates model.ckpt and process.py)
+    megan train dataset.csv
+
+    # Train a classification model with custom settings
+    megan train data.csv --prediction-mode classification --final-units 64,32,3
+
+Training automatically creates two files: ``model.ckpt`` (the trained model) and ``process.py`` (molecular processing configuration).
+
+Use ``train --help`` for detailed options and examples.
+
+**Making Predictions**
+
+Generate predictions and visual explanations using the trained model files:
+
+.. code-block:: bash
+
+    # Predict using default model files
+    megan predict "CCO"
+
+    # Specify custom model and processing files
+    megan predict "c1ccccc1" --model-path my_model.ckpt --processing-path my_process.py
+
+Predictions generate numerical values and comprehensive PDF reports with molecular visualizations and explanation heatmaps showing which atoms contribute most to the prediction.
+
+The CLI supports regression, binary classification, and multi-class classification tasks. Use ``--help`` with any command for detailed options and examples.
+
+> [!NOTE]
+> For advanced use cases requiring custom training loops or integration with existing ML pipelines, use the programmatic API detailed below.
 
 🤖 Training a Custom MEGAN Model
 --------------------------------
