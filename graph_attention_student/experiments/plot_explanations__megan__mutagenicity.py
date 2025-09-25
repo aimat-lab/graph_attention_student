@@ -2,6 +2,7 @@ import os
 import pathlib
 import textwrap
 import typing as t
+from typing import List, Dict
 
 import numpy as np
 import matplotlib.colors as mcolors
@@ -67,7 +68,7 @@ IMPORTANCE_CHANNEL_LABELS: dict = {
 #       fidelity value. The keys of this dict have to be integer indices of the channels in the order as they
 #       appear in the model. The values are matplotlib color maps which will be used to color the explanation
 #       masks in the visualization.
-CHANNEL_COLORS_MAP: dict[int, mcolors.Colormap] = {
+CHANNEL_COLORS_MAP: Dict[int, mcolors.Colormap] = {
     0: mcolors.LinearSegmentedColormap.from_list('yellow', ['white', '#FFC574']),
     1: mcolors.LinearSegmentedColormap.from_list('purple', ['white', '#D874FF']),
 }
@@ -91,8 +92,8 @@ experiment = Experiment.extend(
 @experiment.hook('create_labels', default=False, replace=True)
 def create_labels(e: Experiment,
                   index_data_map: dict,
-                  indices: list[int],
-                  graphs: list[dict],
+                  indices: List[int],
+                  graphs: List[dict],
                   ) -> str:
     """
     This hook is supposed to create a list of labels that can be used as the figure titles in the visualization PDF

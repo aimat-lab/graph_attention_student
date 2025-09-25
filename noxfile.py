@@ -26,7 +26,7 @@ def get_wheel_path(path: str = 'dist') -> str:
 def test(session: nox.Session) -> None:
     """Run tests with pytest and coverage."""
     session.install("pytest", "pytest-cov", "pytest-xdist")
-    session.install("-e", ".[cpu]")
+    session.install("-e", ".")
     session.run(
         "pytest",
         *session.posargs

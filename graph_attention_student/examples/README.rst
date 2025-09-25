@@ -7,4 +7,6 @@ This folder defines a series of example scripts that demonstrate how to use vari
 
 The examples are split into the following files:
 
-- ``00_quickstart.py``: A quickstart guide
+- ``00_basic_usage.ipynb``: A notebook that shows how to set up and train a basic MEGAN model for a graph regression
+  task.
+- ``01_full_example.ipynb``: A notebook that provides a more comprehensive example, including data splitting, model training, evaluation, and visualization of explanations.

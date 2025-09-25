@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Tuple
 import typing as typ
 
 import numpy as np
@@ -37,7 +37,7 @@ def threshold_error_reduction(uncertainties: np.ndarray,
                               error_func: typ.Callable = np.mean,
                               num_bins: int = 10,
                               percentile: int = 5,
-                              ) -> tuple[np.ndarray, np.ndarray]:
+                              ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Given an array of ``uncertainties`` and an array of ``errors``, this function computes the error reduction
     for different uncertainty thresholds. The error reduction is computed as the relative error reduction

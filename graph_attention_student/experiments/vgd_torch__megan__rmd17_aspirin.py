@@ -3,6 +3,7 @@ This experiment extends vgd_torch__megan for the training of a self-explaining M
 visual graph dataset.
 """
 import typing as t
+from typing import List
 
 import numpy as np
 from pycomex.functional.experiment import Experiment
@@ -206,7 +207,7 @@ def after_dataset(e: Experiment,
     correctly.
     """
     
-    target_values: list[float] = []
+    target_values: List[float] = []
     for index, data in index_data_map.items():
         graph = data['metadata']['graph']
         target_values.append(np.squeeze(graph['graph_labels']))

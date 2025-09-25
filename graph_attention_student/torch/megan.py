@@ -1784,7 +1784,7 @@ class MeganEnsemble(AbstractGraphModel, UncertaintyEstimatorMixin):
         return result
         
     def forward_graphs(self, graphs: List[dict], **kwargs) -> List[dict]:
-        results: list[Dict] = super().forward_graphs(graphs, **kwargs)
+        results: List[Dict] = super().forward_graphs(graphs, **kwargs)
 
         # ~ uncertainty calibration
         # If the model has already been calibrated, we will apply the calibration to the raw uncertainty 

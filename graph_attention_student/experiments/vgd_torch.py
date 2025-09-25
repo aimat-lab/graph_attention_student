@@ -18,7 +18,7 @@ import json
 import random
 import typing as t
 from collections import defaultdict
-from typing import Union, Dict
+from typing import Union, Dict, List, Tuple
 
 import pandas as pd
 import numpy as np
@@ -263,9 +263,9 @@ def load_model(e: Experiment,
 
 @experiment.hook('train_test_split', default=False, replace=False)
 def train_test_split(e: Experiment,
-                     indices: list[int],
-                     index_data_map: dict[int, dict]
-                     ) -> tuple[list, list, list]:
+                     indices: List[int],
+                     index_data_map: Dict[int, dict]
+                     ) -> Tuple[List, List, List]:
     """
     This hook is supposed to determine the split of the indices into the training, validation and testing set. 
     The function is supposed to return a tuple (train_indices, test_indices) where both are the lists 
@@ -333,9 +333,9 @@ def train_test_split(e: Experiment,
 
 @experiment.hook('filter_train_indices', default=False, replace=False)
 def filter_train_indices(e: Experiment,
-                         train_indices: list[int],
-                         index_data_map: dict[int, dict]
-                         ) -> list[int]:
+                         train_indices: List[int],
+                         index_data_map: Dict[int, dict]
+                         ) -> List[int]:
     """
     This hook is called after the train-test split has been determined and is supposed to filter the 
     training indices list. This can be useful to remove certain elements from the training set that 

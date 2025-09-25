@@ -6,6 +6,7 @@ This experiment specifically implements the AqSolDB dataset which is a dataset f
 experimentally measured values for the water solubility of compounds.
 """
 import typing as t
+from typing import List
 
 import numpy as np
 from rdkit import Chem
@@ -204,7 +205,7 @@ def after_dataset(e: Experiment,
     correctly.
     """
     
-    target_values: list[float] = []
+    target_values: List[float] = []
     for index, data in index_data_map.items():
         graph = data['metadata']['graph']
         target_values.append(np.squeeze(graph['graph_labels']))

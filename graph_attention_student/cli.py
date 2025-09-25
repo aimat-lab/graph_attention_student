@@ -19,6 +19,7 @@ from visual_graph_datasets.util import dynamic_import
 from pycomex.experiment import run_experiment
 from pycomex.cli import ExperimentCLI
 from rich.columns import Columns
+from rich.syntax import Syntax
 
 from graph_attention_student.util import (
     get_version,
@@ -55,18 +56,104 @@ class RichLogo:
 
 
 class RichHelp:
-    
+
     def __rich_console__(
         self,
         console: Console,
         options: ConsoleOptions,
     ) -> RenderResult:
-        
-        yield "[white bold]MEGAN[/white bold] - [white]Multi Explanation Graph Attention Network[/white]"
-        yield ''
+
+        yield "[white bold]MEGAN[/white bold] - Multi Explanation Graph Attention Network"
+        yield ""
         yield (
-            'This command line interface allows to train custom MEGAN models query predictions '
-            'from trained models or to explore pre-trained models shipped with the package.'
+            "MEGAN is an explainable graph neural network that provides both predictions and visual "
+            "explanations for molecular property prediction tasks. This command line interface enables "
+            "training custom MEGAN models on molecular datasets and generating predictions with "
+            "comprehensive explanation reports."
+        )
+        yield ""
+        # ~ Model Training
+        yield "🚀 [magenta bold]Training Models[/magenta bold]"
+        yield ""
+        yield (
+            "Train MEGAN models on CSV datasets containing SMILES strings and target values. "
+            "The training process automatically handles molecular featurization, model optimization, "
+            "and explanation consistency losses."
+        )
+        yield Padding(
+            Syntax(
+                ("megan train dataset.csv --prediction-mode regression --max-epochs 200"),
+                lexer="bash",
+                theme="monokai",
+                line_numbers=False,
+            ),
+            (1, 3),
+        )
+        yield (
+            "For classification tasks, specify the prediction mode and adjust final layer units:"
+        )
+        yield Padding(
+            Syntax(
+                ("megan train data.csv --prediction-mode classification --final-units 64,32,3"),
+                lexer="bash",
+                theme="monokai",
+                line_numbers=False,
+            ),
+            (1, 3),
+        )
+        yield ("Use [cyan]megan train --help[/cyan] for detailed training options")
+        yield ""
+
+        # ~ Making Predictions
+        yield "🔮 [magenta bold]Making Predictions[/magenta bold]"
+        yield ""
+        yield (
+            "Generate predictions and visual explanations for molecular SMILES strings using "
+            "trained models. Creates comprehensive PDF reports with molecular visualizations "
+            "and explanation heatmaps."
+        )
+        yield Padding(
+            Syntax(
+                ('megan predict "CCO" --model-path model.ckpt --processing-path process.py'),
+                lexer="bash",
+                theme="monokai",
+                line_numbers=False,
+            ),
+            (1, 3),
+        )
+        yield (
+            "For batch predictions or custom visualization settings:"
+        )
+        yield Padding(
+            Syntax(
+                ('megan predict "c1ccccc1" --output-path benzene_report.pdf --width 1500 --height 1500'),
+                lexer="bash",
+                theme="monokai",
+                line_numbers=False,
+            ),
+            (1, 3),
+        )
+        yield ("Use [cyan]megan predict --help[/cyan] for prediction options")
+        yield ""
+
+        # ~ Dataset Requirements
+        yield "📊 [magenta bold]Dataset Format[/magenta bold]"
+        yield ""
+        yield (
+            "Training datasets should be CSV files with SMILES strings and target values:"
+        )
+        yield Padding(
+            Syntax(
+                ("smiles,logP\nCCO,0.25\nc1ccccc1,2.13\nCCC,1.09"),
+                lexer="csv",
+                theme="monokai",
+                line_numbers=False,
+            ),
+            (1, 3),
+        )
+        yield (
+            "Supports [cyan]regression[/cyan] (continuous values), [cyan]binary classification[/cyan] (0/1), "
+            "and [cyan]multi-class classification[/cyan] (multiple target columns)."
         )
 
 

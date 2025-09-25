@@ -1,5 +1,6 @@
 import logging
 from collections import deque
+from typing import List
 
 import torch
 import torch.nn as nn
@@ -105,7 +106,7 @@ class SwaCallback(pl.Callback):
         self.history_length = history_length
         self.logger = logger
         
-        self.history: list[torch.Tensor] = deque(maxlen=history_length)
+        self.history: List[torch.Tensor] = deque(maxlen=history_length)
         
     def on_train_start(self, trainer, pl_module):
         self.logger.info('starting to record model weights for SWA')

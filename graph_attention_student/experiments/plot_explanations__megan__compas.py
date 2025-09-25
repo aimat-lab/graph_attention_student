@@ -2,6 +2,7 @@ import os
 import pathlib
 import textwrap
 import typing as t
+from typing import List
 
 import numpy as np
 from pycomex.functional.experiment import Experiment
@@ -32,7 +33,7 @@ NUM_ELEMENTS: int = 20
 #       explanations are supposed to be generated.
 #       If this list is given, then the explanations will be generated for these elements only. If 
 #       this parameter is None, the elements will be sampled from the dataset instead.
-ELEMENTS: list[str] = [
+ELEMENTS: List[str] = [
     'C1C=C2C=C3C=C4C=CC5C=C6C7C=C8C=C9C=CC=CC9=CC8=CC=7C=CC6=CC=5C4=CC3=CC2=CC1',
     'C1=CC=C2C=CC3C4C=CC5C6C7C=C8C=C9C=C%10C=CC=CC%10=CC9=CC8=CC=7C=CC=6C=CC=5C=4C=CC=3C2=C1',
     'c1ccc2c(c1)ccc3cc4c(ccc5ccc6ccc7ccc8ccccc8c7c6c45)cc23',
@@ -78,8 +79,8 @@ experiment = Experiment.extend(
 @experiment.hook('create_labels', default=False, replace=True)
 def create_labels(e: Experiment,
                   index_data_map: dict,
-                  indices: list[int],
-                  graphs: list[dict],
+                  indices: List[int],
+                  graphs: List[dict],
                   ) -> str:
     """
     This hook is supposed to create a list of labels that can be used as the figure titles in the visualization PDF

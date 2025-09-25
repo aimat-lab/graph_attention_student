@@ -1,4 +1,5 @@
 import typing as t
+from typing import List
 import random
 from queue import SimpleQueue
 from rich.pretty import pprint
@@ -104,9 +105,9 @@ class SmilesDataset(IterableDataset):
     """
 
     def __init__(self,
-                 dataset: t.Union[pl.DataFrame, pd.DataFrame, list[dict], str],
+                 dataset: t.Union[pl.DataFrame, pd.DataFrame, List[dict], str],
                  smiles_column: str = 'smiles',
-                 target_columns: list[str] = ['value'],
+                 target_columns: List[str] = ['value'],
                  processing=MoleculeProcessing(),
                  reservoir_sampling: bool = True,
                  reservoir_size: int = 1000,
@@ -122,7 +123,7 @@ class SmilesDataset(IterableDataset):
         # --- reservoir sampling setup ---
         # If reservoir sampling is enabled, we need to set up a reservoir to hold the samples
         # from which we then randomly draw during iteration.
-        self.reservoir: list[dict] = []
+        self.reservoir: List[dict] = []
 
     def _create_worker_dataframe(self) -> pl.LazyFrame:
         """

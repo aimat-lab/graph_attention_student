@@ -17,6 +17,7 @@ import os
 import time
 import tempfile
 import typing as typ
+from typing import List, Dict, Tuple
 
 import matplotlib as mpl
 import weasyprint as wp
@@ -52,13 +53,13 @@ def megan_prediction_report(
     value: str,
     model: Megan,
     processing: ProcessingBase,
-    figsize: tuple[int, int] = (10, 10),
+    figsize: Tuple[int, int] = (10, 10),
     output_path: str = tempfile.tempdir,
-    color_maps: list[str] = [negative_cmap, positive_cmap],
+    color_maps: List[str] = [negative_cmap, positive_cmap],
     vis_width: int = 1000,
     vis_height: int = 1000,
     unit: typ.Optional[str] = None,
-) -> tuple[str, dict, dict]:
+) -> Tuple[str, Dict, Dict]:
     """Generate a comprehensive PDF prediction report for a MEGAN model.
 
     This function creates a detailed PDF report that includes the model's prediction,
@@ -135,9 +136,9 @@ def megan_prediction_report(
     # when leaving out each of the channels.
     leave_one_out: np.ndarray = model.leave_one_out_deviations([graph])[0]
     if model.prediction_mode == 'regression':
-        fidelity: list[float] = [-leave_one_out[0][0], leave_one_out[0][1]]
+        fidelity: List[float] = [-leave_one_out[0][0], leave_one_out[0][1]]
     else:
-        fidelity: list[float] = [leave_one_out[i][i] for i in range(model.num_channels)]
+        fidelity: List[float] = [leave_one_out[i][i] for i in range(model.num_channels)]
 
     # --- create visualizations ---
     # The next step is to create the actual visualizations for the report.
@@ -263,10 +264,10 @@ def explain_value(
     radius: int = 50,
     thickness: int = 20,
     color: str = 'lightgreen',
-    color_maps: list[str] = [positive_cmap, negative_cmap],
+    color_maps: List[str] = [positive_cmap, negative_cmap],
     width: int = 1000,
     height: int = 1000,
-) -> tuple[plt.Figure, list[plt.Axes], dict, dict]:
+) -> Tuple[plt.Figure, List[plt.Axes], Dict, Dict]:
     """
     Given a domain specific string graph representation ``value``, a Megan model instance ``model``
     and a processing instance ``processing``, this function will process the given value into a
@@ -344,8 +345,8 @@ def explain_graph(
     radius: int = 50,
     thickness: int = 20,
     color: str = 'lightgreen',
-    color_maps: list[str] = ['Reds', 'Blues'],
-) -> tuple[plt.Figure, list[plt.Axes], dict]:
+    color_maps: List[str] = ['Reds', 'Blues'],
+) -> Tuple[plt.Figure, List[plt.Axes], Dict]:
     """
     Given a graph dict representation ``graph``, an absolute ``image_path`` to the graph's visualization
     and a Megan ``model``, this function performs a forward pass of the given graph to obtain the
@@ -419,8 +420,8 @@ def explain_graph_joint(
     fig_size: int = 10,
     radius: int = 50,
     thickness: int = 20,
-    color_maps: list[plt.Colormap] = ['Reds', 'Blues'],
-) -> tuple[plt.Figure, list[plt.Axes], dict]:
+    color_maps: List[plt.Colormap] = ['Reds', 'Blues'],
+) -> Tuple[plt.Figure, List[plt.Axes], Dict]:
     """
     Given a graph dict representation ``graph``, an absolute ``image_path`` to the graph's visualization
     and a Megan ``model``, this function performs a forward pass of the given graph to obtain the
@@ -516,7 +517,7 @@ def explain_graph_split(
     radius: int = 50,
     thickness: int = 20,
     color: str = 'lightgreen',
-) -> tuple[plt.Figure, list[plt.Axes], dict]:
+) -> Tuple[plt.Figure, List[plt.Axes], Dict]:
     """
     Given a graph dict representation ``graph``, an absolute ``image_path`` to the graph's visualization
     and a Megan ``model``, this function performs a forward pass of the given graph to obtain the
@@ -562,7 +563,7 @@ def explain_graph_split(
         squeeze=False,
     )
 
-    axs: list[plt.Axes] = []
+    axs: List[plt.Axes] = []
     for channel_index in range(num_channels):
         ax = rows[0][channel_index]
 

@@ -2,6 +2,7 @@ import os
 import pathlib
 import textwrap
 import typing as t
+from typing import List
 
 import numpy as np
 from pycomex.functional.experiment import Experiment
@@ -64,8 +65,8 @@ experiment = Experiment.extend(
 @experiment.hook('create_labels', default=False, replace=True)
 def create_labels(e: Experiment,
                   index_data_map: dict,
-                  indices: list[int],
-                  graphs: list[dict],
+                  indices: List[int],
+                  graphs: List[dict],
                   ) -> str:
     """
     This hook is supposed to create a list of labels that can be used as the figure titles in the visualization PDF

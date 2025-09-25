@@ -1,5 +1,6 @@
 import os
 import typing as t
+from typing import List, Dict, Tuple
 
 import numpy as np
 import matplotlib.cm as cm
@@ -60,7 +61,7 @@ MODEL_PATH: str = 'rb_dual_motifs__2021-09-14_17-01-05__model__best.pth'
 #       fidelity value. The keys of this dict have to be integer indices of the channels in the order as they
 #       appear in the model. The values are matplotlib color maps which will be used to color the explanation
 #       masks in the visualization.
-CHANNEL_COLORS_MAP: dict[int, mcolors.Colormap] = {
+CHANNEL_COLORS_MAP: Dict[int, mcolors.Colormap] = {
     0: truncate_colormap(cm.get_cmap('Blues'), 0.0, 0.7),
     1: truncate_colormap(cm.get_cmap('Reds'), 0.0, 0.7),
 }
@@ -80,9 +81,9 @@ experiment = Experiment.extend(
 @experiment.hook('create_explanations', default=False, replace=True)
 def create_explanations(e: Experiment,
                         index_data_map: dict,
-                        indices: list[int],
-                        graphs: list[dict],
-                        ) -> tuple[list[np.ndarray], list[np.ndarray], list[np.ndarray]]:
+                        indices: List[int],
+                        graphs: List[dict],
+                        ) -> Tuple[List[np.ndarray], List[np.ndarray], List[np.ndarray]]:
     
     e.log('loading the Megan model...')
     model = Megan.load_from_checkpoint(e.MODEL_PATH)
@@ -120,8 +121,8 @@ def create_explanations(e: Experiment,
 @experiment.hook('additional_explanation', default=False, replace=True)
 def additional_visualization(e: Experiment,
                              index_data_map: dict,
-                             indices: list[int],
-                             graphs: list[dict],
+                             indices: List[int],
+                             graphs: List[dict],
                              ) -> None:
     
     e.log('creating combined importances pdf...')
