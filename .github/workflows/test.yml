@@ -40,6 +40,7 @@ jobs:
 
     # Windows: Install CairoSVG dependencies
     - name: Install GTK3 Runtime (includes Cairo)
+      if: runner.os == 'Windows'
       shell: powershell
       run: |
         # URL for the GTK3 Runtime installer (often 64-bit is required for 64-bit Python)
@@ -56,6 +57,7 @@ jobs:
         .\$gtk_installer_path /VERYSILENT /SUPPRESSMSGBOXES
 
     - name: Add GTK bin directory to PATH
+      if: runner.os == 'Windows'
       shell: powershell
       run: |
         # The default installation path for the 64-bit runtime.
