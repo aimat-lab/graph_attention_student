@@ -39,32 +39,21 @@ jobs:
         echo ".venv\Scripts" >> $env:GITHUB_PATH
 
     # Windows: Install CairoSVG dependencies
-    - name: Install GTK3 Runtime (includes Cairo)
+    - name: Install GTK3 Runtime (includes Cairo) using Chocolatey
       if: runner.os == 'Windows'
       shell: powershell
       run: |
-        # URL for the GTK3 Runtime installer (often 64-bit is required for 64-bit Python)
-        # The exact link might change, but the one below often works for win-x64.
-        $gtk_installer_url = "https://github.com/tschoonj/GTK-for-Windows-Runtime-Installer/releases/download/2023-01-08/gtk3-runtime-3.24.36-2023-01-08-tschoonj-win64.exe"
-        $gtk_installer_path = "gtk3-runtime.exe"
-
-        # Download the installer
-        Invoke-WebRequest -Uri $gtk_installer_url -OutFile $gtk_installer_path
-
-        # Run the installer silently with the default installation path
-        # /VERYSILENT performs the installation without showing the installer interface.
-        # /SUPPRESSMSGBOXES prevents message boxes from interrupting the CI.
-        .\$gtk_installer_path /VERYSILENT /SUPPRESSMSGBOXES
-
-    - name: Add GTK bin directory to PATH
-      if: runner.os == 'Windows'
-      shell: powershell
-      run: |
-        # The default installation path for the 64-bit runtime.
-        $gtk_bin_path = "C:\Program Files\GTK3-Runtime Win64\bin"
-        # Add the path to the environment variable for subsequent steps
+        # 1. Use Chocolatey to install the gtk3 package, which bundles libcairo-2.dll
+        choco install gtk3 -y
+        
+        # 2. Locate the GTK3 bin folder (DLLs) installed by Chocolatey
+        # This location is standardized by the GTK3 package on Choco.
+        $gtk_bin_path = "C:\ProgramData\chocolatey\lib\gtk3\tools\bin"
+        
+        # 3. Add the bin folder to the environment PATH for subsequent steps
+        # This ensures Python and cairosvg can find the necessary DLLs.
         echo "PATH=$gtk_bin_path;$env:PATH" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-  
+
     # --- install package dependencies ---
 
     - name: Install package in development mode
