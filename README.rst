@@ -17,7 +17,7 @@
     :alt: Architecture Overview
 
 👩‍🏫 MEGAN: Multi Explanation Graph Attention Student
-====================================================
+======================================================
 
 **Abstract.** Explainable artificial intelligence (XAI) methods are expected to improve trust during human-AI interactions,
 provide tools for model analysis and extend human understanding of complex problems. Attention-based models
@@ -74,9 +74,17 @@ Then in the main folder run a `pip install`:
     cd graph_attention_student
     uv pip install -e .
 
-<div style="border: 1px solid #FFA500; padding: 10px; background-color: #FFF8DC;">
-⚠️ <strong>Warning for Windows Users</strong> The required library ``cairosvg`` is known to cause problems on Windows systems. If you are on Windows, there might be additional steps required to properly install the project dependencies. See this `issue <https://github.com/aimat-lab/graph_attention_student/issues/2>`_ for additional information.
-</div>
+.. warning::
+   **Note for Windows Users**
+
+   The visualization libraries ``cairosvg`` and ``weasyprint`` require additional system dependencies on Windows.
+   Install MSYS2 from https://www.msys2.org/ and run:
+
+   .. code-block:: bash
+
+      pacman -S mingw-w64-ucrt-x86_64-cairo mingw-w64-ucrt-x86_64-gtk3 mingw-w64-ucrt-x86_64-glib2 mingw-w64-ucrt-x86_64-pango
+
+   Add ``C:\msys64\ucrt64\bin`` to your PATH and set environment variable: ``WEASYPRINT_DLL_DIRECTORIES=C:\msys64\ucrt64\bin``
 
 
 🚀 Quickstart

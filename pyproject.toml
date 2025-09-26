@@ -6,8 +6,9 @@ build-backend = "hatchling.build"
 
 [project]
 name = "graph_attention_student"
-version = "0.18.5"
+version = "1.0.0"
 description = "MEGAN: Multi Explanation Graph Attention Network"
+readme = "README.rst"
 license = "MIT"
 authors = [
     {name = "Jonas Teufel", email = "jonseb1998@gmail.com"}
@@ -118,7 +119,7 @@ indent-style = "space"
 
 # --- bumpversion configuration ---
 [tool.bumpversion]
-current_version = "0.18.5"
+current_version = "1.0.0"
 parse = "(?<![=<>])(?P<major>\\d+)\\.(?P<minor>\\d+)\\.(?P<patch>\\d+)"
 serialize = ["{major}.{minor}.{patch}"]
 search = "{current_version}"
