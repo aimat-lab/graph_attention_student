@@ -47,18 +47,17 @@ jobs:
         # This package contains the GTK3 DLLs and dependencies like Cairo.
         choco install gtk-runtime -y
         
-        # 2. Find the 'bin' path using a compact, stable approach.
-        # This finds the first (and usually only) 'tools\bin' directory
-        # within the versioned package folder.
-        $gtk_bin_path = (Get-ChildItem -Path "C:\ProgramData\chocolatey\lib\gtk-runtime\*\tools\bin" -Directory -ErrorAction Stop).FullName
+        # 2. Use the actual installation path from the console output.
+        # gtk-runtime installs to Program Files, not chocolatey lib folder.
+        $gtk_bin_path = "C:\Program Files (x86)\GTK2-Runtime\bin"
 
         # 3. Add the bin folder to the environment PATH for subsequent steps.
-        if ($gtk_bin_path) {
-            Write-Host "✅ Found GTK3 bin path: $gtk_bin_path"
+        if (Test-Path $gtk_bin_path) {
+            Write-Host "✅ Found GTK runtime bin path: $gtk_bin_path"
             # Set the PATH for the current GitHub Actions runner session
             echo "PATH=$gtk_bin_path;$env:PATH" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
         } else {
-            Write-Error "❌ GTK3 'bin' directory not found. Installation may be incomplete or path structure has changed."
+            Write-Error "❌ GTK runtime 'bin' directory not found at expected location: $gtk_bin_path"
             exit 1
         }
 
