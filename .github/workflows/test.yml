@@ -42,12 +42,17 @@ jobs:
     - name: Setup MSYS2 and install Cairo dependencies
       if: runner.os == 'Windows'
       uses: msys2/setup-msys2@v2
+      id: msys2
       with:
         msystem: UCRT64
         update: true
         install: >-
           mingw-w64-ucrt-x86_64-cairo
           mingw-w64-ucrt-x86_64-gtk3
+
+    - name: Add MSYS2 UCRT64 to PATH (Windows)
+      if: runner.os == 'Windows'
+      run: echo "${{ steps.msys2.outputs.msys2-location }}/ucrt64/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
     # --- install package dependencies ---
 
