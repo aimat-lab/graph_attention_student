@@ -38,28 +38,16 @@ jobs:
         echo "VIRTUAL_ENV=.venv" >> $env:GITHUB_ENV
         echo ".venv\Scripts" >> $env:GITHUB_PATH
 
-    # Windows: Install CairoSVG dependencies
-    - name: Install GTK3 Runtime (includes Cairo) using Chocolatey
+    # Windows: Install CairoSVG dependencies using MSYS2
+    - name: Setup MSYS2 and install Cairo dependencies
       if: runner.os == 'Windows'
-      shell: powershell
-      run: |
-        # 1. Use the CORRECT package name: 'gtk-runtime'
-        # This package contains the GTK3 DLLs and dependencies like Cairo.
-        choco install gtk-runtime -y
-        
-        # 2. Use the actual installation path from the console output.
-        # gtk-runtime installs to Program Files, not chocolatey lib folder.
-        $gtk_bin_path = "C:\Program Files (x86)\GTK2-Runtime\bin"
-
-        # 3. Add the bin folder to the environment PATH for subsequent steps.
-        if (Test-Path $gtk_bin_path) {
-            Write-Host "✅ Found GTK runtime bin path: $gtk_bin_path"
-            # Set the PATH for the current GitHub Actions runner session
-            echo "PATH=$gtk_bin_path;$env:PATH" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-        } else {
-            Write-Error "❌ GTK runtime 'bin' directory not found at expected location: $gtk_bin_path"
-            exit 1
-        }
+      uses: msys2/setup-msys2@v2
+      with:
+        msystem: UCRT64
+        update: true
+        install: >-
+          mingw-w64-ucrt-x86_64-cairo
+          mingw-w64-ucrt-x86_64-gtk3
 
     # --- install package dependencies ---
 
