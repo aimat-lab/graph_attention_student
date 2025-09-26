@@ -38,8 +38,8 @@ jobs:
         echo "VIRTUAL_ENV=.venv" >> $env:GITHUB_ENV
         echo ".venv\Scripts" >> $env:GITHUB_PATH
 
-    # Windows: Install CairoSVG dependencies using MSYS2
-    - name: Setup MSYS2 and install Cairo dependencies
+    # Windows: Install CairoSVG and WeasyPrint dependencies using MSYS2
+    - name: Setup MSYS2 and install Cairo/GTK dependencies
       if: runner.os == 'Windows'
       uses: msys2/setup-msys2@v2
       id: msys2
@@ -49,6 +49,10 @@ jobs:
         install: >-
           mingw-w64-ucrt-x86_64-cairo
           mingw-w64-ucrt-x86_64-gtk3
+          mingw-w64-ucrt-x86_64-glib2
+          mingw-w64-ucrt-x86_64-gobject-introspection
+          mingw-w64-ucrt-x86_64-pango
+          mingw-w64-ucrt-x86_64-gdk-pixbuf2
 
     - name: Add MSYS2 UCRT64 to PATH (Windows)
       if: runner.os == 'Windows'
