@@ -34,7 +34,7 @@ with human intuition, opening the way to learning from our model in less well-un
 🔔 News
 -------
 
-- **September 2025** - Version `1.0.0` of the package has finally been released!
+- **September 2025** - Version `1.1.0` of the package has finally been released!
 - **April 2024** - The follow-up paper about *global concept explanations using an extension of MEGAN* is now available on arxiv: https://arxiv.org/abs/2404.16532 
 - **October 2023** - The `paper`_ is published with Springer in the xAI conference proceedings: https://link.springer.com/chapter/10.1007/978-3-031-44067-0_18
 - **June 2023** - Check out the `MeganExplains`_ web interface @ https://megan.aimat.science/. The interface allows to query MEGAN models trained on 
@@ -103,6 +103,7 @@ SMILES strings and target values, then run:
     # Train a regression model
     python graph_attention_student/experiments/train_model__megan.py \
         --CSV_FILE_PATH=/path/to/your/data.csv \
+        --VALUE_COLUMN_NAME='"smiles"' \
         --TARGET_COLUMN_NAMES='"target"' \
         --DATASET_TYPE='"regression"' \
         --EPOCHS=150
