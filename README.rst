@@ -104,7 +104,7 @@ SMILES strings and target values, then run:
     python graph_attention_student/experiments/train_model__megan.py \
         --CSV_FILE_PATH='"/path/to/your/data.csv"' \
         --VALUE_COLUMN_NAME='"smiles"' \
-        --TARGET_COLUMN_NAMES='"target"' \
+        --TARGET_COLUMN_NAMES='["target"]' \
         --DATASET_TYPE='"regression"' \
         --EPOCHS=150
 
@@ -131,6 +131,7 @@ Instead of passing parameters on the command line, you can create a YAML config 
     CSV_FILE_PATH: /path/to/your/data.csv
     TARGET_COLUMN_NAMES:
       - target
+    VALUE_COLUMN_NAME: smiles
     DATASET_TYPE: regression
     EPOCHS: 100
     BATCH_SIZE: 64
