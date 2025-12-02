@@ -102,7 +102,7 @@ SMILES strings and target values, then run:
 
     # Train a regression model
     python graph_attention_student/experiments/train_model__megan.py \
-        --CSV_FILE_PATH=/path/to/your/data.csv \
+        --CSV_FILE_PATH='"/path/to/your/data.csv"' \
         --VALUE_COLUMN_NAME='"smiles"' \
         --TARGET_COLUMN_NAMES='"target"' \
         --DATASET_TYPE='"regression"' \

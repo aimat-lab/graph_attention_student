@@ -40,6 +40,7 @@ from visual_graph_datasets.util import dynamic_import
 from torch_geometric.loader import DataLoader
 from lightning.pytorch.loggers import CSVLogger
 
+from graph_attention_student.util import ASSETS_PATH
 from graph_attention_student.utils import export_metadatas_csv
 from graph_attention_student.visualization import plot_regression_fit
 from graph_attention_student.torch.model import AbstractGraphModel
@@ -86,10 +87,10 @@ NUM_CLASSES: Optional[int] = None
 # The following parameters configure how graph representations are computed.
 
 # :param PROCESSING_PATH:
-#       Optional. The absolute path to a process.py module that contains a 'processing' attribute
-#       which is a Processing instance (e.g., MoleculeProcessing). If None, a default
-#       MoleculeProcessing instance will be created.
-PROCESSING_PATH: Optional[str] = None
+#       The absolute path to a process.py module that contains a 'processing' attribute
+#       which is a Processing instance (e.g., MoleculeProcessing). By default, this uses
+#       the molecule_processing.py from the package assets folder.
+PROCESSING_PATH: Optional[str] = os.path.join(ASSETS_PATH, 'molecule_processing.py')
 # :param IMAGE_WIDTH:
 #       The width in pixels for generated visualization images.
 IMAGE_WIDTH: int = 1000
