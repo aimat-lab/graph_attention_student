@@ -329,3 +329,20 @@ Documentation
   and inference of the trained model.
 - Added the `01_full_example.ipynb` tutorial notebook. Illustrates a more involved workflow with train test splitting,
   performance evaluations and manual explanation visualizations.
+
+1.1.0 - 02.12.2025
+------------------
+
+Command Line Interface
+
+- Fixed a bug where `megan --version` was not working 
+
+Experiment Modules
+
+- Added the new experiment module `train_model.py` which is the new base experiment
+  that allows for the training of models without a pre-computed visual graph dataset 
+  and instead uses just a CSV file as the dataset basis.
+- Added `train_model__megan.py` which implements the training of a MEGAN model based 
+  on simple dataset csv files.
+- Extended the training scripts to now also track various statistics about the latent 
+  space of the megan model during the training.
