@@ -128,20 +128,22 @@ Instead of passing parameters on the command line, you can create a YAML config 
 .. code-block:: yaml
 
     # config.yml
-    CSV_FILE_PATH: /path/to/your/data.csv
-    TARGET_COLUMN_NAMES:
-      - target
-    VALUE_COLUMN_NAME: smiles
-    DATASET_TYPE: regression
-    EPOCHS: 100
-    BATCH_SIZE: 64
-    LEARNING_RATE: 0.0001
+    extend: train_model__megan.py
+    parameters:
+      CSV_FILE_PATH: /path/to/your/data.csv
+      TARGET_COLUMN_NAMES:
+        - target
+      VALUE_COLUMN_NAME: smiles
+      DATASET_TYPE: regression
+      EPOCHS: 100
+      BATCH_SIZE: 64
+      LEARNING_RATE: 0.0001
 
 Then run the experiment with:
 
 .. code-block:: bash
 
-    pycomex run graph_attention_student/experiments/train_model__megan.py config.yml
+    pycomex run graph_attention_student/experiments/config.yml
 
 .. _`GATv2`: https://github.com/tech-srl/how_attentive_are_gats
 
