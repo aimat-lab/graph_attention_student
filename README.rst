@@ -90,126 +90,56 @@ Then in the main folder run a `pip install`:
 🚀 Quickstart
 -------------
 
-This example demonstrates the complete workflow for creating, training, and using a MEGAN model to predict molecular properties with explanations. The following code shows how to set up a model, train it, and make predictions for a single SMILES string:
+The fastest way to train a MEGAN model is using the built-in experiment scripts. Prepare a CSV file with
+SMILES strings and target values, then run:
 
-.. code-block:: python
+.. code-block:: bash
 
-    from visual_graph_datasets.processing.molecules import MoleculeProcessing
-    from graph_attention_student import Megan, SmilesDataset
-    from graph_attention_student.torch.advanced import megan_prediction_report
-    from torch_geometric.loader import DataLoader
-    import pytorch_lightning as pl
+    # Clone and install
+    git clone https://github.com/aimat-lab/graph_attention_student
+    cd graph_attention_student
+    uv pip install -e .
 
-    # Initialize molecule processing
-    processing = MoleculeProcessing()
+    # Train a regression model
+    python graph_attention_student/experiments/train_model__megan.py \
+        CSV_FILE_PATH=/path/to/your/data.csv \
+        TARGET_COLUMN_NAMES=target \
+        DATASET_TYPE=regression \
+        EPOCHS=100
 
-    # Create and configure the MEGAN model
-    model = Megan(
-        node_dim=processing.get_num_node_attributes(),
-        edge_dim=processing.get_num_edge_attributes(),
-        units=[64, 64, 64],
-        final_units=[64, 32, 1],
-        prediction_mode='regression',
-        learning_rate=1e-4,
-        importance_factor=1.0,  # Enable explanations
-        sparsity_factor=0.5,
-    )
+Your CSV should have a ``smiles`` column and your target column(s):
 
-    # Train the model (assuming you have a dataset CSV file)
-    dataset = SmilesDataset(
-        dataset="your_dataset.csv",
-        smiles_column='smiles',
-        target_columns=['value'],
-        processing=processing,
-        reservoir_sampling=True
-    )
-    loader = DataLoader(dataset, batch_size=64, num_workers=4)
-    trainer = pl.Trainer(max_epochs=150, accelerator='auto')
-    trainer.fit(model, train_dataloaders=loader)
-    model.eval()
+.. code-block:: text
 
-    # Make predictions with explanations
-    SMILES = 'CN1C=NC2=C1C(=O)N(C(=O)N2C)C'  # Caffeine
-    graph = processing.process(SMILES)
-    results = model.forward_graph(graph)
+    smiles,target
+    CCO,1.23
+    CCN,2.45
+    CCC,0.89
 
-    print(f"Predicted value: {results['graph_output'].item():.3f}")
-
-    # Generate explanation report
-    megan_prediction_report(
-        value=SMILES,
-        model=model,
-        processing=processing,
-        output_path="explanation_report.pdf"
-    )
-
+Key parameters: ``CSV_FILE_PATH`` (path to data), ``TARGET_COLUMN_NAMES`` (prediction target),
+``DATASET_TYPE`` ('regression' or 'classification'). See ``train_model__megan.py`` for all options.
 
 .. _`GATv2`: https://github.com/tech-srl/how_attentive_are_gats
 
 💻 Command Line Interface
 -------------------------
 
-Once installed, the package exposes the `megan` command line interface which can be used to train models and generate predictions without the need to write additional code.
-
-**Training Models**
-
-Train MEGAN models directly from CSV datasets containing SMILES strings and target values:
+For quick predictions, use the ``megan`` CLI:
 
 .. code-block:: bash
 
-    # Train a regression model (creates model.ckpt and process.py)
+    # Train from CSV
     megan train dataset.csv
 
-    # Train a classification model with custom settings
-    megan train data.csv --prediction-mode classification --final-units 64,32,3
-
-Training automatically creates two files: ``model.ckpt`` (the trained model) and ``process.py`` (molecular processing configuration).
-
-Use ``train --help`` for detailed options and examples.
-
-**Making Predictions**
-
-Generate predictions and visual explanations using the trained model files:
-
-.. code-block:: bash
-
-    # Predict using default model files
+    # Make predictions with explanations
     megan predict "CCO"
 
-    # Specify custom model and processing files
-    megan predict "c1ccccc1" --model-path my_model.ckpt --processing-path my_process.py
+Use ``megan --help`` for all options.
 
-Predictions generate numerical values and comprehensive PDF reports with molecular visualizations and explanation heatmaps showing which atoms contribute most to the prediction.
+🤖 Python API
+-------------
 
-The CLI supports regression, binary classification, and multi-class classification tasks. Use ``--help`` with any command for detailed options and examples.
-
-> [!NOTE]
-> For advanced use cases requiring custom training loops or integration with existing ML pipelines, use the programmatic API detailed below.
-
-🤖 Training a Custom MEGAN Model
---------------------------------
-
-This section provides a detailed guide for training a custom MEGAN model on your own molecular dataset using the modern PyTorch Lightning-based API.
-
-Dataset Preparation
--------------------
-
-The MEGAN model can be trained directly on CSV files containing SMILES strings and target values. Your dataset should be structured as follows:
-
-.. code-block:: text
-
-    smiles,value
-    CCO,1.23
-    CCN,2.45
-    CCC,0.89
-    ...
-
-For molecular datasets, the package uses the `SmilesDataset` class which handles the conversion from SMILES to graph representations automatically.
-
-Model Configuration and Training
----------------------------------
-
-Here's a complete example of how to train a custom MEGAN model:
+For custom workflows, use the Python API directly:
 
 .. code-block:: python
 
@@ -218,110 +148,52 @@ Here's a complete example of how to train a custom MEGAN model:
     from visual_graph_datasets.processing.molecules import MoleculeProcessing
     from graph_attention_student import Megan, SmilesDataset
 
-    # Initialize molecule processing
+    # Setup
     processing = MoleculeProcessing()
-
-    # Create the dataset
     dataset = SmilesDataset(
-        dataset="path/to/your/dataset.csv",
-        smiles_column='smiles',  # Name of SMILES column
-        target_columns=['value'],  # Name of target column(s)
+        dataset="data.csv",
+        smiles_column='smiles',
+        target_columns=['target'],
         processing=processing,
-        reservoir_sampling=True,  # Enables shuffling
     )
+    loader = DataLoader(dataset, batch_size=64)
 
-    # Create data loader
-    loader_train = DataLoader(
-        dataset,
-        batch_size=64,
-        drop_last=True,
-        num_workers=4,
-        prefetch_factor=2,
-    )
-
-    # Configure the MEGAN model
+    # Create model
     model = Megan(
-        # --- Graph Architecture ---
         node_dim=processing.get_num_node_attributes(),
         edge_dim=processing.get_num_edge_attributes(),
-        units=[64, 64, 64],  # GNN layer sizes
-        final_units=[64, 32, 1],  # Final MLP layers
-
-        # --- Task Configuration ---
-        prediction_mode='regression',  # or 'bce' for binary, 'classification' for multi-class
-        learning_rate=1e-4,
-
-        # --- Explanation Configuration ---
-        importance_mode='regression',  # Match your prediction mode
-        importance_factor=1.0,  # Weight of explanation loss (0.0 disables explanations)
-        sparsity_factor=0.5,  # Encourages sparse explanations
-        importance_offset=1.0,  # Controls explanation sparsity threshold
+        units=[64, 64, 64],
+        final_units=[64, 32, 1],
+        prediction_mode='regression',
+        importance_factor=1.0,
     )
 
-    # Configure trainer
-    trainer = pl.Trainer(
-        max_epochs=150,
-        accelerator='auto',  # Uses GPU if available
-        devices='auto',
-        # Optional: add callbacks for checkpointing, early stopping, etc.
-    )
-
-    # Train the model
-    trainer.fit(model, train_dataloaders=loader_train)
-
-    # Important: Switch to evaluation mode
+    # Train
+    trainer = pl.Trainer(max_epochs=150, accelerator='auto')
+    trainer.fit(model, train_dataloaders=loader)
     model.eval()
+    model.save("model.ckpt")
 
-    # Save the trained model
-    model.save("trained_model.ckpt")
-
-Model Configuration Options
----------------------------
-
-**Architecture Parameters:**
-
-- ``units``: List defining the hidden dimensions of the GNN layers (e.g., ``[64, 64, 64]``)
-- ``final_units``: List defining the final MLP structure. Last value must match the number of targets
-- ``node_dim/edge_dim``: Input feature dimensions (automatically determined by processing)
-
-**Training Parameters:**
-
-- ``prediction_mode``: Task type - ``'regression'``, ``'bce'`` (binary classification), or ``'classification'``
-- ``learning_rate``: Learning rate for the Adam optimizer
-- ``batch_size``: Training batch size (set in DataLoader)
-
-**Explanation Parameters:**
-
-- ``importance_factor``: Weight of the explanation consistency loss (1.0 = explanations enabled)
-- ``sparsity_factor``: Weight of the sparsity loss encouraging focused explanations
-- ``importance_offset``: Threshold controlling explanation sparsity (higher = more sparse)
-- ``importance_mode``: Should match your ``prediction_mode``
-
-Loading and Using Trained Models
----------------------------------
+**Loading and Using Models:**
 
 .. code-block:: python
 
-    # Load a previously trained model
-    model = Megan.load("trained_model.ckpt")
-    model.eval()
-
-    # Make predictions
-    graph = processing.process("CCO")  # Convert SMILES to graph
-    results = model.forward_graph(graph)
-
-    predicted_value = results['graph_output'].item()
-    node_importance = results['node_importance']  # Explanation scores
-    edge_importance = results['edge_importance']
-
-    # Generate explanation visualization
+    from graph_attention_student import Megan
     from graph_attention_student.torch.advanced import megan_prediction_report
 
+    model = Megan.load("model.ckpt")
+    model.eval()
+
+    # Make prediction
+    results = model.forward_graph(processing.process("CCO"))
+    print(f"Prediction: {results['graph_output'].item():.3f}")
+
+    # Generate explanation PDF
     megan_prediction_report(
         value="CCO",
         model=model,
         processing=processing,
-        output_path="prediction_report.pdf"
+        output_path="report.pdf"
     )
 
 🔍 Examples

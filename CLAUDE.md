@@ -2,6 +2,13 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Important: Virtual Environment
+
+**Always activate the virtual environment before running any scripts or commands:**
+```bash
+source .venv/bin/activate
+```
+
 ## Common Development Commands
 
 ### Setup and Installation

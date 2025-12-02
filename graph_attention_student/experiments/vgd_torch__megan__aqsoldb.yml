@@ -1,0 +1,3 @@
+extend: vgd_torch__megan.py
+parameters:
+  NUM_CHANNELS: 2
