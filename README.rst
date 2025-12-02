@@ -102,10 +102,10 @@ SMILES strings and target values, then run:
 
     # Train a regression model
     python graph_attention_student/experiments/train_model__megan.py \
-        CSV_FILE_PATH=/path/to/your/data.csv \
-        TARGET_COLUMN_NAMES=target \
-        DATASET_TYPE=regression \
-        EPOCHS=100
+        --CSV_FILE_PATH=/path/to/your/data.csv \
+        --TARGET_COLUMN_NAMES='"target"' \
+        --DATASET_TYPE='"regression"' \
+        --EPOCHS=150
 
 Your CSV should have a ``smiles`` column and your target column(s):
 
@@ -117,7 +117,29 @@ Your CSV should have a ``smiles`` column and your target column(s):
     CCC,0.89
 
 Key parameters: ``CSV_FILE_PATH`` (path to data), ``TARGET_COLUMN_NAMES`` (prediction target),
-``DATASET_TYPE`` ('regression' or 'classification'). See ``train_model__megan.py`` for all options.
+``DATASET_TYPE`` ('regression' or 'classification'). See ``train_model__megan.py --help`` for all options.
+
+📄 Config Files
+---------------
+
+Instead of passing parameters on the command line, you can create a YAML config file:
+
+.. code-block:: yaml
+
+    # config.yml
+    CSV_FILE_PATH: /path/to/your/data.csv
+    TARGET_COLUMN_NAMES:
+      - target
+    DATASET_TYPE: regression
+    EPOCHS: 100
+    BATCH_SIZE: 64
+    LEARNING_RATE: 0.0001
+
+Then run the experiment with:
+
+.. code-block:: bash
+
+    pycomex run graph_attention_student/experiments/train_model__megan.py config.yml
 
 .. _`GATv2`: https://github.com/tech-srl/how_attentive_are_gats
 
@@ -132,6 +154,7 @@ For quick predictions, use the ``megan`` CLI:
     megan train dataset.csv
 
     # Make predictions with explanations
+    # Optionally pass the path to a model checkpoint to use for the prediction.
     megan predict "CCO"
 
 Use ``megan --help`` for all options.

@@ -98,31 +98,70 @@ def hoyer_square_reg(x, epsilon=1e-8):
 
 
 class SwaCallback(pl.Callback):
-    
+
     def __init__(self,
                  history_length: int = 10,
                  logger: logging.Logger = NULL_LOGGER):
         super(SwaCallback, self).__init__()
         self.history_length = history_length
         self.logger = logger
-        
+
         self.history: List[torch.Tensor] = deque(maxlen=history_length)
-        
+
     def on_train_start(self, trainer, pl_module):
         self.logger.info('starting to record model weights for SWA')
-    
+
     def on_train_epoch_end(self, trainer, pl_module):
         weights = parameters_to_vector(pl_module.parameters())
         self.history.append(weights)
 
     def on_train_end(self, trainer, pl_module):
         self.logger.info(f'training finished, starting to compute SWA weights from {len(self.history)} recordings')
-        
+
         weights_stacked = torch.stack(list(self.history), dim=-1)
         weights_mean = torch.mean(weights_stacked, dim=-1)
-        # This utility function handles the expansion of the now flat weights vector back into the 
+        # This utility function handles the expansion of the now flat weights vector back into the
         # parameter dict of the actual module.
         vector_to_parameters(weights_mean, pl_module.parameters())
+
+
+class ContrastiveSchedulerCallback(pl.Callback):
+    """
+    PyTorch Lightning callback that linearly ramps up the contrastive factor
+    from near zero to the target value over a specified number of warmup epochs.
+
+    This is useful for training models with contrastive learning objectives where
+    starting with a high contrastive factor can destabilize early training.
+
+    :param target_factor: The target contrastive factor to reach after warmup.
+    :param warmup_epochs: Number of epochs over which to linearly ramp up.
+    :param start_factor: The initial contrastive factor value (near zero).
+    """
+
+    def __init__(self,
+                 target_factor: float,
+                 warmup_epochs: int,
+                 start_factor: float = 1e-6,
+                 ):
+        self.target_factor = target_factor
+        self.warmup_epochs = warmup_epochs
+        self.start_factor = start_factor
+
+    def on_train_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule):
+        print(f'ContrastiveSchedulerCallback registered - '
+              f'ramping from {self.start_factor} to {self.target_factor} over {self.warmup_epochs} epochs')
+        pl_module.contrastive_factor = self.start_factor
+
+    def on_train_epoch_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule):
+        current_epoch = trainer.current_epoch
+
+        if current_epoch >= self.warmup_epochs:
+            pl_module.contrastive_factor = self.target_factor
+        else:
+            progress = current_epoch / self.warmup_epochs
+            pl_module.contrastive_factor = (
+                self.start_factor + progress * (self.target_factor - self.start_factor)
+            )
         
         
 class FocalLoss(nn.Module):

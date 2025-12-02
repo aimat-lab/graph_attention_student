@@ -16,7 +16,7 @@ from visual_graph_datasets.processing.molecules import MoleculeProcessing
 from visual_graph_datasets.processing.base import create_processing_module
 from visual_graph_datasets.util import dynamic_import
 
-from pycomex.experiment import run_experiment
+from pycomex.functional.experiment import run_experiment
 from pycomex.cli import ExperimentCLI
 from rich.columns import Columns
 from rich.syntax import Syntax
@@ -513,7 +513,7 @@ class CLI(click.RichGroup):
             sys.exit(1)
 
 
-@click.group(cls=CLI)
+@click.group(cls=CLI, invoke_without_command=True)
 @click.option("-v", "--version", is_flag=True, help="Show the package version and exit.")
 @click.pass_context
 def cli(ctx: click.Context, version: bool) -> None:
