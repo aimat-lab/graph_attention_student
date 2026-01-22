@@ -335,14 +335,31 @@ Documentation
 
 Command Line Interface
 
-- Fixed a bug where `megan --version` was not working 
+- Fixed a bug where `megan --version` was not working
 
 Experiment Modules
 
 - Added the new experiment module `train_model.py` which is the new base experiment
-  that allows for the training of models without a pre-computed visual graph dataset 
+  that allows for the training of models without a pre-computed visual graph dataset
   and instead uses just a CSV file as the dataset basis.
-- Added `train_model__megan.py` which implements the training of a MEGAN model based 
+- Added `train_model__megan.py` which implements the training of a MEGAN model based
   on simple dataset csv files.
-- Extended the training scripts to now also track various statistics about the latent 
+- Extended the training scripts to now also track various statistics about the latent
   space of the megan model during the training.
+
+1.2.0 - 22.01.2026
+------------------
+
+Data Loading
+
+- Added new random-access data store classes to `torch/data.py` for more efficient data loading:
+  - ``SmilesStore``: SQLite-backed store for CSV data with random access. Uses thread-local
+    connections for multi-worker DataLoader support. Create from CSV via ``SmilesStore.from_csv()``.
+  - ``SmilesGraphStore``: Wraps a ``SmilesStore`` with a ``Processing`` instance to convert
+    SMILES strings to GraphDict representations on-the-fly.
+  - ``VisualGraphDatasetStore``: Random-access store for Visual Graph Dataset (VGD) directories.
+    Provides direct index-based access (``store[5]`` reads ``5.json``).
+  - ``GraphDataLoader``: PyTorch Geometric DataLoader subclass that accepts any ``Sequence[GraphDict]``
+    and automatically converts to PyG Data objects.
+- These new classes provide an alternative to the streaming-based ``SmilesDataset`` when random
+  access is needed (e.g., for validation/test sets or when shuffling is required without reservoir sampling).

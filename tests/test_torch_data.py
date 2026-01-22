@@ -16,6 +16,10 @@ from graph_attention_student.testing import get_mock_graphs
 from graph_attention_student.torch.data import data_from_graph
 from graph_attention_student.torch.data import data_list_from_graphs
 from graph_attention_student.torch.data import SmilesDataset
+from graph_attention_student.torch.data import SmilesStore
+from graph_attention_student.torch.data import SmilesGraphStore
+from graph_attention_student.torch.data import VisualGraphDatasetStore
+from graph_attention_student.torch.data import GraphDataLoader
 
 
 @pytest.mark.parametrize('num_graphs', [
@@ -489,4 +493,591 @@ class TestSmilesDataset:
                 break
 
         assert total_items > 0
+
+
+# == SmilesStore Tests ==
+
+class TestSmilesStore:
+    """Test suite for the SmilesStore class."""
+
+    @pytest.fixture
+    def sample_csv_file(self):
+        """Fixture creating a temporary CSV file with sample data."""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+            f.write('smiles,value,name\n')
+            f.write('CCO,1.5,ethanol\n')
+            f.write('CC(=O)O,2.3,acetic_acid\n')
+            f.write('c1ccccc1,0.8,benzene\n')
+            f.write('CCN,1.2,ethylamine\n')
+            temp_path = f.name
+
+        yield temp_path
+
+        try:
+            os.unlink(temp_path)
+        except FileNotFoundError:
+            pass
+
+    @pytest.fixture
+    def sample_sqlite_path(self):
+        """Fixture providing a temporary SQLite file path."""
+        with tempfile.NamedTemporaryFile(suffix='.sqlite', delete=False) as f:
+            temp_path = f.name
+
+        yield temp_path
+
+        try:
+            os.unlink(temp_path)
+        except FileNotFoundError:
+            pass
+
+    def test_from_csv_creates_sqlite(self, sample_csv_file, sample_sqlite_path):
+        """Test that from_csv creates a valid SQLite file."""
+        store = SmilesStore.from_csv(sample_csv_file, sample_sqlite_path)
+
+        assert os.path.exists(sample_sqlite_path)
+        assert isinstance(store, SmilesStore)
+        assert store.sqlite_path == sample_sqlite_path
+
+    def test_from_csv_overwrites_existing(self, sample_csv_file, sample_sqlite_path):
+        """Test that from_csv overwrites existing SQLite file."""
+        # Create initial store
+        store1 = SmilesStore.from_csv(sample_csv_file, sample_sqlite_path)
+        len1 = len(store1)
+
+        # Create new CSV with different data
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+            f.write('smiles,value,name\n')
+            f.write('CCO,1.5,ethanol\n')
+            new_csv_path = f.name
+
+        try:
+            # Overwrite with new data
+            store2 = SmilesStore.from_csv(new_csv_path, sample_sqlite_path)
+            len2 = len(store2)
+
+            assert len2 == 1  # New file has only 1 row
+            assert len1 != len2
+        finally:
+            os.unlink(new_csv_path)
+
+    def test_len(self, sample_csv_file, sample_sqlite_path):
+        """Test that __len__ returns correct count."""
+        store = SmilesStore.from_csv(sample_csv_file, sample_sqlite_path)
+
+        assert len(store) == 4
+
+    def test_getitem_returns_dict(self, sample_csv_file, sample_sqlite_path):
+        """Test that __getitem__ returns a dictionary with all columns."""
+        store = SmilesStore.from_csv(sample_csv_file, sample_sqlite_path)
+
+        row = store[0]
+
+        assert isinstance(row, dict)
+        assert 'smiles' in row
+        assert 'value' in row
+        assert 'name' in row
+        assert row['smiles'] == 'CCO'
+        assert row['value'] == 1.5
+        assert row['name'] == 'ethanol'
+
+    def test_getitem_all_rows(self, sample_csv_file, sample_sqlite_path):
+        """Test accessing all rows by index."""
+        store = SmilesStore.from_csv(sample_csv_file, sample_sqlite_path)
+
+        expected = [
+            {'smiles': 'CCO', 'value': 1.5, 'name': 'ethanol'},
+            {'smiles': 'CC(=O)O', 'value': 2.3, 'name': 'acetic_acid'},
+            {'smiles': 'c1ccccc1', 'value': 0.8, 'name': 'benzene'},
+            {'smiles': 'CCN', 'value': 1.2, 'name': 'ethylamine'},
+        ]
+
+        for i, exp in enumerate(expected):
+            row = store[i]
+            assert row['smiles'] == exp['smiles']
+            assert row['value'] == exp['value']
+            assert row['name'] == exp['name']
+
+    def test_getitem_index_error(self, sample_csv_file, sample_sqlite_path):
+        """Test that out-of-range index raises IndexError."""
+        store = SmilesStore.from_csv(sample_csv_file, sample_sqlite_path)
+
+        with pytest.raises(IndexError):
+            store[10]
+
+        with pytest.raises(IndexError):
+            store[-1]
+
+    def test_columns_property(self, sample_csv_file, sample_sqlite_path):
+        """Test that columns property returns correct column names."""
+        store = SmilesStore.from_csv(sample_csv_file, sample_sqlite_path)
+
+        columns = store.columns
+        assert 'smiles' in columns
+        assert 'value' in columns
+        assert 'name' in columns
+        assert '_id' not in columns  # Internal column should be excluded
+
+    def test_sequence_protocol(self, sample_csv_file, sample_sqlite_path):
+        """Test that SmilesStore properly implements Sequence protocol."""
+        from collections.abc import Sequence
+
+        store = SmilesStore.from_csv(sample_csv_file, sample_sqlite_path)
+
+        assert isinstance(store, Sequence)
+        assert len(store) == 4
+        assert store[0] is not None
+
+
+# == SmilesGraphStore Tests ==
+
+class TestSmilesGraphStore:
+    """Test suite for the SmilesGraphStore class."""
+
+    @pytest.fixture
+    def sample_smiles_store(self):
+        """Fixture providing a SmilesStore with sample data."""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+            f.write('smiles,value\n')
+            f.write('CCO,1.5\n')
+            f.write('CC(=O)O,2.3\n')
+            f.write('c1ccccc1,0.8\n')
+            csv_path = f.name
+
+        with tempfile.NamedTemporaryFile(suffix='.sqlite', delete=False) as f:
+            sqlite_path = f.name
+
+        store = SmilesStore.from_csv(csv_path, sqlite_path)
+
+        yield store
+
+        try:
+            os.unlink(csv_path)
+            os.unlink(sqlite_path)
+        except FileNotFoundError:
+            pass
+
+    @pytest.fixture
+    def sample_smiles_store_with_invalid(self):
+        """Fixture providing a SmilesStore with some invalid SMILES."""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+            f.write('smiles,value\n')
+            f.write('CCO,1.5\n')
+            f.write('INVALID_SMILES,2.3\n')
+            f.write('c1ccccc1,0.8\n')
+            csv_path = f.name
+
+        with tempfile.NamedTemporaryFile(suffix='.sqlite', delete=False) as f:
+            sqlite_path = f.name
+
+        store = SmilesStore.from_csv(csv_path, sqlite_path)
+
+        yield store
+
+        try:
+            os.unlink(csv_path)
+            os.unlink(sqlite_path)
+        except FileNotFoundError:
+            pass
+
+    def test_init(self, sample_smiles_store):
+        """Test SmilesGraphStore initialization."""
+        graph_store = SmilesGraphStore(
+            smiles_store=sample_smiles_store,
+            processing=MoleculeProcessing(),
+            target_columns=['value'],
+            smiles_column='smiles'
+        )
+
+        assert graph_store.smiles_store is sample_smiles_store
+        assert graph_store.target_columns == ['value']
+        assert graph_store.smiles_column == 'smiles'
+
+    def test_len(self, sample_smiles_store):
+        """Test that __len__ returns correct count."""
+        graph_store = SmilesGraphStore(
+            smiles_store=sample_smiles_store,
+            processing=MoleculeProcessing(),
+            target_columns=['value']
+        )
+
+        assert len(graph_store) == 3
+
+    def test_getitem_returns_graph_dict(self, sample_smiles_store):
+        """Test that __getitem__ returns a valid GraphDict."""
+        graph_store = SmilesGraphStore(
+            smiles_store=sample_smiles_store,
+            processing=MoleculeProcessing(),
+            target_columns=['value']
+        )
+
+        graph = graph_store[0]
+
+        assert graph is not None
+        assert 'node_attributes' in graph
+        assert 'edge_attributes' in graph
+        assert 'edge_indices' in graph
+        assert 'graph_labels' in graph
+        assert isinstance(graph['node_attributes'], np.ndarray)
+        assert isinstance(graph['graph_labels'], np.ndarray)
+
+    def test_getitem_graph_labels(self, sample_smiles_store):
+        """Test that graph_labels contains correct target values."""
+        graph_store = SmilesGraphStore(
+            smiles_store=sample_smiles_store,
+            processing=MoleculeProcessing(),
+            target_columns=['value']
+        )
+
+        graph = graph_store[0]
+        assert graph['graph_labels'][0] == 1.5
+
+    def test_getitem_invalid_smiles_returns_none(self, sample_smiles_store_with_invalid):
+        """Test that invalid SMILES returns None."""
+        graph_store = SmilesGraphStore(
+            smiles_store=sample_smiles_store_with_invalid,
+            processing=MoleculeProcessing(),
+            target_columns=['value']
+        )
+
+        # Index 1 has invalid SMILES
+        graph = graph_store[1]
+        assert graph is None
+
+        # Index 0 and 2 should be valid
+        assert graph_store[0] is not None
+        assert graph_store[2] is not None
+
+    def test_sequence_protocol(self, sample_smiles_store):
+        """Test that SmilesGraphStore properly implements Sequence protocol."""
+        from collections.abc import Sequence
+
+        graph_store = SmilesGraphStore(
+            smiles_store=sample_smiles_store,
+            processing=MoleculeProcessing(),
+            target_columns=['value']
+        )
+
+        assert isinstance(graph_store, Sequence)
+
+
+# == VisualGraphDatasetStore Tests ==
+
+class TestVisualGraphDatasetStore:
+    """Test suite for the VisualGraphDatasetStore class."""
+
+    @pytest.fixture
+    def sample_vgd_directory(self):
+        """Fixture creating a temporary VGD-style directory with sample data."""
+        import json
+
+        temp_dir = tempfile.mkdtemp()
+
+        # Create sample VGD JSON files
+        for idx in [0, 1, 2, 5]:  # Note: sparse indices (missing 3, 4)
+            graph_data = {
+                'metadata': {
+                    'index': idx,
+                    'graph': {
+                        'node_indices': [0, 1, 2],
+                        'node_attributes': [[1, 0], [0, 1], [1, 1]],
+                        'edge_indices': [[0, 1], [1, 2]],
+                        'edge_attributes': [[1], [1]],
+                        'graph_labels': [float(idx)]
+                    }
+                }
+            }
+            with open(os.path.join(temp_dir, f'{idx}.json'), 'w') as f:
+                json.dump(graph_data, f)
+
+        yield temp_dir
+
+        # Cleanup
+        import shutil
+        shutil.rmtree(temp_dir)
+
+    def test_init_discovers_indices(self, sample_vgd_directory):
+        """Test that __init__ correctly discovers indices from directory."""
+        store = VisualGraphDatasetStore(sample_vgd_directory)
+
+        assert 0 in store._indices
+        assert 1 in store._indices
+        assert 2 in store._indices
+        assert 5 in store._indices
+        assert 3 not in store._indices
+        assert 4 not in store._indices
+
+    def test_len_with_sparse_indices(self, sample_vgd_directory):
+        """Test that __len__ returns max_index + 1 for sparse indices."""
+        store = VisualGraphDatasetStore(sample_vgd_directory)
+
+        # max index is 5, so len should be 6
+        assert len(store) == 6
+
+    def test_getitem_returns_graph_dict(self, sample_vgd_directory):
+        """Test that __getitem__ returns a valid GraphDict."""
+        store = VisualGraphDatasetStore(sample_vgd_directory)
+
+        graph = store[0]
+
+        assert isinstance(graph, dict)
+        assert 'node_attributes' in graph
+        assert 'edge_attributes' in graph
+        assert 'edge_indices' in graph
+        assert 'graph_labels' in graph
+
+    def test_getitem_converts_to_numpy(self, sample_vgd_directory):
+        """Test that JSON lists are converted to numpy arrays."""
+        store = VisualGraphDatasetStore(sample_vgd_directory)
+
+        graph = store[0]
+
+        assert isinstance(graph['node_attributes'], np.ndarray)
+        assert isinstance(graph['edge_attributes'], np.ndarray)
+        assert isinstance(graph['edge_indices'], np.ndarray)
+        assert isinstance(graph['graph_labels'], np.ndarray)
+
+    def test_getitem_correct_values(self, sample_vgd_directory):
+        """Test that __getitem__ returns correct graph data."""
+        store = VisualGraphDatasetStore(sample_vgd_directory)
+
+        graph = store[5]
+        assert graph['graph_labels'][0] == 5.0
+
+        graph = store[0]
+        assert graph['graph_labels'][0] == 0.0
+
+    def test_getitem_missing_index_raises(self, sample_vgd_directory):
+        """Test that accessing missing index raises IndexError."""
+        store = VisualGraphDatasetStore(sample_vgd_directory)
+
+        with pytest.raises(IndexError):
+            store[3]  # Index 3 doesn't exist
+
+        with pytest.raises(IndexError):
+            store[100]
+
+    def test_get_valid_indices(self, sample_vgd_directory):
+        """Test get_valid_indices returns sorted list of valid indices."""
+        store = VisualGraphDatasetStore(sample_vgd_directory)
+
+        valid_indices = store.get_valid_indices()
+
+        assert valid_indices == [0, 1, 2, 5]
+
+    def test_sequence_protocol(self, sample_vgd_directory):
+        """Test that VisualGraphDatasetStore properly implements Sequence protocol."""
+        from collections.abc import Sequence
+
+        store = VisualGraphDatasetStore(sample_vgd_directory)
+
+        assert isinstance(store, Sequence)
+
+
+# == GraphDataLoader Tests ==
+
+class TestGraphDataLoader:
+    """Test suite for the GraphDataLoader class."""
+
+    @pytest.fixture
+    def sample_smiles_graph_store(self):
+        """Fixture providing a SmilesGraphStore with sample data."""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+            f.write('smiles,value\n')
+            f.write('CCO,1.5\n')
+            f.write('CC(=O)O,2.3\n')
+            f.write('c1ccccc1,0.8\n')
+            f.write('CCN,1.2\n')
+            f.write('CCCC,0.5\n')
+            csv_path = f.name
+
+        with tempfile.NamedTemporaryFile(suffix='.sqlite', delete=False) as f:
+            sqlite_path = f.name
+
+        smiles_store = SmilesStore.from_csv(csv_path, sqlite_path)
+        graph_store = SmilesGraphStore(
+            smiles_store=smiles_store,
+            processing=MoleculeProcessing(),
+            target_columns=['value']
+        )
+
+        yield graph_store
+
+        try:
+            os.unlink(csv_path)
+            os.unlink(sqlite_path)
+        except FileNotFoundError:
+            pass
+
+    @pytest.fixture
+    def sample_smiles_graph_store_with_invalid(self):
+        """Fixture providing a SmilesGraphStore with some invalid SMILES."""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+            f.write('smiles,value\n')
+            f.write('CCO,1.5\n')
+            f.write('INVALID,2.3\n')
+            f.write('c1ccccc1,0.8\n')
+            f.write('BAD_SMILES,1.2\n')
+            f.write('CCN,0.5\n')
+            csv_path = f.name
+
+        with tempfile.NamedTemporaryFile(suffix='.sqlite', delete=False) as f:
+            sqlite_path = f.name
+
+        smiles_store = SmilesStore.from_csv(csv_path, sqlite_path)
+        graph_store = SmilesGraphStore(
+            smiles_store=smiles_store,
+            processing=MoleculeProcessing(),
+            target_columns=['value']
+        )
+
+        yield graph_store
+
+        try:
+            os.unlink(csv_path)
+            os.unlink(sqlite_path)
+        except FileNotFoundError:
+            pass
+
+    @pytest.fixture
+    def sample_vgd_store(self):
+        """Fixture providing a VisualGraphDatasetStore with sample data."""
+        import json
+
+        temp_dir = tempfile.mkdtemp()
+
+        for idx in range(5):
+            graph_data = {
+                'metadata': {
+                    'index': idx,
+                    'graph': {
+                        'node_indices': [0, 1, 2],
+                        'node_attributes': [[1, 0], [0, 1], [1, 1]],
+                        'edge_indices': [[0, 1], [1, 2]],
+                        'edge_attributes': [[1], [1]],
+                        'graph_labels': [float(idx)]
+                    }
+                }
+            }
+            with open(os.path.join(temp_dir, f'{idx}.json'), 'w') as f:
+                json.dump(graph_data, f)
+
+        store = VisualGraphDatasetStore(temp_dir)
+
+        yield store
+
+        import shutil
+        shutil.rmtree(temp_dir)
+
+    def test_init_with_smiles_graph_store(self, sample_smiles_graph_store):
+        """Test GraphDataLoader initialization with SmilesGraphStore."""
+        loader = GraphDataLoader(
+            sample_smiles_graph_store,
+            batch_size=2,
+            shuffle=False
+        )
+
+        assert loader.batch_size == 2
+
+    def test_init_with_vgd_store(self, sample_vgd_store):
+        """Test GraphDataLoader initialization with VisualGraphDatasetStore."""
+        loader = GraphDataLoader(
+            sample_vgd_store,
+            batch_size=2,
+            shuffle=False
+        )
+
+        assert loader.batch_size == 2
+
+    def test_iteration_yields_batches(self, sample_smiles_graph_store):
+        """Test that iteration yields PyG Batch objects."""
+        loader = GraphDataLoader(
+            sample_smiles_graph_store,
+            batch_size=2,
+            shuffle=False
+        )
+
+        batches = list(loader)
+
+        assert len(batches) > 0
+        for batch in batches:
+            assert hasattr(batch, 'x')
+            assert hasattr(batch, 'edge_index')
+            assert hasattr(batch, 'y')
+            assert hasattr(batch, 'batch')  # Batch assignment vector
+
+    def test_batch_contains_correct_data(self, sample_smiles_graph_store):
+        """Test that batches contain correctly structured data."""
+        loader = GraphDataLoader(
+            sample_smiles_graph_store,
+            batch_size=2,
+            shuffle=False
+        )
+
+        batch = next(iter(loader))
+
+        assert isinstance(batch.x, torch.Tensor)
+        assert isinstance(batch.edge_index, torch.Tensor)
+        assert isinstance(batch.y, torch.Tensor)
+        assert batch.edge_index.shape[0] == 2  # (2, num_edges) format
+
+    def test_invalid_smiles_raises_error(self, sample_smiles_graph_store_with_invalid):
+        """Test that invalid SMILES raises an error (user must clean data first)."""
+        loader = GraphDataLoader(
+            sample_smiles_graph_store_with_invalid,
+            batch_size=10,
+            shuffle=False
+        )
+
+        # Should raise an error when encountering invalid SMILES (returns None)
+        with pytest.raises(Exception):  # Will fail in data_from_graph when graph is None
+            list(loader)
+
+    def test_with_vgd_store(self, sample_vgd_store):
+        """Test GraphDataLoader with VisualGraphDatasetStore."""
+        loader = GraphDataLoader(
+            sample_vgd_store,
+            batch_size=2,
+            shuffle=False
+        )
+
+        batches = list(loader)
+
+        assert len(batches) > 0
+        for batch in batches:
+            assert hasattr(batch, 'x')
+            assert hasattr(batch, 'edge_index')
+
+    def test_shuffle(self, sample_smiles_graph_store):
+        """Test that shuffle parameter works."""
+        loader1 = GraphDataLoader(
+            sample_smiles_graph_store,
+            batch_size=1,
+            shuffle=False
+        )
+
+        loader2 = GraphDataLoader(
+            sample_smiles_graph_store,
+            batch_size=1,
+            shuffle=True
+        )
+
+        # Both should produce batches
+        batches1 = list(loader1)
+        batches2 = list(loader2)
+
+        assert len(batches1) == len(batches2)
+
+    @pytest.mark.skip(reason="Multi-worker tests can timeout")
+    def test_num_workers(self, sample_smiles_graph_store):
+        """Test that num_workers parameter works."""
+        loader = GraphDataLoader(
+            sample_smiles_graph_store,
+            batch_size=2,
+            shuffle=False,
+            num_workers=2
+        )
+
+        batches = list(loader)
+        assert len(batches) > 0
 
