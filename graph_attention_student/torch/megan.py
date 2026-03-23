@@ -1437,8 +1437,8 @@ class Megan(MveMixin, AbstractGraphModel):
             node_transformed = F.sigmoid(self.lay_transform_2(self.lay_transform_1(data.x).relu())) + self.importance_offset
             node_transformed = self.importance_offset * torch.ones_like(node_transformed, device=self.device)
             node_transformed = node_transformed * node_importance
-            
-            pooled_importance = self.lay_pool_importance(node_transformed, data.batch)
+
+            pooled_importance = self.lay_pool_mean(node_transformed, data.batch)
         
         elif self.importance_target == 'edge':
         
@@ -1464,8 +1464,8 @@ class Megan(MveMixin, AbstractGraphModel):
             edge_transformed = F.sigmoid(self.lay_transform_2(self.lay_transform_1(edge_input).relu()) - 5) + self.importance_offset
             edge_transformed = torch.ones_like(edge_transformed, device=self.device) * self.importance_offset
             edge_transformed = edge_transformed * edge_importance
-            
-            pooled_importance = self.lay_pool_importance(edge_transformed, data.batch[data.edge_index[0]])
+
+            pooled_importance = self.lay_pool_mean(edge_transformed, data.batch[data.edge_index[0]])
         
         # ~ constructing the approximation
         
@@ -1561,21 +1561,21 @@ class Megan(MveMixin, AbstractGraphModel):
                 node_importance *= self.importance_offset
                 
                 # pooled_importances: (num_channels, )
-                pooled_importance = np.sum(node_importance, axis=0)
-            
+                pooled_importance = np.mean(node_importance, axis=0)
+
             elif self.importance_target == 'edge':
-            
+
                 # -- edge-level explanation approximation --
                 # for each *edge* these are attention values in the range [0, 1]
                 # edge_importance: (num_edges, num_channels)
                 edge_importance = result['edge_importance']
-                
+
                 max_value = max(np.max(edge_importance), 1e-6)
                 edge_importance = edge_importance / max_value
                 edge_importance *= self.importance_offset
-                
+
                 # pooled_importances: (num_channels, )
-                pooled_importance = np.sum(edge_importance, axis=0)
+                pooled_importance = np.mean(edge_importance, axis=0)
 
             # prediction: (num_channels, )
             pred = np.tanh(0.1 * pooled_importance)
