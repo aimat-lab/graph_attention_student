@@ -1483,15 +1483,12 @@ class Megan(MveMixin, AbstractGraphModel):
             # So here we construct the "true" labels simply as a binary decision problem of samples being either 
             # "positive" or "negative".
             
-            regression_lo = torch.quantile(out_true, 0.5 - self.regression_margin)
-            regression_hi = torch.quantile(out_true, 0.5 + self.regression_margin)
-            
+            regression_median = torch.quantile(out_true, 0.5)
+
             values_true = torch.cat([
-                # (out_true < (regression_reference - self.regression_margin)), 
-                # (out_true > (regression_reference + self.regression_margin)),
-                out_true < regression_lo,
-                out_true > regression_hi,
-            ], 
+                out_true <= regression_median,
+                out_true > regression_median,
+            ],
             axis=1).float()
             
             # values_pred: (B, K)
