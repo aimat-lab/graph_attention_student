@@ -50,6 +50,7 @@ from graph_attention_student.torch.model import AbstractGraphModel
 from graph_attention_student.torch.megan import Megan
 from graph_attention_student.torch.megan import MveCallback
 from graph_attention_student.torch.utils import SwaCallback
+from graph_attention_student.torch.callbacks import ImportanceFactorWarmup
 from sklearn.metrics import accuracy_score, f1_score, confusion_matrix
 import seaborn as sns
 
@@ -123,6 +124,12 @@ LABEL_SMOOTHING: t.Optional[float] = 0.0
 #       This is the coefficient that is used to scale the explanation co-training loss during training.
 #       Roughly, the higher this value, the more the model will prioritize the explanations during training.
 IMPORTANCE_FACTOR: float = 1.0
+# :param IMPORTANCE_FACTOR_WARMUP_EPOCHS:
+#       If set to a positive integer, the importance factor will be linearly ramped up from a small value
+#       (1e-6) to the final IMPORTANCE_FACTOR value over this many epochs. This can help stabilize training
+#       by allowing the model to first learn the prediction task before focusing on explanations.
+#       If set to None (default), no warmup is applied and the importance factor is constant from the start.
+IMPORTANCE_FACTOR_WARMUP_EPOCHS: Optional[int] = None
 # :param IMPORTANCE_OFFSET:
 #       This parameter controls the sparsity of the explanation masks even more so than the sparsity factor.
 #       It basically provides the upper limit of how many nodes/edges need to be activated for a channel to 
@@ -557,13 +564,21 @@ def train_model(e: Experiment,
         TrainingCallback(),
     ]
     
-    # The SwaCallback fully implements the stochastic weight averaging by itself without any modification 
-    # in the model itself. The callback simply updates a FIFO queue of the model weights in each epoch 
-    # and then at the end of the training calculates an average over those and assigns them as the new 
+    # The SwaCallback fully implements the stochastic weight averaging by itself without any modification
+    # in the model itself. The callback simply updates a FIFO queue of the model weights in each epoch
+    # and then at the end of the training calculates an average over those and assigns them as the new
     # weights of the model.
     if e.USE_SWA:
         callbacks.append(SwaCallback(history_length=e.SWA_EPOCHS, logger=logger))
-        
+
+    # The ImportanceFactorWarmup callback linearly ramps up the importance factor from a small value
+    # to the final value over the specified number of epochs.
+    if e.IMPORTANCE_FACTOR_WARMUP_EPOCHS is not None:
+        callbacks.append(ImportanceFactorWarmup(
+            start_value=1e-6,
+            warmup_epochs=e.IMPORTANCE_FACTOR_WARMUP_EPOCHS,
+        ))
+
     if e.TRAIN_MVE:
         callbacks.append(MveCallback(
             warmup_epochs=e.MVE_WARMUP_EPOCHS,

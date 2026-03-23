@@ -12,6 +12,7 @@ import os
 import csv
 import json
 import random
+import shutil
 import typing as t
 from collections import defaultdict
 from typing import Union, Dict, List, Tuple, Optional
@@ -35,6 +36,7 @@ from sklearn.metrics import pairwise_distances
 from pycomex.functional.experiment import Experiment
 from pycomex.utils import file_namespace, folder_path
 from visual_graph_datasets.processing.molecules import MoleculeProcessing
+from visual_graph_datasets.processing.base import create_processing_module
 from visual_graph_datasets.visualization.base import draw_image
 from visual_graph_datasets.util import dynamic_import
 from torch_geometric.loader import DataLoader
@@ -852,6 +854,23 @@ def experiment(e: Experiment):
     e.log('saving the model to the disk...')
     model_path = os.path.join(e.path, 'model.ckpt')
     model.save(model_path)
+
+    # ~ saving the processing module
+    e.log('saving the processing module to the disk...')
+    processing_path = os.path.join(e.path, 'process.py')
+    if e.PROCESSING_PATH is not None and os.path.exists(e.PROCESSING_PATH):
+        # If a processing module file was provided, copy it directly
+        e.log(f' * copying processing module from {e.PROCESSING_PATH}')
+        shutil.copy(e.PROCESSING_PATH, processing_path)
+    else:
+        # Otherwise, generate the processing module code from the processing instance
+        e.log(' * generating processing module from Processing instance')
+        processing = e['_processing']
+        processing_code = create_processing_module(processing)
+        with open(processing_path, mode='w') as file:
+            file.write(processing_code)
+
+    e.log(f' * processing module saved to {processing_path}')
 
 
 @experiment.analysis

@@ -3,6 +3,7 @@ import json
 import pathlib
 import random
 import typing as t
+from typing import List, Dict, Tuple
 
 import numpy as np
 from pycomex.functional.experiment import Experiment
@@ -39,7 +40,7 @@ INDICES_PATH: t.Optional[str] = None
 #       and explanation. In the case of molecular graphs the string domain representation for example is 
 #       the SMILES string. If this parameter is given (not None) then only the elements from this list 
 #       will be used for the explanations and the dataset elements will NOT be used.
-ELEMENTS: t.Optional[list[str]] = None
+ELEMENTS: t.Optional[List[str]] = None
 # :param NUM_ELEMENTS:
 #       This integer number defines how many elements of the dataset are supposed to be sampled for the
 #       plotting of the explanations. This parameter will be ignored if a indices file path is given.
@@ -107,9 +108,9 @@ def load_dataset(e: Experiment):
 @experiment.hook('create_explanations', default=False, replace=False)
 def create_explanations(e: Experiment,
                         index_data_map: dict,
-                        indices: list[int],
-                        graphs: list[dict],
-                        ) -> tuple[list[np.ndarray], list[np.ndarray]]:
+                        indices: List[int],
+                        graphs: List[dict],
+                        ) -> Tuple[List[np.ndarray], List[np.ndarray]]:
     """
     This hook is called to create the explanations for the given graphs. The graphs to be 
     explained are given in the form of the ``indices`` and the ``graphs`` list. This hook 
@@ -137,9 +138,9 @@ def create_explanations(e: Experiment,
 @experiment.hook('create_labels', default=False, replace=False)
 def create_labels(e: Experiment,
                   index_data_map: dict,
-                  indices: list[int],
-                  graphs: list[dict],
-                  ) -> list[str]:
+                  indices: List[int],
+                  graphs: List[dict],
+                  ) -> List[str]:
     """
     This is hook is supposed to create a list of string labels which will be printed as the headers
     of each of the figures during the visualization.
