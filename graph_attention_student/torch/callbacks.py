@@ -184,6 +184,8 @@ class MeganTrainingMetricsCallback(Callback):
         self.fidelity_sign_consistency: List[np.ndarray] = []
         self.latest_node_importances: Optional[List[np.ndarray]] = None
         self.latest_edge_importances: Optional[List[np.ndarray]] = None
+        self.latest_values_true: Optional[np.ndarray] = None
+        self.latest_values_pred: Optional[np.ndarray] = None
 
         # Gradients & convergence
         self.global_grad_norms: List[float] = []
@@ -439,6 +441,10 @@ class MeganTrainingMetricsCallback(Callback):
         values_true = np.array([g['graph_labels'] for g in self.val_graphs])
         values_pred = np.array([r['graph_output'] for r in results])
 
+        # Store for the latest-epoch regression/classification plot
+        self.latest_values_true = values_true
+        self.latest_values_pred = values_pred
+
         # -- Prediction quality --
         if self.dataset_type == 'regression':
             self.primary_metric.append(float(r2_score(values_true, values_pred)))
@@ -664,27 +670,46 @@ class MeganTrainingMetricsCallback(Callback):
         ax.grid(True, alpha=0.3)
 
     def _plot_latest_fit(self, ax):
-        """Plot regression scatter or text summary for latest epoch."""
-        ax.set_title('Latest Prediction', fontsize=9)
-        if not self.primary_metric:
+        """Plot regression scatter or confusion matrix for latest epoch."""
+        if self.latest_values_true is None or self.latest_values_pred is None:
+            ax.set_title('Latest Prediction', fontsize=9)
             ax.text(0.5, 0.5, 'No data', ha='center', va='center', transform=ax.transAxes)
             return
+
+        yt = self.latest_values_true
+        yp = self.latest_values_pred
+
         if self.dataset_type == 'regression':
-            val = self.primary_metric[-1]
-            val2 = self.secondary_metric[-1] if self.secondary_metric else 0
-            ax.text(0.5, 0.6, f'R² = {val:.4f}', ha='center', va='center',
-                    transform=ax.transAxes, fontsize=14, fontweight='bold')
-            ax.text(0.5, 0.4, f'MAE = {val2:.4f}', ha='center', va='center',
-                    transform=ax.transAxes, fontsize=14)
+            r2 = self.primary_metric[-1] if self.primary_metric else 0
+            mae = self.secondary_metric[-1] if self.secondary_metric else 0
+            ax.set_title(f'Regression Fit (R²={r2:.3f}, MAE={mae:.3f})', fontsize=9)
+            ax.scatter(yt.flatten(), yp.flatten(), alpha=0.4, s=8, color='#2196F3')
+            # Plot diagonal reference line
+            vmin = min(yt.min(), yp.min())
+            vmax = max(yt.max(), yp.max())
+            ax.plot([vmin, vmax], [vmin, vmax], 'k--', alpha=0.5, linewidth=1)
+            ax.set_xlabel('True', fontsize=8)
+            ax.set_ylabel('Predicted', fontsize=8)
+            ax.set_aspect('equal', adjustable='datalim')
+            ax.grid(True, alpha=0.3)
         else:
-            val = self.primary_metric[-1]
-            val2 = self.secondary_metric[-1] if self.secondary_metric else 0
-            ax.text(0.5, 0.6, f'Acc = {val:.4f}', ha='center', va='center',
-                    transform=ax.transAxes, fontsize=14, fontweight='bold')
-            ax.text(0.5, 0.4, f'F1 = {val2:.4f}', ha='center', va='center',
-                    transform=ax.transAxes, fontsize=14)
-        ax.set_xticks([])
-        ax.set_yticks([])
+            acc = self.primary_metric[-1] if self.primary_metric else 0
+            ax.set_title(f'Confusion Matrix (Acc={acc:.3f})', fontsize=9)
+            yt_cls = np.argmax(yt, axis=1)
+            yp_cls = np.argmax(yp, axis=1)
+            n_classes = yt.shape[1]
+            cm = np.zeros((n_classes, n_classes), dtype=int)
+            for t, p in zip(yt_cls, yp_cls):
+                cm[t, p] += 1
+            # Row-normalize for display
+            row_sums = cm.sum(axis=1, keepdims=True)
+            cm_norm = cm / (row_sums + 1e-8)
+            im = ax.imshow(cm_norm, cmap='Blues', vmin=0, vmax=1)
+            for i in range(n_classes):
+                for j in range(n_classes):
+                    ax.text(j, i, str(cm[i, j]), ha='center', va='center', fontsize=7)
+            ax.set_xlabel('Predicted', fontsize=8)
+            ax.set_ylabel('True', fontsize=8)
 
     def _plot_importance_sparsity(self, ax, epochs):
         ax.set_title('Mean Importance / Channel', fontsize=9)
