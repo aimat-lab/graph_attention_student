@@ -78,7 +78,8 @@ IMPORTANCE_FACTOR: float = 1.0
 #       Number of epochs to linearly ramp up the importance factor from 1e-6 to the final value.
 IMPORTANCE_FACTOR_WARMUP_EPOCHS: int = 25
 # :param SPARSITY_FACTOR:
-#       DEPRECATED
+#       Coefficient for the explanation sparsity loss (Hoyer-Square regularization).
+#       Higher values promote sparser explanation masks.
 SPARSITY_FACTOR: float = 0.5
 # :param IMPORTANCE_OFFSET:
 #       This parameter controls the sparsity of the explanation masks. It acts as a multiplier on

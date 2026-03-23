@@ -141,10 +141,9 @@ IMPORTANCE_FACTOR_WARMUP_EPOCHS: Optional[int] = None
 #       hand. This is a parameter with which one has to experiment until a good trade-off is found!
 IMPORTANCE_OFFSET: float = 0.8
 # :param SPARSITY_FACTOR:
-#       DEPRECATED
 #       This is the coefficient that is used to scale the explanation sparsity loss during training.
 #       The higher this value the more explanation sparsity (less and more discrete explanation masks)
-#       is promoted.
+#       is promoted. Uses Hoyer-Square regularization on the importance masks.
 SPARSITY_FACTOR: float = 1.0
 # :param FIDELITY_FACTOR:
 #       This parameter controls the coefficient of the explanation fidelity loss during training. The higher
