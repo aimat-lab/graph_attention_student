@@ -1,6 +1,7 @@
 """
 PyTorch Lightning callbacks for MEGAN model training.
 """
+import signal
 import time
 import threading
 import typing as t
@@ -37,6 +38,47 @@ try:
     _PSUTIL_AVAILABLE = True
 except Exception:
     _PSUTIL_AVAILABLE = False
+
+
+class GracefulStopCallback(Callback):
+    """
+    Catches Ctrl+C (SIGINT) and gracefully stops training instead of killing the process.
+
+    On the first Ctrl+C, sets ``trainer.should_stop = True`` so the current epoch finishes
+    and training exits cleanly — allowing evaluation and model saving to proceed.
+    On the second Ctrl+C, raises KeyboardInterrupt to force-quit immediately.
+
+    The original signal handler is restored when training ends (via ``teardown``).
+    """
+
+    def __init__(self):
+        super().__init__()
+        self._original_handler = None
+        self._trainer = None
+        self._interrupted = False
+
+    def on_train_start(self, trainer: pl.Trainer, pl_module):
+        self._trainer = trainer
+        self._interrupted = False
+        self._original_handler = signal.getsignal(signal.SIGINT)
+        signal.signal(signal.SIGINT, self._handler)
+
+    def _handler(self, signum, frame):
+        if self._interrupted:
+            # Second Ctrl+C — force quit
+            print('\nForce quit requested. Exiting immediately.')
+            if self._original_handler:
+                signal.signal(signal.SIGINT, self._original_handler)
+            raise KeyboardInterrupt
+        self._interrupted = True
+        print('\nGraceful stop requested — finishing current epoch. Press Ctrl+C again to force quit.')
+        if self._trainer is not None:
+            self._trainer.should_stop = True
+
+    def teardown(self, trainer, pl_module, stage=None):
+        if self._original_handler is not None:
+            signal.signal(signal.SIGINT, self._original_handler)
+            self._original_handler = None
 
 
 class ImportanceFactorWarmup(Callback):

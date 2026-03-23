@@ -51,6 +51,7 @@ from graph_attention_student.torch.megan import Megan
 from graph_attention_student.torch.megan import MveCallback
 from graph_attention_student.torch.utils import SwaCallback
 from graph_attention_student.torch.utils import ContrastiveSchedulerCallback
+from graph_attention_student.torch.callbacks import GracefulStopCallback
 from graph_attention_student.torch.callbacks import ImportanceFactorWarmup
 from graph_attention_student.torch.callbacks import MeganTrainingMetricsCallback
 from sklearn.metrics import accuracy_score, f1_score, confusion_matrix
@@ -578,6 +579,9 @@ def train_model(e: Experiment,
     logger = CSVLogger(e.path, name='logs')
     
     callbacks = [
+        # Catches Ctrl+C and gracefully stops training instead of killing the process.
+        # The first Ctrl+C finishes the current epoch and proceeds to evaluation.
+        GracefulStopCallback(),
         # This will record the embeddings of the test set after each epoch and then track them into the
         # experiment storage so that the evolution of the embeddings can be animated at the end of the
         # experiment.
