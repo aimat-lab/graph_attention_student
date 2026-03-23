@@ -649,7 +649,19 @@ class Megan(MveMixin, AbstractGraphModel):
                 ) -> t.Dict[str, torch.Tensor]:
     
         node_input, edge_input, edge_index = data.x, data.edge_attr, data.edge_index
-        
+
+        # Fix edge_attr / edge_index size mismatch that can occur in some datasets.
+        # Truncate or pad edge_attr to match edge_index.
+        num_edges_idx = edge_index.size(1)
+        num_edges_attr = edge_input.size(0)
+        if num_edges_attr != num_edges_idx:
+            if num_edges_attr > num_edges_idx:
+                edge_input = edge_input[:num_edges_idx]
+            else:
+                pad = torch.zeros(num_edges_idx - num_edges_attr, edge_input.size(1),
+                                  device=edge_input.device)
+                edge_input = torch.cat([edge_input, pad], dim=0)
+
         node_input = torch.where(torch.isinf(node_input), torch.zeros_like(node_input), node_input) # workaround for infinity values
         
         # node_embedding: (B * V, num_features_0)
