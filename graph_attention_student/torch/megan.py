@@ -923,7 +923,7 @@ class Megan(MveMixin, AbstractGraphModel):
             info: dict = self(data)
         except RuntimeError as exc:
             print(f'Runtime Error: {exc}')
-            return torch.tensor(0.0)
+            return torch.tensor(0.0, requires_grad=True)
         
         loss_pred = self.training_prediction(
             data=data,
