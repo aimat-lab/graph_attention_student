@@ -1018,13 +1018,15 @@ class Megan(MveMixin, AbstractGraphModel):
         
         loss_cont = torch.tensor(0.0)
         if self.contrastive_factor != 0:
-            # The "training_representation" method will calculate the loss for the contrastive 
-            # representation learning of the graph embeddings.
-            loss_cont = self.training_representation(
-                data=data,
-                info=info,
-                batch_size=batch_size,
-            )
+            try:
+                loss_cont = self.training_representation(
+                    data=data,
+                    info=info,
+                    batch_size=batch_size,
+                )
+            except RuntimeError as exc:
+                print(f'Contrastive Error: {exc}')
+                loss_cont = torch.tensor(0.0)
         
         self.log(
             'loss_cont', loss_cont.detach().cpu(),
