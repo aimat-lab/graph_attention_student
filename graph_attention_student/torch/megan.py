@@ -1216,29 +1216,41 @@ class Megan(MveMixin, AbstractGraphModel):
         edge_importance_bin = (edge_importance_norm > 0.5).float()
 
         # ~ data augmentation (single augmented view)
+        num_edges_attr = data.edge_attr.size(0)
+        num_edges_idx = data.edge_index.size(1)
+        num_edges_imp = edge_importance_bin.size(0)
+
+        # edge_importance comes from edge_index (via attention), but edge_attr may have
+        # a different count in some datasets. Pad or truncate the edge mask to match edge_attr.
+        if num_edges_imp != num_edges_attr:
+            if num_edges_imp < num_edges_attr:
+                # Pad with zeros (non-explained)
+                pad = torch.zeros(num_edges_attr - num_edges_imp, edge_importance_bin.size(1),
+                                  device=self.device)
+                edge_importance_bin = torch.cat([edge_importance_bin, pad], dim=0)
+            else:
+                # Truncate
+                edge_importance_bin = edge_importance_bin[:num_edges_attr]
+
         # 1. Strong noise on non-explained regions, gentle noise on explained regions
         node_mask = torch.amax(node_importance_bin, dim=-1).unsqueeze(-1)  # (B*V, 1)
-        edge_mask = torch.amax(edge_importance_bin, dim=-1).unsqueeze(-1)  # (B*E, 1)
+        edge_mask = torch.amax(edge_importance_bin, dim=-1).unsqueeze(-1)  # (num_edges_attr, 1)
 
-        # Noise for non-explained regions (strong)
+        # Noise tensors match data dimensions exactly
         node_noise_strong = torch_gauss(list(data.x.size()), mean=0, std=self.contrastive_noise).to(self.device)
         edge_noise_strong = torch_gauss(list(data.edge_attr.size()), mean=0, std=self.contrastive_noise).to(self.device)
-        # Noise for explained regions (gentle, 1/4 of the strong noise)
         node_noise_gentle = torch_gauss(list(data.x.size()), mean=0, std=self.contrastive_noise * 0.25).to(self.device)
         edge_noise_gentle = torch_gauss(list(data.edge_attr.size()), mean=0, std=self.contrastive_noise * 0.25).to(self.device)
 
         data_aug = data.clone()
-        # Blend: explained regions get gentle noise, non-explained get strong noise
         data_aug.x = data.x + node_mask * node_noise_gentle + (1 - node_mask) * node_noise_strong
         data_aug.edge_attr = data.edge_attr + edge_mask * edge_noise_gentle + (1 - edge_mask) * edge_noise_strong
 
         # 2. Structural augmentation: randomly drop edges in non-explained regions
         edge_drop_prob = 0.15
-        edge_keep_mask = (torch.rand(data.edge_index.size(1), device=self.device) > edge_drop_prob).float()
-        # Only drop non-explained edges; explained edges are always kept
-        edge_explained = torch.amax(edge_importance_bin, dim=-1)  # (B*E,)
+        edge_keep_mask = (torch.rand(num_edges_attr, device=self.device) > edge_drop_prob).float()
+        edge_explained = torch.amax(edge_importance_bin, dim=-1)  # (num_edges_attr,)
         edge_keep_mask = torch.max(edge_keep_mask, edge_explained)
-        # Zero out features of dropped edges instead of removing them (preserves graph structure/indexing)
         data_aug.edge_attr = data_aug.edge_attr * edge_keep_mask.unsqueeze(-1)
 
         # Forward pass on augmented data
