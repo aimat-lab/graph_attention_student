@@ -21,8 +21,12 @@ except ImportError:
     f1_score = None
 
 # Optional hardware monitoring dependencies
+# nvidia-ml-py and pynvml both expose the 'pynvml' module
 try:
-    import pynvml
+    import warnings as _w
+    with _w.catch_warnings():
+        _w.filterwarnings('ignore', category=FutureWarning)
+        import pynvml
     pynvml.nvmlInit()
     _NVML_AVAILABLE = True
 except Exception:
