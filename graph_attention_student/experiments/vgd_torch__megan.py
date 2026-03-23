@@ -327,7 +327,7 @@ def train_model(e: Experiment,
         #persisetent_workers=False,
     )
      
-    example_indices = test_indices[:8]
+    example_indices = test_indices[:16]
     example_graphs = [index_data_map[i]['metadata']['graph'] for i in example_indices]
      
     class TrainingCallback(pl.Callback):
