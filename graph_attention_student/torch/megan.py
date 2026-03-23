@@ -651,7 +651,7 @@ class Megan(MveMixin, AbstractGraphModel):
         node_input, edge_input, edge_index = data.x, data.edge_attr, data.edge_index
 
         # Fix edge_attr / edge_index size mismatch that can occur in some datasets.
-        # Truncate or pad edge_attr to match edge_index.
+        # Modify data.edge_attr in-place so all downstream code sees consistent sizes.
         num_edges_idx = edge_index.size(1)
         num_edges_attr = edge_input.size(0)
         if num_edges_attr != num_edges_idx:
@@ -661,6 +661,7 @@ class Megan(MveMixin, AbstractGraphModel):
                 pad = torch.zeros(num_edges_idx - num_edges_attr, edge_input.size(1),
                                   device=edge_input.device)
                 edge_input = torch.cat([edge_input, pad], dim=0)
+            data.edge_attr = edge_input
 
         node_input = torch.where(torch.isinf(node_input), torch.zeros_like(node_input), node_input) # workaround for infinity values
         
@@ -728,9 +729,12 @@ class Megan(MveMixin, AbstractGraphModel):
         #edge_importance = softmax(edge_importance, data)
         
         # edge_importance_pooled: (B * V, K)
+        # Use size=num_nodes to ensure output matches data.batch even when
+        # some nodes have no edges (isolated nodes).
+        num_nodes = node_input.size(0)
         edge_importance_pooled = 0.5 * (
-            self.lay_pool_edge(edge_importance, edge_index[0]) + 
-            self.lay_pool_edge(edge_importance, edge_index[1])   
+            self.lay_pool_edge(edge_importance, edge_index[0], dim_size=num_nodes) +
+            self.lay_pool_edge(edge_importance, edge_index[1], dim_size=num_nodes)
         )
         # edge_importance_pooled = self.lay_pool_edge(edge_importance, edge_index[1])
             
