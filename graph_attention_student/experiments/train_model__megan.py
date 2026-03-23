@@ -123,17 +123,27 @@ ATTENTION_AGGREGATION: str = 'max'
 #       Factor for contrastive representation learning loss.
 CONTRASTIVE_FACTOR: float = 0.0
 # :param CONTRASTIVE_NOISE:
-#       Noise level for positive augmentations in contrastive learning.
-CONTRASTIVE_NOISE: float = 0.1
+#       Noise level for augmentations in contrastive learning. Non-explained regions receive this
+#       noise level; explained regions receive 1/4 of this value.
+CONTRASTIVE_NOISE: float = 0.2
 # :param CONTRASTIVE_TEMP:
-#       Temperature for contrastive learning loss.
-CONTRASTIVE_TEMP: float = 1.0
+#       Temperature for InfoNCE contrastive loss. Standard MoCo values are 0.07-0.2.
+CONTRASTIVE_TEMP: float = 0.1
 # :param CONTRASTIVE_BETA:
-#       Concentration parameter for hard negative mining.
+#       DEPRECATED. Kept for checkpoint backward compatibility.
 CONTRASTIVE_BETA: float = 0.1
 # :param CONTRASTIVE_TAU:
-#       De-biasing parameter for contrastive learning.
+#       DEPRECATED. Kept for checkpoint backward compatibility.
 CONTRASTIVE_TAU: float = 0.1
+# :param CONTRASTIVE_QUEUE_SIZE:
+#       Size of the MoCo negative queue per explanation channel.
+CONTRASTIVE_QUEUE_SIZE: int = 4096
+# :param CONTRASTIVE_MOMENTUM:
+#       Momentum coefficient for EMA update of momentum projection layers.
+CONTRASTIVE_MOMENTUM: float = 0.999
+# :param CONTRASTIVE_DETACH_IMPORTANCE:
+#       Whether to detach importance masks from contrastive gradients.
+CONTRASTIVE_DETACH_IMPORTANCE: bool = True
 # :param USE_CONTRASTIVE_SCHEDULER:
 #       Whether to use a scheduler that linearly ramps up the contrastive factor
 #       from near zero to the target value over a warmup period.
@@ -864,6 +874,9 @@ def train_model(e: Experiment,
         contrastive_noise=e.CONTRASTIVE_NOISE,
         contrastive_beta=e.CONTRASTIVE_BETA,
         contrastive_tau=e.CONTRASTIVE_TAU,
+        contrastive_queue_size=e.CONTRASTIVE_QUEUE_SIZE,
+        contrastive_momentum=e.CONTRASTIVE_MOMENTUM,
+        contrastive_detach_importance=e.CONTRASTIVE_DETACH_IMPORTANCE,
         learning_rate=e.LEARNING_RATE,
         lr_scheduler=e.LR_SCHEDULER,
     )

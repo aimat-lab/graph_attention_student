@@ -175,29 +175,40 @@ NORMALIZE_EMBEDDING: bool = False
 #       following values: 'sum', 'max', 'min'.
 ATTENTION_AGGREGATION: str = 'max'
 # :param CONTRASTIVE_FACTOR:
-#       This is the factor of the contrastive representation learning loss of the network. If this value is 0 
-#       the contrastive repr. learning is completely disabled (increases computational efficiency). The higher 
+#       This is the factor of the contrastive representation learning loss of the network. If this value is 0
+#       the contrastive repr. learning is completely disabled (increases computational efficiency). The higher
 #       this value the more the contrastive learning will influence the network during training.
 CONTRASTIVE_FACTOR: float = 0.0
 # :param CONTRASTIVE_NOISE:
-#       This float value determines the noise level that is applied when generating the positive augmentations 
-#       during the contrastive learning process.
-CONTRASTIVE_NOISE: float = 0.0
+#       This float value determines the noise level that is applied when generating the positive augmentations
+#       during the contrastive learning process. For the MoCo implementation, this controls the strong noise
+#       applied to non-explained regions (explained regions receive 1/4 of this value).
+CONTRASTIVE_NOISE: float = 0.2
 # :param CONTRASTIVE_TEMP:
-#       This float value is a hyperparameter that controls the "temperature" of the contrastive learning loss.
-#       The higher this value, the more the contrastive learning will be smoothed out. The lower this value,
-#       the more the contrastive learning will be focused on the most similar pairs of embeddings.
-CONTRASTIVE_TEMP: float = 1.0
+#       This float value is a hyperparameter that controls the "temperature" of the InfoNCE contrastive loss.
+#       Standard MoCo values are 0.07-0.2. Lower values produce sharper similarity distributions and
+#       tighter clusters but can be less stable.
+CONTRASTIVE_TEMP: float = 0.1
 # :param CONTRASTIVE_BETA:
-#       This is the float value from the paper about the hard negative mining called the concentration 
-#       parameter. It determines how much the contrastive loss is focused on the hardest negative samples.
+#       DEPRECATED. Kept for checkpoint backward compatibility. No longer used in MoCo implementation.
 CONTRASTIVE_BETA: float = 0.1
 # :param CONTRASTIVE_TAU:
-#       This float value is a hyperparameters of the de-biasing improvement of the contrastive learning loss. 
-#       This value should be chosen as roughly the inverse of the number of expected concepts. So as an example 
-#       if it is expected that each explanation consists of roughly 10 distinct concepts, this should be chosen 
-#       as 1/10 = 0.1
+#       DEPRECATED. Kept for checkpoint backward compatibility. No longer used in MoCo implementation.
 CONTRASTIVE_TAU: float = 0.1
+# :param CONTRASTIVE_QUEUE_SIZE:
+#       The size of the MoCo negative queue per explanation channel. Larger queues provide more diverse
+#       negatives for contrastive learning, decoupling the number of negatives from the batch size.
+#       Typical values: 2048-16384.
+CONTRASTIVE_QUEUE_SIZE: int = 4096
+# :param CONTRASTIVE_MOMENTUM:
+#       The momentum coefficient for the exponential moving average update of the momentum projection
+#       layers. Values close to 1.0 (e.g. 0.999) provide slow, stable updates.
+CONTRASTIVE_MOMENTUM: float = 0.999
+# :param CONTRASTIVE_DETACH_IMPORTANCE:
+#       If True, the importance masks used for augmentation masking are detached from the computation
+#       graph during contrastive training. This prevents the contrastive loss from interfering with
+#       explanation training, especially early in training when explanations are noisy.
+CONTRASTIVE_DETACH_IMPORTANCE: bool = True
 # :param PREDICTION_FACTOR:
 #       This is a float value that determines the factor by which the main prediction loss is being scaled 
 #       durign the model training. Changing this from 1.0 should usually not be necessary except for regression
@@ -549,6 +560,9 @@ def train_model(e: Experiment,
         contrastive_noise=e.CONTRASTIVE_NOISE,
         contrastive_beta=e.CONTRASTIVE_BETA,
         contrastive_tau=e.CONTRASTIVE_TAU,
+        contrastive_queue_size=e.CONTRASTIVE_QUEUE_SIZE,
+        contrastive_momentum=e.CONTRASTIVE_MOMENTUM,
+        contrastive_detach_importance=e.CONTRASTIVE_DETACH_IMPORTANCE,
         learning_rate=e.LEARNING_RATE,
         lr_scheduler=e.LR_SCHEDULER,
     )

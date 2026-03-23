@@ -1,4 +1,5 @@
 import os
+import copy
 import typing as t
 from typing import List, Dict, Optional, Tuple
 
@@ -244,6 +245,9 @@ class Megan(MveMixin, AbstractGraphModel):
                  contrastive_beta: float = 1.0,
                  contrastive_tau: float = 0.1,
                  contrastive_units: int = 1028,
+                 contrastive_queue_size: int = 4096,
+                 contrastive_momentum: float = 0.999,
+                 contrastive_detach_importance: bool = True,
                  # prediction-related
                  final_units: t.List[int] = [16, 1],
                  final_dropout_rate: float = 0.0,
@@ -303,7 +307,10 @@ class Megan(MveMixin, AbstractGraphModel):
         self.contrastive_beta = contrastive_beta
         self.contrastive_tau = contrastive_tau
         self.contrastive_units = contrastive_units
-        
+        self.contrastive_queue_size = contrastive_queue_size
+        self.contrastive_momentum = contrastive_momentum
+        self.contrastive_detach_importance = contrastive_detach_importance
+
         self.prediction_mode = prediction_mode
         self.prediction_factor = prediction_factor
         self.final_untis = final_units
@@ -338,6 +345,9 @@ class Megan(MveMixin, AbstractGraphModel):
             'contrastive_beta':         contrastive_beta,
             'contrastive_tau':          contrastive_tau,
             'contrastive_units':        contrastive_units,
+            'contrastive_queue_size':   contrastive_queue_size,
+            'contrastive_momentum':     contrastive_momentum,
+            'contrastive_detach_importance': contrastive_detach_importance,
             'final_units':              final_units,  
             'final_dropout_rate':       final_dropout_rate,
             'num_channels':             num_channels,
@@ -537,10 +547,27 @@ class Megan(MveMixin, AbstractGraphModel):
                 nn.BatchNorm1d(512),
                 nn.SiLU(),
                 nn.Linear(in_features=512, out_features=contrastive_units),
-                nn.BatchNorm1d(contrastive_units),
             )
             self.projection_layers.append(lay)
-            
+
+        # MoCo momentum projection layers: deep copy of projection_layers, no gradients
+        self.projection_layers_momentum = copy.deepcopy(self.projection_layers)
+        for param in self.projection_layers_momentum.parameters():
+            param.requires_grad = False
+
+        # MoCo momentum copies of channel projection layers
+        self.channel_projection_layers_momentum = copy.deepcopy(self.channel_projection_layers)
+        for param in self.channel_projection_layers_momentum.parameters():
+            param.requires_grad = False
+
+        # MoCo queues: one per channel, shape (contrastive_units, queue_size)
+        for k in range(num_channels):
+            self.register_buffer(
+                f'queue_{k}',
+                F.normalize(torch.randn(contrastive_units, contrastive_queue_size), dim=0)
+            )
+        self.register_buffer('queue_ptr', torch.zeros(num_channels, dtype=torch.long))
+
         self.lay_final_dropout = nn.Dropout(p=final_dropout_rate)
         
         # Note that the the final activation (aka output activation) does NOT change depending on the 
@@ -1090,207 +1117,161 @@ class Megan(MveMixin, AbstractGraphModel):
         loss_pred = self.loss_pred(out_pred, out_true)
         loss_pred = loss_pred.mean()
         return loss_pred
-    
+
+    @torch.no_grad()
+    def _momentum_update(self):
+        """Update momentum projection layers via exponential moving average."""
+        m = self.contrastive_momentum
+        for param, param_m in zip(self.projection_layers.parameters(),
+                                  self.projection_layers_momentum.parameters()):
+            param_m.data = m * param_m.data + (1.0 - m) * param.data
+
+        for param, param_m in zip(self.channel_projection_layers.parameters(),
+                                  self.channel_projection_layers_momentum.parameters()):
+            param_m.data = m * param_m.data + (1.0 - m) * param.data
+
+    @torch.no_grad()
+    def _dequeue_and_enqueue(self, keys: torch.Tensor, channel_idx: int):
+        """
+        Insert a batch of L2-normalized key embeddings into the queue for the given channel.
+
+        :param keys: (B, D) tensor of L2-normalized embeddings
+        :param channel_idx: which channel's queue to update
+        """
+        batch_size = keys.shape[0]
+        ptr = int(self.queue_ptr[channel_idx])
+        queue = getattr(self, f'queue_{channel_idx}')
+
+        # If batch_size exceeds remaining space, wrap around
+        if ptr + batch_size <= self.contrastive_queue_size:
+            queue[:, ptr:ptr + batch_size] = keys.T
+        else:
+            remaining = self.contrastive_queue_size - ptr
+            queue[:, ptr:] = keys[:remaining].T
+            queue[:, :batch_size - remaining] = keys[remaining:].T
+
+        self.queue_ptr[channel_idx] = (ptr + batch_size) % self.contrastive_queue_size
+
     def training_representation(self,
                                 data: Data,
                                 info: dict,
                                 batch_size: int
                                 ) -> float:
         """
-        This method implements the calculation of the SimCLR method for the explanation 
-        representation learning objective.
-        Given the input ``data`` representation, this method will return the corresponding loss value.
-        
-        The general idea behind SimCLR is to learn a semantic representation of the input elements in an 
-        unsupervised fashion by jointly maximizing the similarity between an element and it's positive 
-        samples (==semantically similar elements) and maximizing the similarity between an element and 
-        its negative sampels (==semantically dissimilar elements). The main challange with this approach 
-        being to obtain suitable positive and negative samples without supervised knowledge.
-        
-        In this specific case, the subject of the representatation learning will be each individual 
-        explanation channel's explanation. 
-        For the negative samples, we follow the common framework 
-        of simply declaring all other samples in a given batch as the negative samples, since the 
-        probability of them being semantically dissimiliar is higher than them being similar for a 
-        moderatbly high number of expected distinct explanations.
-        For the positive samples we apply a data augmentation where all non-explained nodes are 
-        masked during the model prediction, therefore promoting the model to find a semantic 
-        representation of the explained nodes only.
-        
+        Implements MoCo-style contrastive learning for explanation representation learning.
+
+        Uses a momentum-updated projection head and a queue of negative embeddings to decouple
+        the number of negatives from the batch size. This produces a proper metric space where
+        distance-based clustering of explanation embeddings is meaningful.
+
+        The augmentation strategy creates a single augmented view per sample by:
+        1. Adding strong noise to non-explained regions (preserving explanation structure)
+        2. Adding gentle noise to explained regions (learning invariance)
+        3. Randomly dropping edges in non-explained regions (structural augmentation)
+
         :returns: a single loss value in a torch.Tensor
         """
-        loss_cont = 0.0
-        
-        # info = self(data, stop_importance_grad=True)
-        
-        # ~ positive samples / data augmentation
-        # As a first step we need to construct the data augmentation to obtain the positive 
-        # samples for the constrastive term.
-        # The general idead for the data augementation is that we want to mask out all the 
-        # information that is not explained - so all the nodes that are NOT selected in 
-        # each channels explanation mask. So by maximizing the similarity between that 
-        # augemented versions embedding and the original embeddings, we promote the 
-        # formation of a representation that encodes exactly the information that is 
-        # contained within the explanation mask.
-        
-        # For this we need a way to determine which nodes are actually part of the explanation
-        # and which are not - in essence we want to binarize the explanation masks. 
-        # This is done by normalizing the importance values to a 0, 1 range and then applying 
-        # a threshold.
-        
-        # node_importance: (B * V, K)
-        node_importance = info['node_importance']
-        # node_importance_norm: (B * V, K)
-        #max_values = torch_scatter.scatter_max(node_importance, data.batch, dim=0)[0]
-        #node_importance_norm = node_importance / max_values[data.batch]
+        loss_cont = torch.tensor(0.0, device=data.x.device)
+
+        # ~ importance masks for augmentation
+        # Optionally detach importance masks so the contrastive loss doesn't interfere
+        # with explanation training (especially important early in training when explanations
+        # are still noisy).
         node_importance_norm = info['node_importance_norm']
         edge_importance_norm = info['edge_importance_norm']
-        
-        #print(node_importance.shape, data.batch.shape, data.batch)
-        # pooled_node_importance: (B, K)
-        #pooled_node_importance = self.lay_pool_importance(node_importance, data.batch)
-        # is_empty: (B, K)
-        # This tensor is a binary mask on the 
-        #is_empty = (pooled_node_importance < 0.1).float()
-        
-        # In the SimCLR framework we need 2 augmented views in total, so here we create the binarized 
-        # feature masks but with two slightly different thresholds to capture kind of a multi-level 
-        # information about the explanation
-        node_importance_bin_1 = (node_importance_norm > 0.7).float()
-        #node_importance_bin_2 = (node_importance_norm > 0.7).float()
-        
-        edge_importance_bin = (edge_importance_norm > 0.7).float()
-        
-        # node_importance_bin_1 = self.lay_mask_expansion(
-        #     mask=node_importance_bin_1,
-        #     edge_index=data.edge_index,
-        # )
-        
-        # node_importance_bin_2 = self.lay_mask_expansion(
-        #     mask=node_importance_bin_2,
-        #     edge_index=data.edge_index,
-        # )
-        
-        node_importance_1 = node_importance + torch_gauss(list(node_importance.size()), mean=0, std=self.contrastive_noise).to(self.device)
-        node_importance_1 = torch.clamp(node_importance_1, 0, 1)
-        node_importance_2 = node_importance + torch_gauss(list(node_importance.size()), mean=0, std=self.contrastive_noise).to(self.device)
-        node_importance_2 = torch.clamp(node_importance_2, 0, 1)
-        
-        # To now create the corresponding graph embedding vectors for the data augmentations we have
-        # to actually query the model again with those augementations as addditional arguments.
-        data_1 = data.clone()
-        data_1.x = data.x + (1 - torch.amax(node_importance_bin_1, dim=-1).unsqueeze(-1)) * torch_gauss(list(data.x.size()), mean=0, std=0.2).to(self.device)
-        data_1.edge_attr = data.edge_attr + (1 - torch.amax(edge_importance_bin, dim=-1).unsqueeze(-1)) * torch_gauss(list(data.edge_attr.size()), mean=0, std=0.2).to(self.device)
-        info_1 = self(
-            data_1, 
-            #node_importance_overwrite=node_importance_bin_1, 
-            #edge_importance_overwrite=edge_importance_bin,
-            #node_feature_mask=node_importance_bin_1,
-            stop_importance_grad=False,
+
+        if self.contrastive_detach_importance:
+            node_importance_norm = node_importance_norm.detach()
+            edge_importance_norm = edge_importance_norm.detach()
+
+        # ~ adaptive binarization threshold
+        # Instead of a fixed 0.7 threshold, use per-graph top-30% percentile of importance
+        # values, with a minimum of 0.5 to avoid including too much noise.
+        # percentile_values: (B, K)
+        percentile_values = scatter(
+            node_importance_norm, data.batch, dim=0, reduce='mean'
+        ) + 0.5 * scatter(
+            node_importance_norm, data.batch, dim=0, reduce='max'
         )
-        
-        data_2 = data.clone()
-        data_2.x = data.x + (1 - torch.amax(node_importance_bin_1, dim=-1).unsqueeze(-1)) * torch_gauss(list(data.x.size()), mean=0, std=0.2).to(self.device)
-        data_1.edge_attr = data.edge_attr + (1 - torch.amax(edge_importance_bin, dim=-1).unsqueeze(-1)) * torch_gauss(list(data.edge_attr.size()), mean=0, std=0.2).to(self.device)
-        info_2 = self(
-            data_2,
-            #node_importance_overwrite=node_importance_2,
-            #edge_importance_overwrite=edge_importance_bin,
-            #node_feature_mask=node_importance_bin_2,
-            stop_importance_grad=False,
-        )
-        
-        # The negative samples are realized as simply assuming that all other samples of a current batch 
-        # are the negative samples for each element. The easiest technical implementation is to calculate 
-        # a quadratic similarity matrix of all elements with all elements and then later reduce this.
-        # However, this matrix will also contain the diagonal entries of an elements similarity with itself
-        # we dont want to affect those entries which is why we construct this mask to ignore them.
-        # (0, 1, 1, ...)
-        # (1, 0, 1, ...)
-        mask = torch.ones((batch_size, 2 * batch_size), dtype=bool).to(self.device)
-        for i in range (batch_size):
-            mask[i, i] = 0
-            mask[i, i + batch_size] = 0
-        mask = torch.cat([mask, mask], dim=0)
-        
-        pos_weight = 1.0
-    
-        sim_pos_comb = 0.0
-        sim_neg_comb = 0.0
-        # Essentially we want each channel to develop it's own independent embedding space, so here we 
-        # iterate over all the channels and calculate the constrastive loss contribution for each channel.
+        # Use a blend of mean + 0.5*max as an adaptive threshold, clamped to [0.3, 0.8]
+        percentile_values = torch.clamp(percentile_values * 0.5, min=0.3, max=0.8)
+        # Expand back to per-node: (B*V, K)
+        node_thresholds = percentile_values[data.batch]
+
+        node_importance_bin = (node_importance_norm > node_thresholds).float()
+        edge_importance_bin = (edge_importance_norm > 0.5).float()
+
+        # ~ data augmentation (single augmented view)
+        # 1. Strong noise on non-explained regions, gentle noise on explained regions
+        node_mask = torch.amax(node_importance_bin, dim=-1).unsqueeze(-1)  # (B*V, 1)
+        edge_mask = torch.amax(edge_importance_bin, dim=-1).unsqueeze(-1)  # (B*E, 1)
+
+        # Noise for non-explained regions (strong)
+        node_noise_strong = torch_gauss(list(data.x.size()), mean=0, std=self.contrastive_noise).to(self.device)
+        edge_noise_strong = torch_gauss(list(data.edge_attr.size()), mean=0, std=self.contrastive_noise).to(self.device)
+        # Noise for explained regions (gentle, 1/4 of the strong noise)
+        node_noise_gentle = torch_gauss(list(data.x.size()), mean=0, std=self.contrastive_noise * 0.25).to(self.device)
+        edge_noise_gentle = torch_gauss(list(data.edge_attr.size()), mean=0, std=self.contrastive_noise * 0.25).to(self.device)
+
+        data_aug = data.clone()
+        # Blend: explained regions get gentle noise, non-explained get strong noise
+        data_aug.x = data.x + node_mask * node_noise_gentle + (1 - node_mask) * node_noise_strong
+        data_aug.edge_attr = data.edge_attr + edge_mask * edge_noise_gentle + (1 - edge_mask) * edge_noise_strong
+
+        # 2. Structural augmentation: randomly drop edges in non-explained regions
+        edge_drop_prob = 0.15
+        edge_keep_mask = (torch.rand(data.edge_index.size(1), device=self.device) > edge_drop_prob).float()
+        # Only drop non-explained edges; explained edges are always kept
+        edge_explained = torch.amax(edge_importance_bin, dim=-1)  # (B*E,)
+        edge_keep_mask = torch.max(edge_keep_mask, edge_explained)
+        # Zero out features of dropped edges instead of removing them (preserves graph structure/indexing)
+        data_aug.edge_attr = data_aug.edge_attr * edge_keep_mask.unsqueeze(-1)
+
+        # Forward pass on augmented data
+        info_aug = self(data_aug, stop_importance_grad=True)
+
+        # ~ MoCo contrastive loss per channel
+        # Update momentum encoder
+        self._momentum_update()
+
         for k in range(self.num_channels):
-            
-            # is_empty_k: (B, )
-            #is_empty_k = torch.cat([is_empty[:, k], is_empty[:, k]], dim=0)
-            
-            # NOTE: Looking at the similarity computations, one can see that these are realized as simple 
-            # vector multiplications between the embeddings. However, the graph embeddings are inherently 
-            # L2-normalized - in this special case the multiplication of two vectors is equal to their 
-            # cosine similarity!
-            
-            # graph_embedding_k = info['graph_embedding'][:, :, k]
-            # graph_embedding_1 = info_1['graph_embedding'][:, :, k]
-            # graph_embedding_2 = info_2['graph_embedding'][:, :, k]
-            
-            lay_proj = self.projection_layers[k]
-            graph_embedding_k = F.normalize(lay_proj(info['graph_embedding'][:, :, k]))
-            graph_embedding_1 = F.normalize(lay_proj(info_1['graph_embedding'][:, :, k]))
-            graph_embedding_2 = F.normalize(lay_proj(info_2['graph_embedding'][:, :, k]))
-            
-            # graph_embedding_all = (2 * B, D)
-            graph_embedding_all = torch.cat([graph_embedding_k, graph_embedding_k], dim=0)
-            
-            sim_neg = (graph_embedding_all.unsqueeze(0) * graph_embedding_all.unsqueeze(1)).sum(dim=-1)
-            sim_neg_comb += sim_neg.mean()
-            
-            sim_neg_exp = torch.exp(sim_neg / self.contrastive_temp)
-            # sim_neg_exp: (2 * B, 2 * B)
-            sim_neg_exp = sim_neg_exp.masked_select(mask).view(2 * batch_size, -1)
-            
-            # sim_pos_1: (B, )
-            sim_pos_1 = (graph_embedding_1 * graph_embedding_k).sum(dim=-1)
-            sim_pos_1_exp = torch.exp(pos_weight * sim_pos_1 / self.contrastive_temp)
-            # sim_pos_2: (B, )
-            sim_pos_2 = (graph_embedding_2 * graph_embedding_k).sum(dim=-1)
-            sim_pos_2_exp = torch.exp(pos_weight * sim_pos_2 / self.contrastive_temp)
-            sim_pos = (graph_embedding_1 * graph_embedding_2).sum(dim=-1)
-            sim_pos_exp = torch.exp(pos_weight * sim_pos / self.contrastive_temp)
-            # sim_pos_exp: (2 *B, 1)
-            sim_pos_exp = torch.cat([
-                torch.stack([sim_pos_exp, sim_pos_1_exp], dim=-1).sum(dim=-1),
-                torch.stack([sim_pos_exp, sim_pos_2_exp], dim=-1).sum(dim=-1),
-            ], dim=0)
-            sim_pos_comb = 0.5 * sim_pos_1.mean() + 0.5 * sim_pos_2.mean()
-            #sim_pos_exp[is_empty_k > 0.5] = 1.0
-            
-            # In this section the actual constrastive loss aka the InfoNCE loss is calculated. However, this is 
-            # not just the simple loss term that is used in SimCLR, but also uses an additional debiasing method 
-            # that was proposed in a different paper.
-            N = batch_size * 2 - 2
-            imp = (self.contrastive_beta * sim_neg_exp.log()).exp()
-            reweight_neg = (imp * sim_neg_exp).sum(dim=-1) / imp.mean(dim=-1)
-            #Neg = (-N*self.contrastive_tau*sim_pos_exp + sim_neg_exp.sum(dim=-1)) / (1-self.contrastive_tau)
-            Neg = (-N*self.contrastive_tau*sim_pos_exp + reweight_neg) / (1-self.contrastive_tau)
-            Neg = torch.clamp(Neg, min=N*np.e**(-1/self.contrastive_temp))
-            Neg = sim_neg_exp.sum(dim=-1)
-            
-            z_1 = F.normalize(graph_embedding_1, p=2, dim=-1)
-            z_2 = F.normalize(graph_embedding_2, p=2, dim=-1)
-            
-            c = torch.mm(z_2, z_1.t())
-            eye = torch.eye(c.size(0), device=self.device).float()
-            
-            l_pos = (1.0 - (c * eye)).pow(2).mean()
-            l_neg = torch.max(torch.zeros_like(eye, device=self.device), c * (1.0 - eye)).pow(2).mean()
-            
-            #loss_cont += (1 / self.num_channels) * torch.mean(-torch.log((sim_pos_exp) / (sim_pos_exp + Neg)))
-            #loss_cont += (1 / self.num_channels) * torch.mean(-torch.log((sim_pos_exp) / (Neg)))
-            loss_cont += (1 / self.num_channels) * (l_pos + 0.25 * l_neg)
-                     
-        self.log('sim_pos', sim_pos_comb.detach().cpu(), prog_bar=True, on_epoch=True, on_step=False, batch_size=batch_size)
-        self.log('sim_neg', sim_neg_comb.detach().cpu(), prog_bar=True, on_epoch=True, on_step=False, batch_size=batch_size)
-                     
+            # Query: online projection of original graph embedding
+            q = F.normalize(
+                self.projection_layers[k](info['graph_embedding'][:, :, k]),
+                dim=-1,
+            )
+
+            # Key: momentum projection of augmented graph embedding (no gradient)
+            with torch.no_grad():
+                # Apply momentum channel projection to augmented embeddings
+                aug_embedding_k = info_aug['graph_embedding'][:, :, k]
+                key = F.normalize(
+                    self.projection_layers_momentum[k](aug_embedding_k),
+                    dim=-1,
+                )
+
+            # Positive logits: (B, 1)
+            l_pos = (q * key).sum(dim=-1, keepdim=True)
+
+            # Negative logits from queue: (B, queue_size)
+            queue_k = getattr(self, f'queue_{k}')
+            l_neg = torch.mm(q, queue_k.clone().detach())
+
+            # InfoNCE loss
+            logits = torch.cat([l_pos, l_neg], dim=1) / self.contrastive_temp
+            labels = torch.zeros(logits.shape[0], dtype=torch.long, device=self.device)
+            loss_k = F.cross_entropy(logits, labels)
+
+            loss_cont = loss_cont + (1.0 / self.num_channels) * loss_k
+
+            # Enqueue current keys
+            self._dequeue_and_enqueue(key, channel_idx=k)
+
+        # Log mean positive similarity for monitoring
+        with torch.no_grad():
+            self.log('sim_pos', l_pos.mean().detach().cpu(),
+                     prog_bar=True, on_epoch=True, on_step=False, batch_size=batch_size)
+
         return loss_cont
     
     def training_fidelity(self,
