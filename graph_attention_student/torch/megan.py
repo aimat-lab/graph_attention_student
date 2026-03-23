@@ -1497,26 +1497,26 @@ class Megan(MveMixin, AbstractGraphModel):
             # values_pred: (B, K)
             #values_pred = torch.sigmoid(scaling * (pooled_importance - offset))
             
-            values_pred = torch.tanh(0.1 * pooled_importance)
+            values_pred = torch.tanh(pooled_importance)
             values_true = values_true * 0.9
             loss_expl += F.binary_cross_entropy(values_pred, values_true)
-            
+
             values_pred_ = info['edge_importance']
             values_true_ = values_true[data.batch[data.edge_index[0]]]
             #loss_expl = asym_binary_cross_entropy(values_pred, values_true)
             #loss_expl += F.binary_cross_entropy(values_pred_, values_true_)
-            
+
         elif self.importance_mode == 'classification':
-            
-            # The classification case is quite simple in that we want each channels pooled importances to predict 
-            # each possible class as a binary classification problem using a BCE loss instead of a multi-class 
+
+            # The classification case is quite simple in that we want each channels pooled importances to predict
+            # each possible class as a binary classification problem using a BCE loss instead of a multi-class
             # classification problem.
-            
+
             # values_true: (B, K)
             values_true = out_true
             # values_pred: (B, K)
             #values_pred = torch.sigmoid(scaling * (pooled_importance - offset))
-            values_pred = torch.tanh(0.1 * pooled_importance)
+            values_pred = torch.tanh(pooled_importance)
             values_true = values_true * 0.9
             
             loss_expl = F.binary_cross_entropy(values_pred, values_true)
@@ -1578,7 +1578,7 @@ class Megan(MveMixin, AbstractGraphModel):
                 pooled_importance = np.mean(edge_importance, axis=0)
 
             # prediction: (num_channels, )
-            pred = np.tanh(0.1 * pooled_importance)
+            pred = np.tanh(pooled_importance)
             out_pred.append(pred)
             
         # out_pred: (num_graphs, num_channels)
