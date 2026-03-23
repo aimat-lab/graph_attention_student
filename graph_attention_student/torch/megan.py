@@ -1483,20 +1483,38 @@ class Megan(MveMixin, AbstractGraphModel):
             # So here we construct the "true" labels simply as a binary decision problem of samples being either 
             # "positive" or "negative".
             
-            regression_median = torch.quantile(out_true, 0.5)
+            if self.regression_margin > 0:
+                # With margin: exclude ambiguous samples near the median from the loss
+                regression_lo = torch.quantile(out_true, 0.5 - self.regression_margin)
+                regression_hi = torch.quantile(out_true, 0.5 + self.regression_margin)
 
-            values_true = torch.cat([
-                out_true <= regression_median,
-                out_true > regression_median,
-            ],
-            axis=1).float()
-            
-            # values_pred: (B, K)
-            #values_pred = torch.sigmoid(scaling * (pooled_importance - offset))
-            
+                values_true = torch.cat([
+                    out_true <= regression_lo,
+                    out_true > regression_hi,
+                ], axis=1).float()
+
+                # Mask: only samples clearly in one class contribute to the loss
+                sample_mask = ((out_true <= regression_lo) | (out_true > regression_hi)).any(dim=1)
+            else:
+                # No margin: clean partition at the median
+                regression_median = torch.quantile(out_true, 0.5)
+
+                values_true = torch.cat([
+                    out_true <= regression_median,
+                    out_true > regression_median,
+                ], axis=1).float()
+
+                sample_mask = None
+
             values_pred = torch.tanh(pooled_importance)
             values_true = values_true * 0.9
-            loss_expl += F.binary_cross_entropy(values_pred, values_true)
+
+            if sample_mask is not None and sample_mask.any():
+                loss_expl += F.binary_cross_entropy(
+                    values_pred[sample_mask], values_true[sample_mask]
+                )
+            else:
+                loss_expl += F.binary_cross_entropy(values_pred, values_true)
 
             values_pred_ = info['edge_importance']
             values_true_ = values_true[data.batch[data.edge_index[0]]]
