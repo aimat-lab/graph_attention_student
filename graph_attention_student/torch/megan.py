@@ -264,8 +264,12 @@ class Megan(MveMixin, AbstractGraphModel):
                  bn_momentum: float = 0.1,
                  ):
         pl.LightningModule.__init__(self)
-        
-        # The last integer value in the list of final_units determines the output dimension of the network aka how 
+
+        # Container for batch-level metrics, read by training metrics callbacks.
+        # Populated at the end of each training_step, overwritten each batch.
+        self.batch_metrics: Dict[str, torch.Tensor] = {}
+
+        # The last integer value in the list of final_units determines the output dimension of the network aka how
         # many graph properties the network will predict at the same time.
         self.out_dim = final_units[-1]
         self.importance_factor = importance_factor
@@ -1052,9 +1056,19 @@ class Megan(MveMixin, AbstractGraphModel):
             # fidelity loss to encourage positive fidelity values
             + self.fidelity_factor * loss_fid
         )
-                    
+
+        # Populate batch_metrics for external callbacks (detach + cpu to avoid GPU memory leaks)
+        self.batch_metrics = {
+            'loss': loss.detach().cpu(),
+            'loss_pred': loss_pred.detach().cpu(),
+            'loss_expl': loss_expl.detach().cpu(),
+            'loss_spar': loss_spar.detach().cpu(),
+            'loss_cont': loss_cont.detach().cpu(),
+            'loss_fid': loss_fid.detach().cpu(),
+        }
+
         return loss
-    
+
     def to(self, device, *args, **kwargs):
         """
         Custom implementation to push the model to a specific ``device``.
@@ -1267,10 +1281,12 @@ class Megan(MveMixin, AbstractGraphModel):
             # Enqueue current keys
             self._dequeue_and_enqueue(key, channel_idx=k)
 
-        # Log mean positive similarity for monitoring
+        # Log mean positive and negative similarity for monitoring
         with torch.no_grad():
             self.log('sim_pos', l_pos.mean().detach().cpu(),
                      prog_bar=True, on_epoch=True, on_step=False, batch_size=batch_size)
+            self.log('sim_neg', l_neg.mean().detach().cpu(),
+                     prog_bar=False, on_epoch=True, on_step=False, batch_size=batch_size)
 
         return loss_cont
     

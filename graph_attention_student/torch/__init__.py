@@ -3,3 +3,4 @@ from graph_attention_student.torch.data import SmilesDataset
 from graph_attention_student.torch.data import data_from_graph
 from graph_attention_student.torch.data import data_list_from_graphs
 from graph_attention_student.torch.callbacks import ImportanceFactorWarmup
+from graph_attention_student.torch.callbacks import MeganTrainingMetricsCallback

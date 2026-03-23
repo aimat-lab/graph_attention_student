@@ -50,7 +50,9 @@ from graph_attention_student.torch.model import AbstractGraphModel
 from graph_attention_student.torch.megan import Megan
 from graph_attention_student.torch.megan import MveCallback
 from graph_attention_student.torch.utils import SwaCallback
+from graph_attention_student.torch.utils import ContrastiveSchedulerCallback
 from graph_attention_student.torch.callbacks import ImportanceFactorWarmup
+from graph_attention_student.torch.callbacks import MeganTrainingMetricsCallback
 from sklearn.metrics import accuracy_score, f1_score, confusion_matrix
 import seaborn as sns
 
@@ -209,6 +211,11 @@ CONTRASTIVE_MOMENTUM: float = 0.999
 #       graph during contrastive training. This prevents the contrastive loss from interfering with
 #       explanation training, especially early in training when explanations are noisy.
 CONTRASTIVE_DETACH_IMPORTANCE: bool = True
+# :param CONTRASTIVE_WARMUP_EPOCHS:
+#       Number of epochs over which to linearly ramp up the contrastive factor from near zero
+#       to the target CONTRASTIVE_FACTOR value. This prevents the contrastive loss from destabilizing
+#       early training when explanations are still noisy. Set to 0 to disable warmup.
+CONTRASTIVE_WARMUP_EPOCHS: int = 25
 # :param PREDICTION_FACTOR:
 #       This is a float value that determines the factor by which the main prediction loss is being scaled 
 #       durign the model training. Changing this from 1.0 should usually not be necessary except for regression
@@ -571,11 +578,18 @@ def train_model(e: Experiment,
     logger = CSVLogger(e.path, name='logs')
     
     callbacks = [
-        # This will record the embeddings of the test set after each epoch and then track them into the 
-        # experiment storage so that the evolution of the embeddings can be animated at the end of the 
+        # This will record the embeddings of the test set after each epoch and then track them into the
+        # experiment storage so that the evolution of the embeddings can be animated at the end of the
         # experiment.
         RecordEmbeddingsCallback(),
         TrainingCallback(),
+        MeganTrainingMetricsCallback(
+            experiment=e,
+            val_graphs=graphs_val,
+            dataset_type=e.DATASET_TYPE,
+            num_channels=e.NUM_CHANNELS,
+            channel_infos=e.CHANNEL_INFOS,
+        ),
     ]
     
     # The SwaCallback fully implements the stochastic weight averaging by itself without any modification
@@ -591,6 +605,12 @@ def train_model(e: Experiment,
         callbacks.append(ImportanceFactorWarmup(
             start_value=1e-6,
             warmup_epochs=e.IMPORTANCE_FACTOR_WARMUP_EPOCHS,
+        ))
+
+    if e.CONTRASTIVE_FACTOR > 0 and e.CONTRASTIVE_WARMUP_EPOCHS > 0:
+        callbacks.append(ContrastiveSchedulerCallback(
+            target_factor=e.CONTRASTIVE_FACTOR,
+            warmup_epochs=e.CONTRASTIVE_WARMUP_EPOCHS,
         ))
 
     if e.TRAIN_MVE:
