@@ -1596,15 +1596,12 @@ class Megan(MveMixin, AbstractGraphModel):
             # So here we construct the "true" labels simply as a binary decision problem of samples being either 
             # "positive" or "negative".
             
-            regression_lo = np.quantile(out_true, 0.5)
-            regression_hi = np.quantile(out_true, 0.5)
-            
+            regression_median = np.quantile(out_true, 0.5)
+
             out_true = np.concatenate([
-                # (out_true < (regression_reference - self.regression_margin)), 
-                # (out_true > (regression_reference + self.regression_margin)),
-                out_true < regression_lo,
-                out_true > regression_hi,
-            ], 
+                out_true <= regression_median,
+                out_true > regression_median,
+            ],
             axis=1)
             
         return out_true, out_pred
