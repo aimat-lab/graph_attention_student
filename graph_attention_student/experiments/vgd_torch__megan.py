@@ -308,6 +308,7 @@ def train_model(e: Experiment,
     megan model is also trained to generate a set of explanations about that task at the same time by using the 
     approximative explanation co-training procedure.
     """
+    e.log_parameters()
     e.log('preparing data for training...')
     graphs_train = [index_data_map[i]['metadata']['graph'] for i in train_indices]
     graphs_test = [index_data_map[i]['metadata']['graph'] for i in test_indices]
