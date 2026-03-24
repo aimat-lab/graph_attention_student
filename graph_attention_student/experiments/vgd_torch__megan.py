@@ -14,6 +14,7 @@ space of the all the trained models and will create PDF files that will visualiz
 elements in the dataset that are the closest to the cluster centroids.
 """
 import os
+import shutil
 import tempfile
 import typing as t
 from typing import List, Optional
@@ -309,6 +310,18 @@ def train_model(e: Experiment,
     approximative explanation co-training procedure.
     """
     e.log_parameters()
+
+    # Copy the dataset's process.py into the experiment archive so the processing
+    # module is preserved alongside the trained model.
+    dataset_path = e['dataset_path']
+    process_src = os.path.join(dataset_path, 'process.py')
+    if os.path.exists(process_src):
+        process_dst = os.path.join(e.path, 'process.py')
+        shutil.copy2(process_src, process_dst)
+        e.log(f'copied process.py from {process_src}')
+    else:
+        e.log(f'warning: no process.py found in {dataset_path}')
+
     e.log('preparing data for training...')
     graphs_train = [index_data_map[i]['metadata']['graph'] for i in train_indices]
     graphs_test = [index_data_map[i]['metadata']['graph'] for i in test_indices]
