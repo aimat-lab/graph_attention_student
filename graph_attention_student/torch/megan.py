@@ -1438,8 +1438,8 @@ class Megan(MveMixin, AbstractGraphModel):
             node_transformed = self.importance_offset * torch.ones_like(node_transformed, device=self.device)
             node_transformed = node_transformed * node_importance
 
-            pooled_importance = self.lay_pool_mean(node_transformed, data.batch)
-        
+            pooled_importance = self.lay_pool_importance(node_transformed, data.batch)
+
         elif self.importance_target == 'edge':
         
             # -- edge-level explanation approximation --
@@ -1465,7 +1465,7 @@ class Megan(MveMixin, AbstractGraphModel):
             edge_transformed = torch.ones_like(edge_transformed, device=self.device) * self.importance_offset
             edge_transformed = edge_transformed * edge_importance
 
-            pooled_importance = self.lay_pool_mean(edge_transformed, data.batch[data.edge_index[0]])
+            pooled_importance = self.lay_pool_importance(edge_transformed, data.batch[data.edge_index[0]])
         
         # ~ constructing the approximation
         
@@ -1506,7 +1506,7 @@ class Megan(MveMixin, AbstractGraphModel):
 
                 sample_mask = None
 
-            values_pred = torch.tanh(pooled_importance)
+            values_pred = torch.tanh(0.1 * pooled_importance)
             values_true = values_true * 0.9
 
             if sample_mask is not None and sample_mask.any():
@@ -1531,9 +1531,9 @@ class Megan(MveMixin, AbstractGraphModel):
             values_true = out_true
             # values_pred: (B, K)
             #values_pred = torch.sigmoid(scaling * (pooled_importance - offset))
-            values_pred = torch.tanh(pooled_importance)
+            values_pred = torch.tanh(0.1 * pooled_importance)
             values_true = values_true * 0.9
-            
+
             loss_expl = F.binary_cross_entropy(values_pred, values_true)
                         
         return loss_expl
@@ -1576,7 +1576,7 @@ class Megan(MveMixin, AbstractGraphModel):
                 node_importance *= self.importance_offset
                 
                 # pooled_importances: (num_channels, )
-                pooled_importance = np.mean(node_importance, axis=0)
+                pooled_importance = np.sum(node_importance, axis=0)
 
             elif self.importance_target == 'edge':
 
@@ -1590,10 +1590,10 @@ class Megan(MveMixin, AbstractGraphModel):
                 edge_importance *= self.importance_offset
 
                 # pooled_importances: (num_channels, )
-                pooled_importance = np.mean(edge_importance, axis=0)
+                pooled_importance = np.sum(edge_importance, axis=0)
 
             # prediction: (num_channels, )
-            pred = np.tanh(pooled_importance)
+            pred = np.tanh(0.1 * pooled_importance)
             out_pred.append(pred)
             
         # out_pred: (num_graphs, num_channels)
