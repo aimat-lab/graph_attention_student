@@ -13,7 +13,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pytorch_lightning as pl
 from lightning.pytorch.callbacks import Callback
-from sklearn.metrics import r2_score, mean_absolute_error
+from sklearn.metrics import r2_score, mean_absolute_error, roc_auc_score
 
 try:
     from sklearn.metrics import accuracy_score, f1_score
@@ -223,6 +223,8 @@ class MeganTrainingMetricsCallback(Callback):
         self.secondary_metric: List[float] = [] # MAE or F1
         self.approx_values: List[float] = []
         self.per_channel_approx: List[list] = []
+        self.approx_auc: List[float] = []
+        self.per_channel_auc: List[list] = []
 
         # Explanation quality
         self.importance_sparsity: List[np.ndarray] = []
@@ -505,15 +507,39 @@ class MeganTrainingMetricsCallback(Callback):
         approx_true, approx_pred = model._predict_approximate(
             results=results, values_true=values_true
         )
-        self.approx_values.append(float(np.mean(approx_true == np.round(approx_pred))))
 
-        # Per-channel approx
-        per_ch = []
+        # Per-channel AUC (threshold-free separability) and optimal accuracy
+        per_ch_auc = []
+        per_ch_acc = []
         for k in range(self.num_channels):
             if k < approx_true.shape[1]:
-                acc_k = float(np.mean(approx_true[:, k] == np.round(approx_pred[:, k])))
-                per_ch.append(acc_k)
-        self.per_channel_approx.append(per_ch)
+                yt_k = approx_true[:, k].astype(float)
+                yp_k = approx_pred[:, k]
+
+                # AUC — measures separability across all thresholds
+                try:
+                    if len(np.unique(yt_k)) > 1:
+                        auc_k = float(roc_auc_score(yt_k, yp_k))
+                    else:
+                        auc_k = 0.5
+                except ValueError:
+                    auc_k = 0.5
+                per_ch_auc.append(auc_k)
+
+                # Optimal accuracy — best threshold for this channel
+                thresholds = np.unique(yp_k)
+                best_acc = 0.5
+                for t in thresholds:
+                    acc = float(np.mean(yt_k == (yp_k > t).astype(float)))
+                    best_acc = max(best_acc, acc)
+                per_ch_acc.append(best_acc)
+
+        self.per_channel_auc.append(per_ch_auc)
+        self.per_channel_approx.append(per_ch_acc)
+
+        # Aggregate metrics (mean across channels)
+        self.approx_auc.append(float(np.mean(per_ch_auc)) if per_ch_auc else 0.5)
+        self.approx_values.append(float(np.mean(per_ch_acc)) if per_ch_acc else 0.5)
 
         # -- Importance statistics --
         node_imps_per_channel = [[] for _ in range(self.num_channels)]
@@ -594,9 +620,9 @@ class MeganTrainingMetricsCallback(Callback):
         label2 = 'MAE' if self.dataset_type == 'regression' else 'F1 (macro)'
         self._plot_loss_line(axes[2, 0], epochs, self.primary_metric, label1, '#2196F3')
         self._plot_loss_line(axes[2, 1], epochs, self.secondary_metric, label2, '#FF9800')
-        self._plot_loss_line(axes[2, 2], epochs, self.approx_values,
-                             'Explanation Approx Acc', '#4CAF50')
-        self._plot_per_channel_approx(axes[2, 3], epochs)
+        self._plot_loss_line(axes[2, 2], epochs, self.approx_auc,
+                             'Explanation AUC', '#4CAF50')
+        self._plot_per_channel_auc(axes[2, 3], epochs)
         self._plot_latest_fit(axes[2, 4])
 
         # Row 4: Explanation quality
@@ -699,20 +725,32 @@ class MeganTrainingMetricsCallback(Callback):
         ax.legend(fontsize=7)
         ax.grid(True, alpha=0.3)
 
-    def _plot_per_channel_approx(self, ax, epochs):
-        ax.set_title('Per-Channel Approx Acc', fontsize=9)
-        if not self.per_channel_approx:
+    def _plot_per_channel_auc(self, ax, epochs):
+        ax.set_title('Per-Channel Explanation AUC / Opt. Acc', fontsize=9)
+        if not self.per_channel_auc:
             ax.text(0.5, 0.5, 'No data', ha='center', va='center', transform=ax.transAxes)
             return
-        n = min(len(epochs), len(self.per_channel_approx))
+        n = min(len(epochs), len(self.per_channel_auc))
         for k in range(self.num_channels):
-            vals = [self.per_channel_approx[i][k]
-                    for i in range(n) if k < len(self.per_channel_approx[i])]
             color = self.channel_infos.get(k, {}).get('color', f'C{k}')
             name = self.channel_infos.get(k, {}).get('name', f'ch{k}')
-            if vals:
-                ax.plot(epochs[:len(vals)], vals, color=color, linewidth=2, label=name)
-        ax.legend(fontsize=7)
+            # AUC — solid lines
+            auc_vals = [self.per_channel_auc[i][k]
+                        for i in range(n) if k < len(self.per_channel_auc[i])]
+            if auc_vals:
+                ax.plot(epochs[:len(auc_vals)], auc_vals, color=color,
+                        linewidth=2, label=f'{name} AUC')
+            # Optimal accuracy — dashed lines, low opacity
+            if self.per_channel_approx:
+                m = min(len(epochs), len(self.per_channel_approx))
+                acc_vals = [self.per_channel_approx[i][k]
+                            for i in range(m) if k < len(self.per_channel_approx[i])]
+                if acc_vals:
+                    ax.plot(epochs[:len(acc_vals)], acc_vals, color=color,
+                            linewidth=1.5, linestyle='--', alpha=0.4, label=f'{name} opt acc')
+        ax.axhline(y=0.5, color='grey', linestyle='--', alpha=0.5)
+        ax.set_ylim(0.4, 1.05)
+        ax.legend(fontsize=6, loc='lower right')
         ax.grid(True, alpha=0.3)
 
     def _plot_latest_fit(self, ax):
