@@ -1484,9 +1484,11 @@ class Megan(MveMixin, AbstractGraphModel):
             # "positive" or "negative".
             
             if self.regression_margin > 0:
-                # With margin: exclude ambiguous samples near the median from the loss
-                regression_lo = torch.quantile(out_true, 0.5 - self.regression_margin)
-                regression_hi = torch.quantile(out_true, 0.5 + self.regression_margin)
+                # With margin: exclude ambiguous samples near the mean from the loss
+                regression_mean = out_true.mean()
+                regression_std = out_true.std()
+                regression_lo = regression_mean - self.regression_margin * regression_std
+                regression_hi = regression_mean + self.regression_margin * regression_std
 
                 values_true = torch.cat([
                     out_true <= regression_lo,
@@ -1496,12 +1498,12 @@ class Megan(MveMixin, AbstractGraphModel):
                 # Mask: only samples clearly in one class contribute to the loss
                 sample_mask = ((out_true <= regression_lo) | (out_true > regression_hi)).any(dim=1)
             else:
-                # No margin: clean partition at the median
-                regression_median = torch.quantile(out_true, 0.5)
+                # No margin: clean partition at the mean
+                regression_mean = out_true.mean()
 
                 values_true = torch.cat([
-                    out_true <= regression_median,
-                    out_true > regression_median,
+                    out_true <= regression_mean,
+                    out_true > regression_mean,
                 ], axis=1).float()
 
                 sample_mask = None
@@ -1611,11 +1613,11 @@ class Megan(MveMixin, AbstractGraphModel):
             # So here we construct the "true" labels simply as a binary decision problem of samples being either 
             # "positive" or "negative".
             
-            regression_median = np.quantile(out_true, 0.5)
+            regression_mean = np.mean(out_true)
 
             out_true = np.concatenate([
-                out_true <= regression_median,
-                out_true > regression_median,
+                out_true <= regression_mean,
+                out_true > regression_mean,
             ],
             axis=1)
             

@@ -86,13 +86,13 @@ SPARSITY_FACTOR: float = 0.1
 #       This parameter controls the sparsity of the explanation masks. It acts as a multiplier on
 #       the importance values before pooling. Higher values result in more sparse explanations
 #       (fewer nodes/edges highlighted), lower values result in denser explanations.
-IMPORTANCE_OFFSET: float = 1.5
+IMPORTANCE_OFFSET: float = 2.5
 # :param FIDELITY_FACTOR:
 #       This parameter controls the coefficient of the explanation fidelity loss during training.
 FIDELITY_FACTOR: float = 0.1
 # :param NORMALIZE_EMBEDDING:
 #       This boolean value determines whether the graph embeddings are normalized to a unit length or not.
-NORMALIZE_EMBEDDING: bool = False
+NORMALIZE_EMBEDDING: bool = True
 # :param ATTENTION_AGGREGATION:
 #       This string literal determines the strategy which is used to aggregate the edge attention logits.
 ATTENTION_AGGREGATION: str = 'max'
@@ -140,7 +140,7 @@ TRAIN_MVE: bool = False
 MVE_WARMUP_EPOCHS: int = 50
 
 EPOCHS: int = 150
-BATCH_SIZE: int = 128
+BATCH_SIZE: int = 32
 LEARNING_RATE = 1e-5
 
 __DEBUG__ = True
