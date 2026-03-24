@@ -2,8 +2,9 @@
 This experiment extends vgd_torch__megan for the training of a self-explaining MEGAN model on a
 visual graph dataset.
 
-This experiment specifically implements the synth_easy dataset which is a synthetic dataset for
-regression tasks.
+This experiment specifically implements the synth2 dataset which is a synthetic dataset for
+regression tasks. It uses the MoCo-style queue-based contrastive learning for explanation
+representation learning.
 """
 import typing as t
 
@@ -19,7 +20,7 @@ from pycomex.utils import file_namespace, folder_path
 #       contains all the elements of a visual graph dataset. Alternatively this string can be
 #       a valid unique identifier of a visual graph dataset which can be downloaded from the main
 #       remote file share location.
-VISUAL_GRAPH_DATASET: str = 'synth_easy'
+VISUAL_GRAPH_DATASET: str = 'synth2'
 # :param DATASET_TYPE:
 #       This string has to determine the type of the dataset in regards to the target values.
 #       This can either be "regression" or "classification". This choice influences how the model
@@ -80,18 +81,18 @@ IMPORTANCE_FACTOR_WARMUP_EPOCHS: int = 25
 # :param SPARSITY_FACTOR:
 #       Coefficient for the explanation sparsity loss (Hoyer-Square regularization).
 #       Higher values promote sparser explanation masks.
-SPARSITY_FACTOR: float = 0.5
+SPARSITY_FACTOR: float = 0.1
 # :param IMPORTANCE_OFFSET:
 #       This parameter controls the sparsity of the explanation masks. It acts as a multiplier on
 #       the importance values before pooling. Higher values result in more sparse explanations
 #       (fewer nodes/edges highlighted), lower values result in denser explanations.
-IMPORTANCE_OFFSET: float = 2.0
+IMPORTANCE_OFFSET: float = 2.5
 # :param FIDELITY_FACTOR:
 #       This parameter controls the coefficient of the explanation fidelity loss during training.
 FIDELITY_FACTOR: float = 0.1
 # :param NORMALIZE_EMBEDDING:
 #       This boolean value determines whether the graph embeddings are normalized to a unit length or not.
-NORMALIZE_EMBEDDING: bool = False
+NORMALIZE_EMBEDDING: bool = True
 # :param ATTENTION_AGGREGATION:
 #       This string literal determines the strategy which is used to aggregate the edge attention logits.
 ATTENTION_AGGREGATION: str = 'max'
@@ -99,21 +100,37 @@ ATTENTION_AGGREGATION: str = 'max'
 #       When converting the regression problem into the negative/positive classification problem for the
 #       explanation co-training, this determines the margin for the thresholding.
 REGRESSION_MARGIN: t.Optional[float] = +0.0
+
+# ~ MoCo contrastive learning parameters
 # :param CONTRASTIVE_FACTOR:
-#       This is the factor of the contrastive representation learning loss of the network.
+#       This is the factor of the MoCo contrastive representation learning loss.
 CONTRASTIVE_FACTOR: float = 1.0
 # :param CONTRASTIVE_NOISE:
-#       This float value determines the noise level that is applied when generating the positive augmentations.
-CONTRASTIVE_NOISE: float = 0.1
-# :param CONTRASTIVE_TAU:
-#       This float value is a hyperparameter of the de-biasing improvement of the contrastive learning loss.
-CONTRASTIVE_TAU: float = 0.1
+#       Noise level for augmentations. Non-explained regions receive this value;
+#       explained regions receive 1/4 of this value.
+CONTRASTIVE_NOISE: float = 0.2
 # :param CONTRASTIVE_TEMP:
-#       This float value is a hyperparameter that controls the "temperature" of the contrastive learning loss.
-CONTRASTIVE_TEMP: float = 1.0
+#       Temperature for InfoNCE loss. Standard MoCo values are 0.07-0.2.
+CONTRASTIVE_TEMP: float = 0.1
 # :param CONTRASTIVE_BETA:
-#       This is the concentration parameter for hard negative mining.
+#       DEPRECATED. Kept for backward compatibility.
 CONTRASTIVE_BETA: float = 1.0
+# :param CONTRASTIVE_TAU:
+#       DEPRECATED. Kept for backward compatibility.
+CONTRASTIVE_TAU: float = 0.1
+# :param CONTRASTIVE_QUEUE_SIZE:
+#       Size of the MoCo negative queue per explanation channel.
+CONTRASTIVE_QUEUE_SIZE: int = 4096
+# :param CONTRASTIVE_MOMENTUM:
+#       Momentum coefficient for EMA update of momentum projection layers.
+CONTRASTIVE_MOMENTUM: float = 0.999
+# :param CONTRASTIVE_DETACH_IMPORTANCE:
+#       Whether to detach importance masks from contrastive gradients.
+CONTRASTIVE_DETACH_IMPORTANCE: bool = True
+# :param CONTRASTIVE_WARMUP_EPOCHS:
+#       Number of epochs to linearly ramp up the contrastive factor from near zero to the target value.
+CONTRASTIVE_WARMUP_EPOCHS: int = 25
+
 # :param TRAIN_MVE:
 #       This boolean determines whether or not the model should be trained as a mean variance estimator.
 TRAIN_MVE: bool = False
@@ -123,7 +140,7 @@ TRAIN_MVE: bool = False
 MVE_WARMUP_EPOCHS: int = 50
 
 EPOCHS: int = 150
-BATCH_SIZE: int = 128
+BATCH_SIZE: int = 32
 LEARNING_RATE = 1e-5
 
 __DEBUG__ = True

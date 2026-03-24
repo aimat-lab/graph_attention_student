@@ -14,6 +14,7 @@ space of the all the trained models and will create PDF files that will visualiz
 elements in the dataset that are the closest to the cluster centroids.
 """
 import os
+import shutil
 import tempfile
 import typing as t
 from typing import List, Optional
@@ -50,7 +51,10 @@ from graph_attention_student.torch.model import AbstractGraphModel
 from graph_attention_student.torch.megan import Megan
 from graph_attention_student.torch.megan import MveCallback
 from graph_attention_student.torch.utils import SwaCallback
+from graph_attention_student.torch.utils import ContrastiveSchedulerCallback
+from graph_attention_student.torch.callbacks import GracefulStopCallback
 from graph_attention_student.torch.callbacks import ImportanceFactorWarmup
+from graph_attention_student.torch.callbacks import MeganTrainingMetricsCallback
 from sklearn.metrics import accuracy_score, f1_score, confusion_matrix
 import seaborn as sns
 
@@ -138,10 +142,9 @@ IMPORTANCE_FACTOR_WARMUP_EPOCHS: Optional[int] = None
 #       hand. This is a parameter with which one has to experiment until a good trade-off is found!
 IMPORTANCE_OFFSET: float = 0.8
 # :param SPARSITY_FACTOR:
-#       DEPRECATED
 #       This is the coefficient that is used to scale the explanation sparsity loss during training.
 #       The higher this value the more explanation sparsity (less and more discrete explanation masks)
-#       is promoted.
+#       is promoted. Uses Hoyer-Square regularization on the importance masks.
 SPARSITY_FACTOR: float = 1.0
 # :param FIDELITY_FACTOR:
 #       This parameter controls the coefficient of the explanation fidelity loss during training. The higher
@@ -175,29 +178,45 @@ NORMALIZE_EMBEDDING: bool = False
 #       following values: 'sum', 'max', 'min'.
 ATTENTION_AGGREGATION: str = 'max'
 # :param CONTRASTIVE_FACTOR:
-#       This is the factor of the contrastive representation learning loss of the network. If this value is 0 
-#       the contrastive repr. learning is completely disabled (increases computational efficiency). The higher 
+#       This is the factor of the contrastive representation learning loss of the network. If this value is 0
+#       the contrastive repr. learning is completely disabled (increases computational efficiency). The higher
 #       this value the more the contrastive learning will influence the network during training.
 CONTRASTIVE_FACTOR: float = 0.0
 # :param CONTRASTIVE_NOISE:
-#       This float value determines the noise level that is applied when generating the positive augmentations 
-#       during the contrastive learning process.
-CONTRASTIVE_NOISE: float = 0.0
+#       This float value determines the noise level that is applied when generating the positive augmentations
+#       during the contrastive learning process. For the MoCo implementation, this controls the strong noise
+#       applied to non-explained regions (explained regions receive 1/4 of this value).
+CONTRASTIVE_NOISE: float = 0.2
 # :param CONTRASTIVE_TEMP:
-#       This float value is a hyperparameter that controls the "temperature" of the contrastive learning loss.
-#       The higher this value, the more the contrastive learning will be smoothed out. The lower this value,
-#       the more the contrastive learning will be focused on the most similar pairs of embeddings.
-CONTRASTIVE_TEMP: float = 1.0
+#       This float value is a hyperparameter that controls the "temperature" of the InfoNCE contrastive loss.
+#       Standard MoCo values are 0.07-0.2. Lower values produce sharper similarity distributions and
+#       tighter clusters but can be less stable.
+CONTRASTIVE_TEMP: float = 0.1
 # :param CONTRASTIVE_BETA:
-#       This is the float value from the paper about the hard negative mining called the concentration 
-#       parameter. It determines how much the contrastive loss is focused on the hardest negative samples.
+#       DEPRECATED. Kept for checkpoint backward compatibility. No longer used in MoCo implementation.
 CONTRASTIVE_BETA: float = 0.1
 # :param CONTRASTIVE_TAU:
-#       This float value is a hyperparameters of the de-biasing improvement of the contrastive learning loss. 
-#       This value should be chosen as roughly the inverse of the number of expected concepts. So as an example 
-#       if it is expected that each explanation consists of roughly 10 distinct concepts, this should be chosen 
-#       as 1/10 = 0.1
+#       DEPRECATED. Kept for checkpoint backward compatibility. No longer used in MoCo implementation.
 CONTRASTIVE_TAU: float = 0.1
+# :param CONTRASTIVE_QUEUE_SIZE:
+#       The size of the MoCo negative queue per explanation channel. Larger queues provide more diverse
+#       negatives for contrastive learning, decoupling the number of negatives from the batch size.
+#       Typical values: 2048-16384.
+CONTRASTIVE_QUEUE_SIZE: int = 4096
+# :param CONTRASTIVE_MOMENTUM:
+#       The momentum coefficient for the exponential moving average update of the momentum projection
+#       layers. Values close to 1.0 (e.g. 0.999) provide slow, stable updates.
+CONTRASTIVE_MOMENTUM: float = 0.999
+# :param CONTRASTIVE_DETACH_IMPORTANCE:
+#       If True, the importance masks used for augmentation masking are detached from the computation
+#       graph during contrastive training. This prevents the contrastive loss from interfering with
+#       explanation training, especially early in training when explanations are noisy.
+CONTRASTIVE_DETACH_IMPORTANCE: bool = True
+# :param CONTRASTIVE_WARMUP_EPOCHS:
+#       Number of epochs over which to linearly ramp up the contrastive factor from near zero
+#       to the target CONTRASTIVE_FACTOR value. This prevents the contrastive loss from destabilizing
+#       early training when explanations are still noisy. Set to 0 to disable warmup.
+CONTRASTIVE_WARMUP_EPOCHS: int = 25
 # :param PREDICTION_FACTOR:
 #       This is a float value that determines the factor by which the main prediction loss is being scaled 
 #       durign the model training. Changing this from 1.0 should usually not be necessary except for regression
@@ -290,6 +309,19 @@ def train_model(e: Experiment,
     megan model is also trained to generate a set of explanations about that task at the same time by using the 
     approximative explanation co-training procedure.
     """
+    e.log_parameters()
+
+    # Copy the dataset's process.py into the experiment archive so the processing
+    # module is preserved alongside the trained model.
+    dataset_path = e['dataset_path']
+    process_src = os.path.join(dataset_path, 'process.py')
+    if os.path.exists(process_src):
+        process_dst = os.path.join(e.path, 'process.py')
+        shutil.copy2(process_src, process_dst)
+        e.log(f'copied process.py from {process_src}')
+    else:
+        e.log(f'warning: no process.py found in {dataset_path}')
+
     e.log('preparing data for training...')
     graphs_train = [index_data_map[i]['metadata']['graph'] for i in train_indices]
     graphs_test = [index_data_map[i]['metadata']['graph'] for i in test_indices]
@@ -308,7 +340,7 @@ def train_model(e: Experiment,
         #persisetent_workers=False,
     )
      
-    example_indices = test_indices[:8]
+    example_indices = test_indices[:16]
     example_graphs = [index_data_map[i]['metadata']['graph'] for i in example_indices]
      
     class TrainingCallback(pl.Callback):
@@ -549,6 +581,9 @@ def train_model(e: Experiment,
         contrastive_noise=e.CONTRASTIVE_NOISE,
         contrastive_beta=e.CONTRASTIVE_BETA,
         contrastive_tau=e.CONTRASTIVE_TAU,
+        contrastive_queue_size=e.CONTRASTIVE_QUEUE_SIZE,
+        contrastive_momentum=e.CONTRASTIVE_MOMENTUM,
+        contrastive_detach_importance=e.CONTRASTIVE_DETACH_IMPORTANCE,
         learning_rate=e.LEARNING_RATE,
         lr_scheduler=e.LR_SCHEDULER,
     )
@@ -557,11 +592,21 @@ def train_model(e: Experiment,
     logger = CSVLogger(e.path, name='logs')
     
     callbacks = [
-        # This will record the embeddings of the test set after each epoch and then track them into the 
-        # experiment storage so that the evolution of the embeddings can be animated at the end of the 
+        # Catches Ctrl+C and gracefully stops training instead of killing the process.
+        # The first Ctrl+C finishes the current epoch and proceeds to evaluation.
+        GracefulStopCallback(),
+        # This will record the embeddings of the test set after each epoch and then track them into the
+        # experiment storage so that the evolution of the embeddings can be animated at the end of the
         # experiment.
         RecordEmbeddingsCallback(),
         TrainingCallback(),
+        MeganTrainingMetricsCallback(
+            experiment=e,
+            val_graphs=graphs_val,
+            dataset_type=e.DATASET_TYPE,
+            num_channels=e.NUM_CHANNELS,
+            channel_infos=e.CHANNEL_INFOS,
+        ),
     ]
     
     # The SwaCallback fully implements the stochastic weight averaging by itself without any modification
@@ -577,6 +622,12 @@ def train_model(e: Experiment,
         callbacks.append(ImportanceFactorWarmup(
             start_value=1e-6,
             warmup_epochs=e.IMPORTANCE_FACTOR_WARMUP_EPOCHS,
+        ))
+
+    if e.CONTRASTIVE_FACTOR > 0 and e.CONTRASTIVE_WARMUP_EPOCHS > 0:
+        callbacks.append(ContrastiveSchedulerCallback(
+            target_factor=e.CONTRASTIVE_FACTOR,
+            warmup_epochs=e.CONTRASTIVE_WARMUP_EPOCHS,
         ))
 
     if e.TRAIN_MVE:
