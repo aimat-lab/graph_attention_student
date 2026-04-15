@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.4.0 - Unreleased
+
+Uniformity Regularization
+
+- Added uniformity loss (Wang & Isola, ICML 2020) that encourages graph embeddings to spread
+  uniformly on the unit hypersphere per channel, preventing embedding collapse. Uses per-channel
+  FIFO queues (shared queue size with MoCo) to measure uniformity over thousands of embeddings.
+- New model parameters: `uniformity_factor`, `uniformity_t`.
+
+Training Metrics Dashboard
+
+- Added uniformity loss (`loss_unif`) tracking to `MeganTrainingMetricsCallback`.
+- Added embedding uniformity monitoring (mean-vector norm from uniformity queue).
+- Replaced "Negative Similarity" plot with "Uniformity" plot in the training dashboard.
+- Uniformity loss included in the stacked loss ratio chart.
+
+Housekeeping
+
+- Removed `HISTORY.rst` (superseded by `CHANGELOG.md`).
+
 ## 1.3.0 - 2026-03-24
 
 Contrastive Learning
