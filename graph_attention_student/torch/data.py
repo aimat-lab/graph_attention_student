@@ -176,7 +176,7 @@ class SmilesDataset(IterableDataset):
         # If multiple workers are used, only collect every num_workers-th row,
         # starting at the current worker id. For single-worker loading just collect all.
         if worker_info is None:
-            dataframe: pl.DataFrame = lazyframe.collect(streaming=True)
+            dataframe: pl.DataFrame = lazyframe.collect(engine="streaming")
         else:
             n = worker_info.num_workers
             wid = worker_info.id
@@ -185,7 +185,7 @@ class SmilesDataset(IterableDataset):
             .with_row_index("__row_idx")
             .filter((pl.col("__row_idx") % n) == wid)
             .drop("__row_idx")
-            .collect(streaming=True)
+            .collect(engine="streaming")
             )
 
         # Create a fresh processing instance for this worker

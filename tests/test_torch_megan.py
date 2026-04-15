@@ -35,7 +35,7 @@ def test_saving_loading_megan_works():
         model.save(model_path)
         assert os.path.exists(model_path)
         
-        data = torch.load(model_path)
+        data = torch.load(model_path, weights_only=False)
         assert 'hyper_parameters' in data
         assert 'state_dict' in data
         pprint(data['hyper_parameters'])

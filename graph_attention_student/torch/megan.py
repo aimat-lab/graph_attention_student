@@ -1997,7 +1997,7 @@ class MeganEnsemble(AbstractGraphModel, UncertaintyEstimatorMixin):
         assert os.path.isdir(path), f'The given path needs to be a folder in order to load an ensemble!'
         
         ensemble_path = os.path.join(path, 'ensemble.ckpt')
-        ensemble = torch.load(ensemble_path)
+        ensemble = torch.load(ensemble_path, weights_only=False)
         
         models: List[Megan] = []
         for i in range(ensemble['num_models']):

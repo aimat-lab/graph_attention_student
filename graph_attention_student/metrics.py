@@ -83,14 +83,14 @@ def negative_log_likelihood(y_true: float,
                             y_pred: float,
                             sigma: float,
                             ) -> float:
-    """
+    r"""
     Calculates the negative log likelihood of a given true value ``y_true``, predicted value ``y_pred``
     and the predicted uncertainty ``sigma`` according to the formula:
-    
+
     .. math::
-    
+
         \mathrm{NLL} = 0.5 ( log(2 \pi \sigma^2) + (y_{true} - y_{pred})^2 / (sigma^2) )
-    
+
     :param y_true: The true value.
     :param y_pred: The predicted value.
     :param sigma: The predicted uncertainty.

@@ -222,7 +222,7 @@ class AbstractGraphModel(pl.LightningModule):
             # with a prior version of the package and the current version has changed the model architecture in 
             # a backward-incompatible way. In this case, we give a meaningful error message to inform the user 
             # that downgrading the package might be required.
-            info = torch.load(path)
+            info = torch.load(path, weights_only=False)
             #current_version = get_version()
             
             # The first possibility is that the exported model doesnt even contain the model version information 
