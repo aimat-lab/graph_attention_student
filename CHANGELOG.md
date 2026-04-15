@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.4.0 - Unreleased
+## 1.4.0 - 2026-04-15
 
 Uniformity Regularization
 
@@ -16,9 +16,41 @@ Training Metrics Dashboard
 - Replaced "Negative Similarity" plot with "Uniformity" plot in the training dashboard.
 - Uniformity loss included in the stacked loss ratio chart.
 
+Documentation
+
+- Fixed the "Python API" example in `README.rst`: added missing `importance_mode='regression'`
+  to the `Megan(...)` constructor call, without which `training_step` crashes because
+  `training_explanation` never reassigns `loss_expl` from its initial `float`.
+
+Testing
+
+- Added `tests/test_readme_examples.py` covering the README's Python API training and
+  load-infer-report snippets end-to-end (scaled-down model and epoch count).
+- Added `tests/assets/readme_fixture.csv` (10-row SMILES/target fixture) for those tests.
+
 Housekeeping
 
 - Removed `HISTORY.rst` (superseded by `CHANGELOG.md`).
+- Added `release.sh` script automating test → version bump → commit/tag → push →
+  GitHub release → build/publish.
+- Raised the supported Python floor from 3.8 to 3.9 (`requires-python`, classifiers
+  and `noxfile.py` sweep updated to 3.9–3.13); removed the now-unreachable
+  `pydyf<0.11.0; python_version<'3.9'` marker and the leftover `poetry-bumpversion`
+  dependency from the Poetry era.
+- Added `pyarrow>=10.0.0` as a direct dependency so `pl.from_pandas()` handles
+  pyarrow-backed pandas string columns (fixes a test failure under newer pandas).
+- Introduced a `dev` extra (`nox`, `bump-my-version`, `pytest`) installable via
+  `uv pip install -e ".[dev]"`.
+- Silenced third-party deprecation noise via `[tool.pytest.ini_options]`
+  `filterwarnings` (matplotlib/pyparsing/Pillow, Lightning training UX warnings,
+  and Lightning's internal `torch.load` `weights_only` FutureWarning).
+- Fixed an invalid `\m` escape in the `negative_log_likelihood` docstring
+  (`metrics.py`) by making it a raw string.
+- Switched `polars.LazyFrame.collect(streaming=True)` to `collect(engine="streaming")`
+  in `torch/data.py` to track the polars 1.25+ API.
+- Passed `weights_only=False` explicitly to our own `torch.load` call sites
+  (`torch/megan.py`, `torch/model.py`, `tests/test_torch_megan.py`) to silence
+  the FutureWarning ahead of PyTorch's default flip.
 
 ## 1.3.0 - 2026-03-24
 
