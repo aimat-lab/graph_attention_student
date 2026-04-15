@@ -94,14 +94,14 @@ IMPORTANCE_FACTOR: float = 1.0
 #       This is the coefficient that is used to scale the explanation sparsity loss during training.
 #       The higher this value the more explanation sparsity (less and more discrete explanation masks)
 #       is promoted.
-SPARSITY_FACTOR: float = 1.0
+SPARSITY_FACTOR: float = 0.2
 # :param IMPORTANCE_OFFSET:
 #       This parameter controls the sparsity of the explanation masks even more so than the sparsity factor.
 #       It basically provides the upper limit of how many nodes/edges need to be activated for a channel to 
 #       be considered as active. The higher this value, the less sparse the explanations will be.
 #       Typical values range from 0.2 - 2.0 but also depend on the graph size and the specific problem at 
 #       hand. This is a parameter with which one has to experiment until a good trade-off is found!
-IMPORTANCE_OFFSET: float = 0.5
+IMPORTANCE_OFFSET: float = 1.0
 # :param FIDELITY_FACTOR:
 #       This parameter controls the coefficient of the explanation fidelity loss during training. The higher
 #       this value, the more the model will be trained to create explanations that actually influence the
@@ -113,7 +113,7 @@ FIDELITY_FACTOR: float = 0.1
 #       This boolean value determines whether the graph embeddings are normalized to a unit length or not.
 #       If this is true, the embedding of each individual explanation channel will be L2 normalized such that 
 #       it is projected onto the unit sphere.
-NORMALIZE_EMBEDDING: bool = False
+NORMALIZE_EMBEDDING: bool = True
 # :param ATTENTION_AGGREGATION:
 #       This string literal determines the strategy which is used to aggregate the edge attention logits over 
 #       the various message passing layers in the graph encoder part of the network. This may be one of the 
@@ -162,7 +162,7 @@ TRAIN_MVE: bool = False
 MVE_WARMUP_EPOCHS: int = 50
 
 EPOCHS: int = 150
-BATCH_SIZE: int = 64
+BATCH_SIZE: int = 32
 LEARNING_RATE = 1e-5
 
 __DEBUG__ = True

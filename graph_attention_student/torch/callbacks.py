@@ -208,6 +208,8 @@ class MeganTrainingMetricsCallback(Callback):
         self.cont_losses: List[float] = []
         self.fid_losses: List[float] = []
         self.spar_losses: List[float] = []
+        self.unif_losses: List[float] = []
+        self.uniformity: List[float] = []
 
         # Loss dynamics
         self.importance_factors: List[float] = []
@@ -392,7 +394,7 @@ class MeganTrainingMetricsCallback(Callback):
         metrics = getattr(pl_module, 'batch_metrics', {})
         if not metrics:
             return
-        for key in ('loss', 'loss_pred', 'loss_expl', 'loss_spar', 'loss_cont', 'loss_fid'):
+        for key in ('loss', 'loss_pred', 'loss_expl', 'loss_spar', 'loss_cont', 'loss_unif', 'loss_fid'):
             if key in metrics:
                 self._epoch_losses[key].append(float(metrics[key]))
 
@@ -411,6 +413,7 @@ class MeganTrainingMetricsCallback(Callback):
             ('loss_expl', self.expl_losses),
             ('loss_spar', self.spar_losses),
             ('loss_cont', self.cont_losses),
+            ('loss_unif', self.unif_losses),
             ('loss_fid', self.fid_losses),
         ]:
             vals = self._epoch_losses.get(key, [])
@@ -427,6 +430,16 @@ class MeganTrainingMetricsCallback(Callback):
         self.sim_pos_values.append(float(sim_pos) if sim_pos is not None else 0.0)
         sim_neg = trainer.callback_metrics.get('sim_neg')
         self.sim_neg_values.append(float(sim_neg) if sim_neg is not None else 0.0)
+
+        # -- Embedding uniformity from queue --
+        # ||mean(queue)|| for unit-normalized embeddings: 1.0 = collapsed, 0.0 = uniform
+        concentrations = []
+        for k in range(self.num_channels):
+            queue = getattr(pl_module, f'unif_queue_{k}', None)
+            if queue is not None:
+                mean_vec = queue.mean(dim=1)  # (D,) — mean across queue entries
+                concentrations.append(float(mean_vec.norm().cpu()))
+        self.uniformity.append(np.mean(concentrations) if concentrations else 1.0)
 
         # -- Gradients --
         if self._epoch_grad_norms:
@@ -612,7 +625,7 @@ class MeganTrainingMetricsCallback(Callback):
         self._plot_loss_ratios(axes[1, 0], epochs)
         self._plot_effective_weights(axes[1, 1], epochs)
         self._plot_loss_line(axes[1, 2], epochs, self.sim_pos_values, 'Positive Similarity', '#4CAF50')
-        self._plot_loss_line(axes[1, 3], epochs, self.sim_neg_values, 'Negative Similarity', '#F44336')
+        self._plot_loss_line(axes[1, 3], epochs, self.uniformity, 'Uniformity', '#00BCD4')
         self._plot_loss_line(axes[1, 4], epochs, self.learning_rates, 'Learning Rate', '#607D8B')
 
         # Row 3: Validation prediction quality
@@ -692,10 +705,11 @@ class MeganTrainingMetricsCallback(Callback):
             'Pred': self.pred_losses,
             'Expl': self.expl_losses,
             'Cont': self.cont_losses,
+            'Unif': self.unif_losses,
             'Fid': self.fid_losses,
             'Spar': self.spar_losses,
         }
-        colors = ['#2196F3', '#4CAF50', '#FF9800', '#9C27B0', '#F44336']
+        colors = ['#2196F3', '#4CAF50', '#FF9800', '#00BCD4', '#9C27B0', '#F44336']
         stacked = []
         labels = []
         for (label, vals), color in zip(components.items(), colors):

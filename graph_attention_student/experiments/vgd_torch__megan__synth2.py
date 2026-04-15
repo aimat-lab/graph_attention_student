@@ -131,6 +131,17 @@ CONTRASTIVE_DETACH_IMPORTANCE: bool = True
 #       Number of epochs to linearly ramp up the contrastive factor from near zero to the target value.
 CONTRASTIVE_WARMUP_EPOCHS: int = 25
 
+# ~ Uniformity regularization on graph embeddings
+# :param UNIFORMITY_FACTOR:
+#       Weight for the uniformity loss that encourages embeddings to spread uniformly on the
+#       hypersphere. Prevents collapse to a narrow cone. Wang & Isola (ICML 2020) recommend
+#       starting with values around 1.0 and tuning from there.
+UNIFORMITY_FACTOR: float = 1.0
+# :param UNIFORMITY_T:
+#       Temperature (Gaussian kernel width) for the uniformity loss. Higher values penalize
+#       nearby pairs more aggressively. The original paper uses t=2.
+UNIFORMITY_T: float = 2.0
+
 # :param TRAIN_MVE:
 #       This boolean determines whether or not the model should be trained as a mean variance estimator.
 TRAIN_MVE: bool = False

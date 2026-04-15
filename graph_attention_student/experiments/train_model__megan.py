@@ -877,6 +877,8 @@ def train_model(e: Experiment,
         contrastive_queue_size=e.CONTRASTIVE_QUEUE_SIZE,
         contrastive_momentum=e.CONTRASTIVE_MOMENTUM,
         contrastive_detach_importance=e.CONTRASTIVE_DETACH_IMPORTANCE,
+        uniformity_factor=getattr(e, 'UNIFORMITY_FACTOR', 0.0),
+        uniformity_t=getattr(e, 'UNIFORMITY_T', 2.0),
         learning_rate=e.LEARNING_RATE,
         lr_scheduler=e.LR_SCHEDULER,
     )

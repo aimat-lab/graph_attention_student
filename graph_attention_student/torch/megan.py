@@ -248,6 +248,9 @@ class Megan(MveMixin, AbstractGraphModel):
                  contrastive_queue_size: int = 4096,
                  contrastive_momentum: float = 0.999,
                  contrastive_detach_importance: bool = True,
+                 # uniformity regularization on graph embeddings
+                 uniformity_factor: float = 0.0,
+                 uniformity_t: float = 2.0,
                  # prediction-related
                  final_units: t.List[int] = [16, 1],
                  final_dropout_rate: float = 0.0,
@@ -314,6 +317,8 @@ class Megan(MveMixin, AbstractGraphModel):
         self.contrastive_queue_size = contrastive_queue_size
         self.contrastive_momentum = contrastive_momentum
         self.contrastive_detach_importance = contrastive_detach_importance
+        self.uniformity_factor = uniformity_factor
+        self.uniformity_t = uniformity_t
 
         self.prediction_mode = prediction_mode
         self.prediction_factor = prediction_factor
@@ -571,6 +576,16 @@ class Megan(MveMixin, AbstractGraphModel):
                 F.normalize(torch.randn(contrastive_units, contrastive_queue_size), dim=0)
             )
         self.register_buffer('queue_ptr', torch.zeros(num_channels, dtype=torch.long))
+
+        # Uniformity queues: store raw graph embeddings per channel for the uniformity loss.
+        # These are separate from the MoCo queues (which store projected embeddings).
+        # Shape: (embedding_dim, queue_size) per channel — same queue size as MoCo.
+        for k in range(num_channels):
+            self.register_buffer(
+                f'unif_queue_{k}',
+                F.normalize(torch.randn(self.embedding_dim, contrastive_queue_size), dim=0)
+            )
+        self.register_buffer('unif_queue_ptr', torch.zeros(num_channels, dtype=torch.long))
 
         self.lay_final_dropout = nn.Dropout(p=final_dropout_rate)
         
@@ -1040,6 +1055,45 @@ class Megan(MveMixin, AbstractGraphModel):
             batch_size=batch_size,
         )
         
+        # ~ uniformity loss
+        # Encourages the graph embeddings to be uniformly distributed on the unit hypersphere
+        # (per channel, independently). This prevents the embeddings from collapsing to a narrow
+        # cone, which would make downstream clustering (e.g. HDBSCAN with cosine distance)
+        # unable to distinguish meaningful sub-clusters.
+        #
+        # Uses a queue of past graph embeddings (analogous to MoCo's negative queue) so that the
+        # uniformity is measured over thousands of embeddings, not just the current batch.
+        #
+        # Reference: Wang & Isola, "Understanding Contrastive Representation Learning through
+        # Alignment and Uniformity on the Hypersphere" (ICML 2020).
+
+        loss_unif = torch.tensor(0.0, device=data.y.device)
+        if self.uniformity_factor != 0:
+            graph_emb = info['graph_embedding']  # (B, D, K)
+            for k in range(self.num_channels):
+                z = F.normalize(graph_emb[:, :, k], dim=-1)  # (B, D)
+
+                # Combine current batch with the uniformity queue for a larger sample
+                unif_queue_k = getattr(self, f'unif_queue_{k}')  # (D, queue_size)
+                z_all = torch.cat([z, unif_queue_k.T], dim=0)    # (B + queue_size, D)
+
+                # Pairwise squared L2 distances between current batch and all embeddings
+                # We only need batch-vs-all, not all-vs-all (saves memory, batch provides gradients)
+                sq_dists = 2.0 - 2.0 * torch.mm(z, z_all.t())   # (B, B + queue_size)
+                loss_unif_k = torch.log(torch.exp(-self.uniformity_t * sq_dists).mean() + 1e-8)
+                loss_unif = loss_unif + loss_unif_k / self.num_channels
+
+                # Enqueue current batch embeddings (no grad, like MoCo)
+                self._dequeue_and_enqueue_unif(z.detach(), channel_idx=k)
+
+        self.log(
+            'loss_unif', loss_unif.detach().cpu(),
+            prog_bar=True,
+            on_epoch=True,
+            on_step=False,
+            batch_size=batch_size,
+        )
+
         # ~ fidelity loss
 
         loss_fid = torch.tensor(0.0, device=data.y.device)
@@ -1057,11 +1111,11 @@ class Megan(MveMixin, AbstractGraphModel):
             on_step=False,
             batch_size=batch_size,
         )
-        
+
         # ~ adding the various loss terms
-        # In this section we are simply accumulating the overall loss term as a combination of all the individual loss 
+        # In this section we are simply accumulating the overall loss term as a combination of all the individual loss
         # terms that were previously constructed.
-        
+
         loss = (
             # loss from the primary output predictions
             self.prediction_factor * loss_pred
@@ -1071,6 +1125,8 @@ class Megan(MveMixin, AbstractGraphModel):
             + self.sparsity_factor * loss_spar
             # contrastive loss to encourage the formation of semantic embeddings
             + self.contrastive_factor * loss_cont
+            # uniformity loss to spread embeddings on the hypersphere
+            + self.uniformity_factor * loss_unif
             # fidelity loss to encourage positive fidelity values
             + self.fidelity_factor * loss_fid
         )
@@ -1082,6 +1138,7 @@ class Megan(MveMixin, AbstractGraphModel):
             'loss_expl': loss_expl.detach().cpu(),
             'loss_spar': loss_spar.detach().cpu(),
             'loss_cont': loss_cont.detach().cpu(),
+            'loss_unif': loss_unif.detach().cpu(),
             'loss_fid': loss_fid.detach().cpu(),
         }
 
@@ -1183,6 +1240,28 @@ class Megan(MveMixin, AbstractGraphModel):
             queue[:, :batch_size - remaining] = keys[remaining:].T
 
         self.queue_ptr[channel_idx] = (ptr + batch_size) % self.contrastive_queue_size
+
+    @torch.no_grad()
+    def _dequeue_and_enqueue_unif(self, embeddings: torch.Tensor, channel_idx: int):
+        """
+        Insert a batch of L2-normalized graph embeddings into the uniformity queue.
+
+        :param embeddings: (B, D) tensor of L2-normalized graph embeddings
+        :param channel_idx: which channel's uniformity queue to update
+        """
+        batch_size = embeddings.shape[0]
+        ptr = int(self.unif_queue_ptr[channel_idx])
+        queue = getattr(self, f'unif_queue_{channel_idx}')
+        queue_size = queue.shape[1]
+
+        if ptr + batch_size <= queue_size:
+            queue[:, ptr:ptr + batch_size] = embeddings.T
+        else:
+            remaining = queue_size - ptr
+            queue[:, ptr:] = embeddings[:remaining].T
+            queue[:, :batch_size - remaining] = embeddings[remaining:].T
+
+        self.unif_queue_ptr[channel_idx] = (ptr + batch_size) % queue_size
 
     def training_representation(self,
                                 data: Data,
