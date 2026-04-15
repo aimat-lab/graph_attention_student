@@ -1,0 +1,11 @@
+smiles,target
+CCO,-0.77
+CCN,-0.03
+CCC,0.89
+CCCC,1.23
+CCCCC,1.45
+CC(=O)O,-1.12
+c1ccccc1,2.13
+c1ccncc1,-0.11
+CCOCC,0.50
+CC(C)O,-0.92
