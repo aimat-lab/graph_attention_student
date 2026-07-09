@@ -465,7 +465,7 @@ def train_test_split(e: Experiment,
             num_train = int(e.NUM_TRAIN * len(indices))
 
         e.log(f'sampling {num_train} random training elements...')
-        random.seed()
+        random.seed(e.SEED)
         train_indices = random.sample(indices, k=num_train)
     else:
         train_indices = indices
@@ -485,7 +485,7 @@ def filter_train_indices(e: Experiment,
 
     if e.USE_BOOTSTRAPPING:
         e.log('sub-sampling the training elements for bootstrapping...')
-        random.seed()
+        random.seed(e.SEED)
         train_indices = random.choices(train_indices, k=len(train_indices))
 
     if e.CLASS_OVERSAMPLING or e.OVERSAMPLING_FACTORS:

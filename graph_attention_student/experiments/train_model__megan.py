@@ -44,6 +44,7 @@ from graph_attention_student.visualization import generate_contrastive_colors
 from graph_attention_student.visualization import plot_embeddings_3d
 from graph_attention_student.visualization import plot_embeddings_2d
 from graph_attention_student.visualization import plot_leave_one_out_analysis
+from graph_attention_student.torch.evaluation import generate_diagnostic_report
 from graph_attention_student.torch.data import data_list_from_graphs
 from graph_attention_student.torch.model import AbstractGraphModel
 from graph_attention_student.torch.megan import Megan
@@ -152,6 +153,14 @@ USE_CONTRASTIVE_SCHEDULER: bool = True
 #       Fraction of total epochs over which to linearly ramp up the contrastive factor.
 #       E.g., 0.7 means the contrastive factor reaches its target value after 70% of training.
 CONTRASTIVE_WARMUP_EPOCHS: float = 0.5
+# :param UNIFORMITY_FACTOR:
+#       Coefficient of the uniformity regularization on the per-channel graph embeddings. If 0.0
+#       (default) the uniformity loss is disabled. Higher values spread the embeddings more evenly
+#       on the unit hypersphere, which can help downstream clustering distinguish sub-clusters.
+UNIFORMITY_FACTOR: float = 0.0
+# :param UNIFORMITY_T:
+#       Temperature of the uniformity loss (see Wang & Isola 2020). Only relevant when UNIFORMITY_FACTOR > 0.
+UNIFORMITY_T: float = 2.0
 # :param PREDICTION_FACTOR:
 #       Factor for scaling the prediction loss.
 PREDICTION_FACTOR: float = 1.0
@@ -235,6 +244,11 @@ def train_model(e: Experiment,
     This implementation trains a MEGAN model that generates both predictions and
     explanations for the prediction task.
     """
+    # Seed everything (python, numpy, torch) so runs are reproducible and a knob sweep
+    # isolates the effect of the knob rather than RNG noise (weight init, shuffling,
+    # bootstrapping). Vary SEED across runs for a robustness estimate.
+    pl.seed_everything(e.SEED, workers=True)
+
     e.log('preparing data for training...')
     graphs_train = [index_data_map[i]['metadata']['graph'] for i in train_indices]
     graphs_test = [index_data_map[i]['metadata']['graph'] for i in test_indices]
@@ -244,6 +258,13 @@ def train_model(e: Experiment,
         data_list_from_graphs(graphs_train),
         batch_size=e.BATCH_SIZE,
         shuffle=True,
+    )
+    # Validate/monitor on the VALIDATION set (never the test set) so the test set stays
+    # untouched until the final unbiased evaluation.
+    val_loader = DataLoader(
+        data_list_from_graphs(graphs_val),
+        batch_size=e.BATCH_SIZE,
+        shuffle=False,
     )
     test_loader = DataLoader(
         data_list_from_graphs(graphs_test),
@@ -918,7 +939,7 @@ def train_model(e: Experiment,
     trainer.fit(
         model,
         train_dataloaders=train_loader,
-        val_dataloaders=test_loader,
+        val_dataloaders=val_loader,
     )
 
     del train_loader
@@ -1007,6 +1028,59 @@ def evaluate_model(e: Experiment,
         num_targets=e.FINAL_UNITS[-1],
     )
     fig.savefig(os.path.join(e.path, 'leave_one_out.pdf'))
+
+    # ~ agent-facing post-training diagnostic protocol
+    # Consolidates the run's explanation signals into machine-readable reports (raw values +
+    # PASS/WARN/FAIL per axis) plus diagnostic images, so an autonomous agent can judge whether
+    # the run produced usable explanations without parsing the PDFs above.
+    #
+    # Two reports are written to keep model selection honest:
+    #   - report.json (+ scorecard/examples/fidelity.png)  -> VALIDATION set: the tuning gate.
+    #     Read this to decide if a run is good and to compare knob settings across runs.
+    #   - report_test.json (+ test_*.png)                   -> TEST set: the final unbiased
+    #     estimate. Quote this once for the chosen configuration; never tune against it.
+    e.log('generating post-training diagnostic report...')
+    try:
+        # the per-epoch explanation loss history (if tracked) feeds divergence detection
+        try:
+            loss_history = list(e['loss_expl'])
+        except Exception:
+            loss_history = None
+
+        val_indices = e['indices/val']
+        graphs_val = [index_data_map[i]['metadata']['graph'] for i in val_indices]
+
+        report = generate_diagnostic_report(
+            model=model,
+            graphs=graphs_val,
+            output_dir=e.path,
+            example_graphs=graphs_example,
+            example_image_paths=image_paths,
+            channel_infos=e.CHANNEL_INFOS,
+            num_targets=e.FINAL_UNITS[-1],
+            loss_history=loss_history,
+        )
+        e['diagnostic_report'] = report
+        e.log(f'[VALIDATION] diagnostic overall verdict: {report["overall"]["verdict"]}'
+              f' - reasons: {report["overall"]["reasons"]}')
+
+        report_test = generate_diagnostic_report(
+            model=model,
+            graphs=graphs_test,
+            output_dir=e.path,
+            example_graphs=graphs_example,
+            example_image_paths=image_paths,
+            channel_infos=e.CHANNEL_INFOS,
+            num_targets=e.FINAL_UNITS[-1],
+            loss_history=loss_history,
+            report_filename='report_test.json',
+            image_prefix='test_',
+        )
+        e['diagnostic_report_test'] = report_test
+        e.log(f'[TEST] diagnostic overall verdict: {report_test["overall"]["verdict"]}'
+              f' - reasons: {report_test["overall"]["reasons"]}')
+    except Exception as exc:
+        e.log(f'warning: failed to generate diagnostic report: {exc}')
 
     # ~ visualizing the graph embedding space
     e.log(f'visualizating embedding space with {model.embedding_dim} dimensions...')

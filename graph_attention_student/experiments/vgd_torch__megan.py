@@ -46,6 +46,7 @@ from graph_attention_student.visualization import generate_contrastive_colors
 from graph_attention_student.visualization import plot_embeddings_3d
 from graph_attention_student.visualization import plot_embeddings_2d
 from graph_attention_student.visualization import plot_leave_one_out_analysis
+from graph_attention_student.torch.evaluation import generate_diagnostic_report
 from graph_attention_student.torch.data import data_list_from_graphs
 from graph_attention_student.torch.model import AbstractGraphModel
 from graph_attention_student.torch.megan import Megan
@@ -750,6 +751,33 @@ def evaluate_model(e: Experiment,
         num_targets=e.FINAL_UNITS[-1],
     )
     fig.savefig(os.path.join(e.path, 'leave_one_out.pdf'))
+
+    # ~ agent-facing post-training diagnostic protocol
+    # Consolidates the run's explanation signals into a single machine-readable
+    # report.json (raw values + PASS/WARN/FAIL per axis) plus diagnostic images so
+    # an autonomous agent can judge whether the run produced usable explanations.
+    e.log('generating post-training diagnostic report...')
+    try:
+        try:
+            loss_history = list(e['loss_expl'])
+        except Exception:
+            loss_history = None
+
+        report = generate_diagnostic_report(
+            model=model,
+            graphs=graphs_test,
+            output_dir=e.path,
+            example_graphs=graphs_example,
+            example_image_paths=[index_data_map[i]['image_path'] for i in example_indices],
+            channel_infos=e.CHANNEL_INFOS,
+            num_targets=e.FINAL_UNITS[-1],
+            loss_history=loss_history,
+        )
+        e['diagnostic_report'] = report
+        e.log(f'diagnostic overall verdict: {report["overall"]["verdict"]}'
+              f' - reasons: {report["overall"]["reasons"]}')
+    except Exception as exc:
+        e.log(f'warning: failed to generate diagnostic report: {exc}')
 
     # ~ visualizing the graph embedding space
     # Another thing we would like to do for the MEGAN model is to visualize the graph embedding space to see 
