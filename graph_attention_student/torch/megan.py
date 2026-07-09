@@ -342,6 +342,8 @@ class Megan(MveMixin, AbstractGraphModel):
             'encoder_dropout_rate':     encoder_dropout_rate,
             'layer_version':            layer_version,
             'importance_units':         importance_units,
+            'importance_mode':          importance_mode,
+            'importance_factor':        importance_factor,
             'importance_offset':        importance_offset,
             'importance_target':        importance_target,
             'projection_units':         projection_units,
