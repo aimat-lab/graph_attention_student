@@ -217,6 +217,14 @@ CONTRASTIVE_DETACH_IMPORTANCE: bool = True
 #       to the target CONTRASTIVE_FACTOR value. This prevents the contrastive loss from destabilizing
 #       early training when explanations are still noisy. Set to 0 to disable warmup.
 CONTRASTIVE_WARMUP_EPOCHS: int = 25
+# :param UNIFORMITY_FACTOR:
+#       Coefficient of the uniformity regularization on the per-channel graph embeddings. If 0.0 (default)
+#       the uniformity loss is disabled. Higher values spread the embeddings more evenly on the unit
+#       hypersphere, which can help downstream clustering distinguish sub-clusters.
+UNIFORMITY_FACTOR: float = 0.0
+# :param UNIFORMITY_T:
+#       Temperature of the uniformity loss (see Wang & Isola 2020). Only relevant when UNIFORMITY_FACTOR > 0.
+UNIFORMITY_T: float = 2.0
 # :param PREDICTION_FACTOR:
 #       This is a float value that determines the factor by which the main prediction loss is being scaled 
 #       durign the model training. Changing this from 1.0 should usually not be necessary except for regression
@@ -910,8 +918,10 @@ def after_experiment(e: Experiment,
     torch.cuda.empty_cache()
     
     # printing the memory summary to see if there is still something left
-    e.log('memory summary:')
-    e.log('\n' + torch.cuda.memory_summary(device=None, abbreviated=False))
+    # (only meaningful on CUDA - memory_summary raises on a CPU-only run)
+    if torch.cuda.is_available():
+        e.log('memory summary:')
+        e.log('\n' + torch.cuda.memory_summary(device=None, abbreviated=False))
 
 
 @experiment.analysis

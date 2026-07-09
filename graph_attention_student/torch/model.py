@@ -12,6 +12,18 @@ from graph_attention_student.utils import get_version
 from graph_attention_student.torch.data import data_list_from_graphs
 
 
+# torch >= 2.6 changed the default of ``torch.load`` to ``weights_only=True``, which rejects the
+# ``AttributeDict`` global that Lightning stores inside a checkpoint's hyper_parameters. Without this
+# allowlist, ``LightningModule.load_from_checkpoint`` raises an UnpicklingError and model loading fails
+# (including the quickstart example and the post-training evaluation). Registering the class as a safe
+# global restores loading. Guarded so it is a no-op on older torch / lightning layouts.
+try:
+    from lightning_fabric.utilities.data import AttributeDict as _LightningAttributeDict
+    torch.serialization.add_safe_globals([_LightningAttributeDict])
+except Exception:
+    pass
+
+
 class AbstractGraphModel(pl.LightningModule):
     """
     This is the abstract base class for implementing a graph property prediction model.
