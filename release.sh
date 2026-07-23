@@ -1,15 +1,19 @@
 #!/usr/bin/env bash
 # release.sh - Automated release script for graph_attention_student
 #
-# Usage: ./release.sh <major|minor|patch>
+# Usage: ./release.sh
+#
+# Bump the version manually beforehand (edit graph_attention_student/VERSION,
+# pyproject.toml and README.rst); this script reads the version from
+# graph_attention_student/VERSION.
 #
 # This script:
 #   1. Validates preconditions (clean tree, on master, tools available)
 #   2. Runs nox tests
-#   3. Bumps the version via bump-my-version
-#   4. Commits, tags, and pushes
-#   5. Creates a GitHub release
-#   6. Builds and publishes the package via uv
+#   3. Commits any pending version files and tags locally
+#   4. Builds and publishes the package via uv
+#
+# It does NOT push to the remote or create a GitHub release — do those manually.
 
 set -euo pipefail
 
@@ -28,25 +32,12 @@ warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 error() { echo -e "${RED}[ERROR]${NC} $*"; exit 1; }
 step()  { echo -e "\n${BOLD}── $* ──${NC}"; }
 
-# ── Argument validation ──────────────────────────────────────────────
-
-BUMP_PART="${1:-}"
-
-if [[ -z "$BUMP_PART" ]]; then
-    echo "Usage: ./release.sh <major|minor|patch>"
-    exit 1
-fi
-
-if [[ "$BUMP_PART" != "major" && "$BUMP_PART" != "minor" && "$BUMP_PART" != "patch" ]]; then
-    error "Invalid bump part '$BUMP_PART'. Must be one of: major, minor, patch"
-fi
-
 # ── Precondition checks ─────────────────────────────────────────────
 
 step "Checking preconditions"
 
 # Check required tools
-for cmd in git nox bump-my-version gh uv; do
+for cmd in git nox uv; do
     if ! command -v "$cmd" &>/dev/null; then
         error "Required tool '$cmd' is not installed or not in PATH."
     fi
@@ -73,9 +64,9 @@ else
     ok "Working tree is clean"
 fi
 
-# Read current version before bump
-OLD_VERSION=$(cat graph_attention_student/VERSION)
-info "Current version: ${BOLD}$OLD_VERSION${NC}"
+# Read the (manually-set) version to release
+NEW_VERSION=$(cat graph_attention_student/VERSION)
+info "Releasing version: ${BOLD}$NEW_VERSION${NC}"
 
 # ── Run tests ────────────────────────────────────────────────────────
 
@@ -87,70 +78,32 @@ if ! nox -s test; then
 fi
 ok "All tests passed"
 
-# ── Bump version ─────────────────────────────────────────────────────
-
-step "Bumping version ($BUMP_PART)"
-info "Executing: bump-my-version bump $BUMP_PART"
-
-bump-my-version bump "$BUMP_PART"
-
-NEW_VERSION=$(cat graph_attention_student/VERSION)
-ok "Version bumped: ${OLD_VERSION} → ${BOLD}${NEW_VERSION}${NC}"
-
 # ── Git commit & tag ─────────────────────────────────────────────────
 
 TAG_NAME="v${NEW_VERSION}"
 
 step "Creating git commit and tag"
 
-info "Staging changed files..."
+info "Staging version files..."
 git add pyproject.toml graph_attention_student/VERSION README.rst
 
-info "Committing version bump..."
-git commit -m "$(cat <<EOF
+if git diff --cached --quiet; then
+    info "No pending version changes to commit (already committed manually)."
+else
+    info "Committing version files..."
+    git commit -m "$(cat <<EOF
 ${NEW_VERSION}
 
-Bump version: ${OLD_VERSION} → ${NEW_VERSION}
+Release ${NEW_VERSION}
 
 EOF
 )"
-ok "Committed"
+    ok "Committed"
+fi
 
 info "Creating tag '${TAG_NAME}'..."
 git tag -a "$TAG_NAME" -m "Release ${NEW_VERSION}"
 ok "Tag '${TAG_NAME}' created"
-
-# ── Git push ─────────────────────────────────────────────────────────
-
-step "Pushing to remote"
-
-info "Pushing commits..."
-git push origin master
-
-info "Pushing tags..."
-git push origin "$TAG_NAME"
-ok "Pushed commits and tag to origin"
-
-# ── GitHub release ───────────────────────────────────────────────────
-
-step "Creating GitHub release"
-
-REPO_URL=$(git remote get-url origin | sed 's/\.git$//' | sed 's|git@github.com:|https://github.com/|')
-# Extract owner/repo from origin URL for gh commands (avoids gh picking up the wrong remote)
-GH_REPO=$(echo "$REPO_URL" | sed 's|https://github.com/||')
-CHANGELOG_URL="${REPO_URL}/blob/${TAG_NAME}/CHANGELOG.md"
-
-info "Creating release '${TAG_NAME}' on GitHub (repo: ${GH_REPO})..."
-gh release create "$TAG_NAME" \
-    --repo "$GH_REPO" \
-    --title "${NEW_VERSION}" \
-    --notes "$(cat <<EOF
-## ${NEW_VERSION}
-
-See the full changelog: [CHANGELOG.md](${CHANGELOG_URL})
-EOF
-)"
-ok "GitHub release created"
 
 # ── Build & publish ──────────────────────────────────────────────────
 
@@ -174,7 +127,6 @@ ok "Package published"
 step "Release ${NEW_VERSION} complete!"
 echo ""
 info "Summary:"
-info "  Version:  ${OLD_VERSION} → ${NEW_VERSION}"
-info "  Tag:      ${TAG_NAME}"
-info "  Release:  ${REPO_URL}/releases/tag/${TAG_NAME}"
+info "  Version:  ${NEW_VERSION}"
+info "  Tag:      ${TAG_NAME} (local — push manually with: git push origin master && git push origin ${TAG_NAME})"
 echo ""

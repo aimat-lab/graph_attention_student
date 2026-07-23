@@ -1,5 +1,65 @@
 # Changelog
 
+## 1.5.0 - 2026-07-23
+
+Post-Training Diagnostic (Self-Check)
+
+- New `graph_attention_student/torch/evaluation.py`: an agent-facing post-training
+  diagnostic that runs a trained MEGAN model on an evaluation set and writes a JSON
+  report (raw values + PASS/WARN/FAIL verdict per axis and overall) plus
+  `scorecard.png`, `examples.png`, and `fidelity.png`. Scores five axes — `prediction`,
+  `explanation_accuracy` (hard-fail gate), `fidelity_sign`, `fidelity_magnitude`,
+  `coverage` — plus a `divergence` gate (NaN / exploded loss). The
+  `explanation_accuracy` axis reports `computed: false` when the metric cannot be
+  measured, so a broken measurement is never mistaken for a random model. Public
+  entry points: `generate_diagnostic_report()` and `compute_diagnostics()`.
+- Wired into the `evaluate_model` hook of `train_model__megan.py` (validation and
+  test) and `vgd_torch__megan.py` (test), each guarded so a diagnostic failure only
+  warns rather than crashing the run.
+- Added `tests/test_torch_evaluation.py` covering report structure, per-axis verdicts,
+  the `computed: false` path, divergence detection, and artifact writing.
+
+Honest Val/Test Evaluation
+
+- Model selection now monitors the validation set instead of the test set, and each
+  run emits two reports: `report.json` on validation (the tuning gate) and
+  `report_test.json` on test (the final unbiased estimate, with `test_`-prefixed images).
+- Determinism: `pl.seed_everything(SEED, workers=True)` in the train hook and fixed
+  two unseeded `random.seed()` calls in `train_model.py`, so a fixed `SEED` makes runs
+  reproducible and a knob sweep isolates the knob rather than RNG noise.
+
+Explanation Config Round-Trip Fixes
+
+- Persist `importance_mode` and `importance_factor` in `self.hparams` — previously
+  never written, so a reloaded model (`Megan.load` / `load_from_checkpoint`) silently
+  came back with `importance_mode=None` and `importance_factor=0.0`, breaking post-hoc
+  explanation evaluation (`_predict_approximate` skipped its regression→binary
+  conversion, degenerating AUC-based metrics).
+- Persist the previously-missing `UNIFORMITY_FACTOR` / `UNIFORMITY_T` params in
+  `train_model__megan.py` (same latent bug already fixed in `vgd_torch__megan.py`).
+
+Checkpoint / Workflow Fixes
+
+- `model.py`: allowlist Lightning's `AttributeDict` via
+  `torch.serialization.add_safe_globals` so `AbstractGraphModel.load` (hence
+  `Megan.load`, the quickstart, and evaluation) works under torch ≥ 2.6, which
+  defaults `torch.load` to `weights_only=True`.
+- `vgd_torch__megan.py`: define `UNIFORMITY_FACTOR` / `UNIFORMITY_T` as real
+  parameters — pycomex's `__getattr__` raises `KeyError` so the previous
+  `getattr(e, .., default)` default never applied and every sub-experiment lacking
+  these params crashed.
+- `vgd_torch__megan.py`: guard `torch.cuda.memory_summary()` in `after_experiment`
+  with `torch.cuda.is_available()` so a CPU-only run no longer ends "WITH ERROR".
+
+Tooling
+
+- Added the `train-megan-model` Claude Code skill (`.claude/skills/train-megan-model/`):
+  drives training a MEGAN model on a new molecular dataset (a CSV of SMILES + target)
+  end-to-end — validating the data, writing a pycomex sub-experiment from a template,
+  smoke-testing, running, reading the post-training diagnostic self-check, tuning
+  explanation knobs on failure (`IMPORTANCE_OFFSET` as the primary lever, swept against
+  the validation report), and assembling a human-facing explanation report.
+
 ## 1.4.0 - 2026-04-15
 
 Uniformity Regularization

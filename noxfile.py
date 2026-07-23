@@ -22,11 +22,28 @@ def get_wheel_path(path: str = 'dist') -> str:
     raise FileNotFoundError("No wheel file found in dist directory")
 
 
+def compiler_env() -> dict:
+    """Return CC/CXX overrides so source builds find a working compiler.
+
+    On Python versions without a prebuilt ``hdbscan`` wheel (e.g. 3.9/3.10) the
+    dependency is compiled from source. The build defaults to ``clang``, which is
+    not installed everywhere; fall back to ``gcc``/``g++`` when ``clang`` is absent
+    but a GNU compiler is available. Returns an empty dict when no override is
+    needed, leaving the environment untouched.
+    """
+    env = {}
+    if shutil.which("clang") is None and shutil.which("gcc") is not None:
+        env["CC"] = "gcc"
+    if shutil.which("clang++") is None and shutil.which("g++") is not None:
+        env["CXX"] = "g++"
+    return env
+
+
 @nox.session(python=PYTHON_VERSIONS)
 def test(session: nox.Session) -> None:
     """Run tests with pytest and coverage."""
     session.install("pytest", "pytest-cov", "pytest-xdist")
-    session.install("-e", ".")
+    session.install("-e", ".", env=compiler_env())
     session.run(
         "pytest",
         *session.posargs
