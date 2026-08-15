@@ -174,11 +174,16 @@ def export_metadatas_csv(metadatas: t.List[dict],
         # This is for backwards compatibility of datasets. Both of these entries refer to the same thing - 
         # the string representation of the graph - but at some point the name for this field was changed 
         # from "value" to "repr"
+        # Not every dataset ships a domain representation at all - the synthetic color graph
+        # datasets generated after 2026 omit it, for example - so this falls through to a
+        # placeholder rather than leaving the name unbound.
         if 'repr' in metadata:
             value = metadata['repr']
         elif 'value' in metadata:
             value = metadata['value']
-        
+        else:
+            value = None
+
         # Some entries have to be in the metadata dict as per the definition of the visual graph dataset 
         # format, but some values are optional and might not be there - for those we add placeholders 
         # initially and then check for each individual entry if they exist within the dict structure.

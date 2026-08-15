@@ -232,6 +232,19 @@ class MeganTrainingMetricsCallback(Callback):
         self.importance_sparsity: List[np.ndarray] = []
         self.fidelity_values: List[np.ndarray] = []
         self.fidelity_sign_consistency: List[np.ndarray] = []
+        # ~ explanation-loss redesign metrics
+        # These terms are invisible in the original grid, which predates them. Two of the failures
+        # this session cost several runs each precisely because the relevant quantity was not
+        # plotted anywhere: a mask that is structurally correct but numerically collapsed, and a
+        # margin constant that is either unreachable or inert depending on the dataset.
+        self.rdt_losses: List[float] = []
+        self.polar_losses: List[float] = []
+        self.spread_losses: List[float] = []
+        self.margin_met: List[float] = []
+        # mask health, computed from the validation graphs each epoch
+        self.mask_raw_max: List[float] = []
+        self.mask_empty_frac: List[np.ndarray] = []
+        self.mask_midband: List[float] = []
         self.latest_node_importances: Optional[List[np.ndarray]] = None
         self.latest_edge_importances: Optional[List[np.ndarray]] = None
         self.latest_values_true: Optional[np.ndarray] = None
@@ -394,7 +407,8 @@ class MeganTrainingMetricsCallback(Callback):
         metrics = getattr(pl_module, 'batch_metrics', {})
         if not metrics:
             return
-        for key in ('loss', 'loss_pred', 'loss_expl', 'loss_spar', 'loss_cont', 'loss_unif', 'loss_fid'):
+        for key in ('loss', 'loss_pred', 'loss_expl', 'loss_spar', 'loss_cont', 'loss_unif',
+                    'loss_fid', 'loss_rdt', 'loss_polar', 'loss_spread', 'margin_met'):
             if key in metrics:
                 self._epoch_losses[key].append(float(metrics[key]))
 
@@ -415,6 +429,10 @@ class MeganTrainingMetricsCallback(Callback):
             ('loss_cont', self.cont_losses),
             ('loss_unif', self.unif_losses),
             ('loss_fid', self.fid_losses),
+            ('loss_rdt', self.rdt_losses),
+            ('loss_polar', self.polar_losses),
+            ('loss_spread', self.spread_losses),
+            ('margin_met', self.margin_met),
         ]:
             vals = self._epoch_losses.get(key, [])
             target_list.append(np.mean(vals) if vals else 0.0)
@@ -569,6 +587,27 @@ class MeganTrainingMetricsCallback(Callback):
         mean_importance /= max(len(results), 1)
         self.importance_sparsity.append(mean_importance)
 
+        # ~ mask health
+        # raw max says whether the reported mask has a usable scale at all - a run can reach recall
+        # 0.99 at a threshold of 0.1 while reading 0.083 at 0.5 if this collapses. empty fraction
+        # catches masks that vanish entirely, which no aggregate mean reveals. mid-band counts
+        # values left undecided between 0.1 and 0.5, which separates a genuinely sparse mask from a
+        # merely faint one.
+        raw_maxes, empties = [], np.zeros(self.num_channels)
+        mid_total, mid_count = 0.0, 0
+        for r in results:
+            ni = r['node_importance']
+            raw_maxes.append(float(ni.max()) if ni.size else 0.0)
+            for k in range(min(self.num_channels, ni.shape[1])):
+                if not (ni[:, k] > 0.5).any():
+                    empties[k] += 1
+            if ni.size:
+                mid_total += float(np.mean((ni >= 0.1) & (ni <= 0.5)))
+                mid_count += 1
+        self.mask_raw_max.append(float(np.mean(raw_maxes)) if raw_maxes else 0.0)
+        self.mask_empty_frac.append(empties / max(len(results), 1))
+        self.mask_midband.append(mid_total / max(mid_count, 1))
+
         self.latest_node_importances = [np.concatenate(v) if v else np.array([])
                                         for v in node_imps_per_channel]
         self.latest_edge_importances = [np.concatenate(v) if v else np.array([])
@@ -606,7 +645,7 @@ class MeganTrainingMetricsCallback(Callback):
     # ---------------------------------------------------------------
 
     def _create_metrics_plot(self, epoch: int):
-        fig, axes = plt.subplots(6, 5, figsize=(28, 24))
+        fig, axes = plt.subplots(7, 5, figsize=(28, 28))
         fig.suptitle(f'MEGAN Training Metrics — Epoch {epoch}', fontsize=14, fontweight='bold')
 
         epochs = list(range(len(self.train_losses)))
@@ -665,10 +704,64 @@ class MeganTrainingMetricsCallback(Callback):
                       'CPU RAM (GB)', '#e74c3c')
         self._plot_hw(axes[5, 4], epochs, self.epoch_durations, 'Epoch Duration (s)', '#607D8B')
 
+        # -- Row 7: explanation-loss redesign --
+        # These panels exist because their absence was expensive. Several runs this session were
+        # spent chasing symptoms that any one of them would have shown immediately: a mask that was
+        # structurally right but numerically collapsed, and a margin constant that is unreachable on
+        # one dataset and inert on another at the same nominal value.
+        self._plot_redesign_losses(axes[6, 0], epochs)
+        self._plot_loss_line(axes[6, 1], epochs, self.margin_met,
+                             'Margin Satisfied (frac)', '#9C27B0')
+        self._plot_loss_line(axes[6, 2], epochs, self.mask_raw_max,
+                             'Mask Scale (per-graph raw max)', '#E91E63')
+        self._plot_empty_fraction(axes[6, 3], epochs)
+        self._plot_loss_line(axes[6, 4], epochs, self.mask_midband,
+                             'Undecided Values (0.1-0.5)', '#795548')
+
         plt.tight_layout(rect=[0, 0, 1, 0.97])
         return fig
 
     # -- Individual plot helpers --
+
+    def _plot_redesign_losses(self, ax, epochs):
+        """The three redesign loss terms on shared axes, since they are read against each other."""
+        series = [
+            (self.rdt_losses, 'RDT', '#00897B'),
+            (self.polar_losses, 'Polarization', '#F4511E'),
+            (self.spread_losses, 'Spread', '#3949AB'),
+        ]
+        plotted = False
+        for values, label, color in series:
+            if values and any(abs(v) > 1e-12 for v in values):
+                ax.plot(epochs[:len(values)], values, color=color, label=label, linewidth=1.6)
+                plotted = True
+        ax.set_title('Redesign Losses', fontsize=10, fontweight='bold')
+        ax.set_xlabel('Epoch', fontsize=8)
+        ax.grid(alpha=0.3)
+        if plotted:
+            ax.legend(fontsize=7)
+        else:
+            ax.text(0.5, 0.5, 'inactive', ha='center', va='center',
+                    transform=ax.transAxes, fontsize=9, color='#999999')
+
+    def _plot_empty_fraction(self, ax, epochs):
+        """Fraction of validation graphs whose mask is entirely empty, per channel.
+
+        An aggregate mean cannot show this: a channel can have a healthy average importance while a
+        substantial share of individual graphs get no explanation at all.
+        """
+        if self.mask_empty_frac:
+            arr = np.array(self.mask_empty_frac)
+            for k in range(arr.shape[1]):
+                info = self.channel_infos.get(k, {})
+                ax.plot(epochs[:len(arr)], arr[:, k],
+                        color=info.get('color', f'C{k}'),
+                        label=info.get('name', f'channel {k}'), linewidth=1.6)
+            ax.legend(fontsize=7)
+            ax.set_ylim(-0.02, 1.02)
+        ax.set_title('Empty Masks (frac of graphs)', fontsize=10, fontweight='bold')
+        ax.set_xlabel('Epoch', fontsize=8)
+        ax.grid(alpha=0.3)
 
     def _plot_loss_line(self, ax, epochs, values, title, color):
         ax.set_title(title, fontsize=9)
