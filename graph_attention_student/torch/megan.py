@@ -235,6 +235,20 @@ class Megan(MveMixin, AbstractGraphModel):
                  regression_reference: float = 0.0,
                  regression_margin: float = 0.0,
                  sparsity_factor: float = 0.0,
+                 # ~ explanation loss redesign
+                 # These defaults reproduce the original behaviour, so an experiment that does not
+                 # set them trains exactly as it did before. See the attribute docstrings below.
+                 explanation_objective: t.Literal['pooled_bce', 'difference_margin'] = 'pooled_bce',
+                 difference_margin_scale: float = 1.0,
+                 spread_factor: float = 0.0,
+                 polar_factor: float = 0.0,
+                 rdt_factor: float = 0.0,
+                 rdt_samples: int = 1,
+                 rdt_mask_only: bool = True,
+                 rdt_use_raw: bool = False,
+                 rdt_warmup: float = 0.0,
+                 rdt_ramp: float = 0.3,
+                 leave_one_out_fix: bool = True,
                  attention_aggregation: t.Literal['sum', 'min', 'max'] = 'max',
                  normalize_embedding: bool = False,
                  fidelity_factor: float = 0.0,
@@ -271,6 +285,9 @@ class Megan(MveMixin, AbstractGraphModel):
         # Container for batch-level metrics, read by training metrics callbacks.
         # Populated at the end of each training_step, overwritten each batch.
         self.batch_metrics: Dict[str, torch.Tensor] = {}
+        # Set by the difference-margin objective each step and forwarded through
+        # batch_metrics, so the training grid can plot whether the margin is binding.
+        self._last_margin_met: t.Optional[torch.Tensor] = None
 
         # The last integer value in the list of final_units determines the output dimension of the network aka how
         # many graph properties the network will predict at the same time.
@@ -304,6 +321,171 @@ class Megan(MveMixin, AbstractGraphModel):
         self.importance_target = importance_target
         self.regression_margin = regression_margin
         self.sparsity_factor = sparsity_factor
+        # :attr explanation_objective:
+        #       'pooled_bce' is the original: drive a per-channel SUM of importances to a constant
+        #       setpoint. Because it only sees the sum, it is invariant to spreading the same total
+        #       mass over more nodes, so it constrains how much is highlighted and never where.
+        #       'difference_margin' instead requires only that the on-channel exceed the off-channel
+        #       by a margin scaled to how far the target sits from the running mean - a ONE-SIDED
+        #       condition that can be satisfied, after which it stops pulling and leaves the
+        #       allocation to the prediction and spread terms.
+        self.explanation_objective = explanation_objective
+        # :attr difference_margin_scale:
+        #       The constant 'a' in margin = a * |y - mean| / std. Deliberately a constant and not
+        #       learned: a learned margin has a monotonically positive gradient, so the model would
+        #       simply drive it to zero and switch the objective off.
+        self.difference_margin_scale = difference_margin_scale
+        # :attr spread_factor:
+        #       Weight of the spread penalty, which charges for how widely the mask's mass is
+        #       distributed rather than for how much of it there is. A penalty on total mass alone
+        #       cannot distinguish 1.0 on four nodes from 0.5 on eight - both cost the same - so it
+        #       does nothing about a mask that finds the right region and then smears over its
+        #       neighbourhood. This term breaks that tie.
+        #       Intended as a tie-breaker, not an objective: keep it small enough that the
+        #       prediction loss always wins, so that on datasets whose explanations are genuinely
+        #       diffuse the mask is free to stay broad.
+        self.spread_factor = spread_factor
+        # :attr polar_factor:
+        #       Weight of the polarization term, which penalises x*(1-x) on the RAW attention and so
+        #       pushes every value toward either 0 or 1.
+        #
+        #       It exists because nothing else constrains the raw scale at all. Every other term
+        #       operates on node_importance_norm, which divides by the per-graph maximum, so the
+        #       absolute magnitude cancels out of the losses and is free to drift. That is invisible
+        #       during training and then matters twice over: the visualisations plot raw importance,
+        #       and the concept-extraction pipeline binarises explanations at raw > 0.5. A run whose
+        #       masks are structurally correct can therefore be unusable downstream simply because
+        #       its values settled around 0.3 - measured, one arm reached recall 0.99 at a threshold
+        #       of 0.1 while reading 0.083 at 0.5.
+        #
+        #       Polarizing rather than anchoring the peak is the deliberate choice: it fixes the
+        #       scale as a side effect of making every value decisive, so the mask means the same
+        #       thing whatever threshold is applied to it.
+        #
+        #       The risk is that the term is SYMMETRIC. A node sitting at 0.3 is pushed to 0 exactly
+        #       as readily as to 1, and which way it goes is decided by the other terms. For the
+        #       marginal nodes this whole line of work has been about - the green vertex of a ring,
+        #       which has repeatedly sat right at the boundary - that could as easily finish the job
+        #       as undo it. Worth watching rather than assuming.
+        self.polar_factor = polar_factor
+        # :attr rdt_factor:
+        #       Weight of the RDT-fidelity term: replace everything OUTSIDE the explanation with
+        #       random draws from the data distribution and require the prediction to survive.
+        #
+        #       This is the in-distribution counterpart of the subgraph term, and the difference
+        #       matters more than it sounds. Restricting the computation to the mask cuts the graph
+        #       down to a few percent of its edges, producing an input unlike anything the model was
+        #       trained on; its output there is arbitrary, the reconstruction target is
+        #       unachievable, and the resulting gradient destabilised training - measured, both the
+        #       reconstruction loss and the prediction loss rose together and R2 fell from 0.90 to
+        #       0.75. Substituting random values from the dataset instead keeps the node count,
+        #       the degree distribution and the feature statistics intact, so the perturbed graph
+        #       stays on-manifold and the model can actually process it.
+        #
+        #       It also happens to match how this project's synthetic data was generated - random
+        #       colour graphs with motifs seeded into them - so randomising the non-explanation part
+        #       yields another valid graph carrying the same motif, whose value genuinely should be
+        #       unchanged.
+        #
+        #       For the case that motivated all of this it does the right thing without any
+        #       hand-written rule. Leave the green vertex of a ring out of the mask and its colour
+        #       gets randomised, which destroys the ring and moves the prediction; the only way to
+        #       keep the prediction is to include the vertex. Randomising a halo node breaks
+        #       nothing, so there is no pressure to include it.
+        #
+        #       The blend is soft and that is legitimate here, unlike the earlier attempt at gating
+        #       message passing with the continuous mask. There the mask multiplied attention by a
+        #       function of itself, which the model could satisfy by rescaling; here it interpolates
+        #       between real and random FEATURES, which changes the input at any mask value.
+        self.rdt_factor = rdt_factor
+        # :attr rdt_samples:
+        #       Number of independent random replacements averaged per step - the Monte Carlo
+        #       estimate of the expectation in F(S) = E_{Z~N}[match(f(Y_S), f(X))].
+        #
+        #       This matters because the perturbation has two error sources with different
+        #       structure. Randomising the surroundings can CREATE motifs by chance, which changes
+        #       the graph's true value and makes the objective momentarily unsatisfiable; measured
+        #       here, even a perfect mask sees a mean value change of 0.452 with only 70% of graphs
+        #       unaffected, and the resulting floor matched the plateau observed with a single
+        #       sample almost exactly. But that error is RANDOM - a different draw creates different
+        #       spurious motifs, with varying sign, attached to different nodes.
+        #
+        #       Missing a genuinely necessary node is systematic instead. Every draw that
+        #       randomises it destroys the same structure, in the same direction, by the same
+        #       amount. So averaging over draws suppresses the accidental component while the real
+        #       signal survives, which is precisely why the original formulation is an expectation
+        #       rather than a single perturbation.
+        #
+        #       Note this sharpens the GRADIENT rather than lowering the loss: with MSE always
+        #       positive, a perfect mask still scores near the floor, but the pull on a necessary
+        #       node is consistent across samples where the pull on background nodes largely
+        #       cancels.
+        #
+        #       The samples are evaluated as one replicated batch, so the cost is one forward pass
+        #       on rdt_samples times the batch rather than that many separate passes.
+        self.rdt_samples = rdt_samples
+        # :attr rdt_mask_only:
+        #       Whether the RDT gradient is allowed to reach ONLY the mask, by treating the network
+        #       weights as constants during the perturbed forward pass.
+        #
+        #       Without this the term has two ways to be satisfied and only one of them is wanted.
+        #       The loss backpropagates through a second forward pass, so its gradient reaches every
+        #       weight in the model: it can protect the right nodes in the mask, or it can make the
+        #       encoder and the prediction head robust to partially randomised inputs, which
+        #       requires no change to the mask at all. The second route is almost certainly the
+        #       cheaper one, so most of the pressure that was supposed to keep explanation elements
+        #       alive was likely being spent teaching the network to tolerate noise instead.
+        #
+        #       Setting requires_grad False on the parameters for the duration of that forward pass
+        #       makes them constants, so the only route from the loss back into the model is through
+        #       the perturbed input, into the mask that produced it, and from there into the
+        #       attention that produced the mask. Every unit of RDT gradient then lands on the thing
+        #       it is meant to shape. The weights still receive their ordinary gradient from the
+        #       prediction loss and from the mask path itself; what is removed is the shortcut.
+        self.rdt_mask_only = rdt_mask_only
+        # :attr rdt_use_raw:
+        #       Whether the protective mask in the RDT blend is the RAW importance rather than the
+        #       normalized one.
+        #
+        #       This closes a loophole that shows up as the mask's absolute scale collapsing while
+        #       every metric that matters to the losses stays fine. RDT protects a node in
+        #       proportion to its mask value, and with the normalized mask that value is raw divided
+        #       by the per-graph maximum. To protect MORE nodes the model needs more of them near
+        #       1.0 after normalization - and the cheapest way to get many values near the maximum
+        #       is to lower the maximum toward the others rather than raise the others toward it. So
+        #       a stronger RDT term actively compresses the raw range.
+        #
+        #       Measured: with the term at 0.3 the per-graph raw maximum sits at 0.902 with a median
+        #       of 0.998, and 6.70 nodes per graph clear a 0.5 threshold. At 1.0 the maximum falls
+        #       to 0.507 and only 4.70 nodes clear it. Same architecture, same everything else -
+        #       the term's own strength is what shrinks the scale.
+        #
+        #       Blending on the raw importance removes the escape route entirely: protecting a node
+        #       then requires its raw value to be near 1, and shrinking the peak stops protecting
+        #       anything at all. It also means RDT operates on exactly the mask that gets reported,
+        #       visualised and thresholded at 0.5 downstream, rather than on a rescaled proxy.
+        self.rdt_use_raw = rdt_use_raw
+        # :attr rdt_warmup:
+        #       Fraction of training before the term begins. Defaults to zero - unlike the other
+        #       annealed terms this one should be present from the start, because the sparsity term
+        #       drives unused attention to zero early and an element whose attention has already
+        #       collapsed has no gradient left to revive it. A term that arrives late finds parts of
+        #       the graph already pruned beyond recovery.
+        self.rdt_warmup = rdt_warmup
+        # :attr rdt_ramp:
+        #       Fraction of training over which the weight rises to rdt_factor, after which it is
+        #       held. Kept long by default: the term is active from the first step, so the ramp is
+        #       what stops it from dominating before the model can predict anything at all.
+        self.rdt_ramp = rdt_ramp
+        # :attr leave_one_out_fix:
+        #       The leave-one-out fidelity computation masks a channel and re-runs the forward pass.
+        #       Under 'shared' normalization the mask is applied BEFORE the maximum is taken, so
+        #       ablating the channel that happened to own the graph's peak shrinks the denominator
+        #       and silently amplifies every surviving channel. The measured deviation then mixes
+        #       "removed channel k" with "rescaled channel j". When True the normalizer is computed
+        #       from the unmasked importances and reused, so the ablation changes only what it is
+        #       supposed to change. This affects a diagnostic, never training.
+        self.leave_one_out_fix = leave_one_out_fix
         self.normalize_embedding = normalize_embedding
         self.attention_aggregation = attention_aggregation
         self.fidelity_factor = fidelity_factor
@@ -368,6 +550,20 @@ class Megan(MveMixin, AbstractGraphModel):
             'label_smoothing':          label_smoothing,
             'class_weights':            class_weights,
             'output_norm':              output_norm,
+            # Saved with the checkpoint so a reloaded model reconstructs the same explanation
+            # behaviour. Without these a model trained under the redesigned objective would come
+            # back with the defaults and quietly behave like the original.
+            'explanation_objective':    explanation_objective,
+            'difference_margin_scale':  difference_margin_scale,
+            'spread_factor':            spread_factor,
+            'polar_factor':             polar_factor,
+            'rdt_factor':               rdt_factor,
+            'rdt_samples':              rdt_samples,
+            'rdt_mask_only':            rdt_mask_only,
+            'rdt_use_raw':              rdt_use_raw,
+            'rdt_warmup':               rdt_warmup,
+            'rdt_ramp':                 rdt_ramp,
+            'leave_one_out_fix':        leave_one_out_fix,
         })
 
         # ~ Graph encoder layers
@@ -763,11 +959,17 @@ class Megan(MveMixin, AbstractGraphModel):
             node_importance = node_importance.detach()
             edge_importance = edge_importance.detach()
         
+        # Kept before the ablation mask is applied so that the normalizer below can be computed
+        # from the unmasked importances. See the leave_one_out_fix attribute: normalizing after
+        # the mask lets an ablation of one channel rescale the others.
+        node_importance_unmasked = node_importance
+
         if node_mask is not None:
             node_importance = node_importance * node_mask
-            
+
         if node_importance_overwrite is not None:
             node_importance = node_importance_overwrite
+            node_importance_unmasked = node_importance_overwrite
             
         # ~ importance node masking
         # One key step in the MEGAN architecture ist that the attention weights are not simply the edge 
@@ -797,12 +999,21 @@ class Megan(MveMixin, AbstractGraphModel):
         # We need the scatter functionality to find the maximum value across a graph!
         # max_values: (B, K)
         #max_values = torch_scatter.scatter_max(node_importance, data.batch, dim=0)[0]
-        max_values = scatter(node_importance, data.batch, dim=0, reduce='max')
-        # max_values: (B, )
+        # The source of the normalizer is the unmasked importance whenever an ablation mask is in
+        # play, so that zeroing one channel cannot change the scale the others are divided by.
+        norm_source = (node_importance_unmasked
+                       if (self.leave_one_out_fix and node_mask is not None)
+                       else node_importance)
+        max_values = scatter(norm_source, data.batch, dim=0, reduce='max')
+        # max_values: (B, K)
+        # One denominator per graph, shared by every channel. A per-channel variant was tried and
+        # was harmful: giving each channel its own scale collapsed whichever channel was working.
+        # max_values: (B, 1)
         max_values = torch.amax(max_values, dim=-1, keepdim=True)
         max_values = torch.where(max_values < 0.01, torch.ones_like(max_values) * 1e9, max_values)
+        max_values = max_values[data.batch]
         # node_importance_norm: (B * V, K)
-        node_importance_norm = node_importance / max_values[data.batch]
+        node_importance_norm = node_importance / max_values
         # An important detail here is that we dont actually set the values below 0.25 to 0 but rather just 
         # scale them down by a certaion factor. This is important to maintain a proper gradient also 
         # through that computational branch!
@@ -816,9 +1027,14 @@ class Megan(MveMixin, AbstractGraphModel):
         # max_edge_values: (B, K)
         #max_edge_values = torch_scatter.scatter_max(edge_importance, data.batch[edge_index[0]], dim=0)[0]
         max_edge_values = scatter(edge_importance, data.batch[edge_index[0]], dim=0, reduce='max')
-        # max_edge_values: (B, )
+        # max_edge_values: (B, K)
+        # Kept consistent with the node path - normalizing nodes per channel while still normalizing
+        # edges across channels would leave the same coupling in place on the edge masks.
+        # max_edge_values: (B, 1)
         max_edge_values = torch.amax(max_edge_values, dim=-1, keepdim=True)
-        max_edge_values = torch.where(max_edge_values < 0.01, torch.ones_like(max_edge_values) * 1e9, max_edge_values)
+        max_edge_values = torch.where(
+            max_edge_values < 0.01, torch.ones_like(max_edge_values) * 1e9, max_edge_values,
+        )
         # edge_importance_norm: (B * E, K)
         edge_importance_norm = edge_importance / max_edge_values[data.batch[edge_index[0]]]
         # Apply thresholding
@@ -963,7 +1179,105 @@ class Megan(MveMixin, AbstractGraphModel):
             info=info,
             batch_size=batch_size,
         )
-        
+
+        # ~ polarization
+        # Push the RAW attention toward 0 or 1. See polar_factor: the raw scale is otherwise
+        # unconstrained, because every other term sees only the normalized mask.
+        loss_polar = torch.tensor(0.0, device=data.y.device)
+        if self.polar_factor != 0:
+            ni_raw = info['node_importance']
+            ei_raw = info['edge_importance']
+            loss_polar = (
+                (ni_raw * (1.0 - ni_raw)).mean() + (ei_raw * (1.0 - ei_raw)).mean()
+            )
+
+        self.log(
+            'loss_polar', loss_polar.detach().cpu(),
+            prog_bar=False,
+            on_epoch=True,
+            on_step=False,
+            batch_size=batch_size,
+        )
+
+        # ~ RDT fidelity
+        # Replace everything outside the explanation with random draws from the data distribution
+        # and require the prediction to survive. See the rdt_factor attribute.
+        loss_rdt = torch.tensor(0.0, device=data.y.device)
+        rdt_weight = 0.0
+        if self.rdt_factor != 0:
+            max_epochs = getattr(getattr(self, 'trainer', None), 'max_epochs', None)
+            rdt_weight = self.rdt_factor
+            if max_epochs and (self.rdt_warmup > 0 or self.rdt_ramp > 0):
+                progress = self.current_epoch / max(1, max_epochs - 1)
+                if progress < self.rdt_warmup:
+                    rdt_weight = 0.0
+                elif progress < self.rdt_warmup + self.rdt_ramp:
+                    rdt_weight = self.rdt_factor * (
+                        (progress - self.rdt_warmup) / max(1e-6, self.rdt_ramp)
+                    )
+
+        if rdt_weight > 0:
+            # The noise pool is the batch's own node features, permuted. That is in-distribution by
+            # construction and costs nothing to build. Whole ROWS are sampled rather than individual
+            # entries, which matters for one-hot features such as the colours here - drawing each
+            # component independently would produce colours that do not exist in the data.
+            # The UNION of the channel masks, not one channel at a time. With signed channels,
+            # keeping only the positive channel and randomising the rest would destroy the negative
+            # motifs, and the prediction then genuinely should change - so a per-channel version
+            # would be demanding something false. The union states the property actually wanted:
+            # the explanation AS A WHOLE has to be enough to sustain the prediction.
+            # Raw or normalized - see rdt_use_raw. With the normalized mask the model can protect
+            # more nodes by lowering the per-graph maximum instead of raising the others, which
+            # compresses the reported scale; the raw mask removes that route.
+            mask = (info['node_importance'] if self.rdt_use_raw
+                    else info['node_importance_norm']).amax(dim=-1, keepdim=True)
+
+            # Several independent replacements, averaged - the Monte Carlo estimate of the
+            # expectation. See rdt_samples: accidental motif creation is random and cancels across
+            # draws, while a genuinely missing node is destroyed in the same way by every draw.
+            n_nodes = data.x.shape[0]
+
+            # Treat the weights as constants for the perturbed pass, so the only route from this
+            # loss back into the model is through the mask. See rdt_mask_only: otherwise the term
+            # can be satisfied by making the network noise-robust, which does not move the mask at
+            # all and is the cheaper option.
+            params = [p for p in self.parameters() if p.requires_grad]
+            if self.rdt_mask_only:
+                for p in params:
+                    p.requires_grad_(False)
+            try:
+                losses = []
+                for _ in range(max(1, self.rdt_samples)):
+                    perm = torch.randperm(n_nodes, device=data.x.device)
+                    data_pert = data.clone()
+                    # The mask carries gradient; data.x and the permuted copy do not. So the graph
+                    # built by this forward pass reaches back only through the mask.
+                    data_pert.x = mask * data.x + (1.0 - mask) * data.x[perm]
+                    # The target is the TRUE label, not the model's own output. Targeting its own
+                    # prediction creates a feedback loop - a bad mask degrades the prediction, which
+                    # degrades the target, which degrades the mask - and that loop is what tore the
+                    # subgraph run apart. A fixed target cannot drift.
+                    # The model's own configured prediction loss, not a hardcoded MSE. For
+                    # regression these are the same thing, but for classification graph_output is
+                    # logits and out_true is one-hot, where an MSE would be measuring the wrong
+                    # quantity entirely.
+                    losses.append(self.loss_pred(
+                        self(data_pert)['graph_output'], out_true
+                    ).mean())
+                loss_rdt = torch.stack(losses).mean()
+            finally:
+                if self.rdt_mask_only:
+                    for p in params:
+                        p.requires_grad_(True)
+
+        self.log(
+            'loss_rdt', loss_rdt.detach().cpu(),
+            prog_bar=False,
+            on_epoch=True,
+            on_step=False,
+            batch_size=batch_size,
+        )
+
         self.log(
             'loss_pred', loss_pred.detach().cpu(),
             prog_bar=True,
@@ -1022,7 +1336,42 @@ class Megan(MveMixin, AbstractGraphModel):
             #loss_spar = torch.mean(torch.abs(ni))
             #loss_spar = (ni.abs() + 1e-8).pow(0.5).mean()
             loss_spar = hoyer_square_reg(ni)
-        
+
+        # ~ spread penalty
+        # The mass terms above cannot see the difference between 1.0 on four nodes and 0.5 on
+        # eight - both carry the same total - so on their own they do nothing about a mask that
+        # locates the right region and then smears across its neighbourhood. This term charges for
+        # the effective size of the mask's support instead of for its mass.
+        #
+        #   n_eff = (sum |x|)^2 / sum x^2
+        #
+        # which is exactly m for m nodes sharing the mass equally and 1 for all the mass on a single
+        # node. Dividing by the node count makes it comparable across graph sizes.
+        loss_spread = torch.tensor(0.0, device=data.y.device)
+        if self.spread_factor != 0:
+            ni = info['node_importance_norm']
+            num_graphs = int(data.batch.max().item()) + 1
+            counts = scatter(
+                torch.ones_like(ni[:, :1]), data.batch, dim=0,
+                reduce='sum', dim_size=num_graphs,
+            ).clamp(min=1.0)
+            l1 = scatter(ni.abs(), data.batch, dim=0, reduce='sum', dim_size=num_graphs)
+            l2_sq = scatter(ni.pow(2), data.batch, dim=0, reduce='sum', dim_size=num_graphs)
+            n_eff = l1.pow(2) / (l2_sq + 1e-8)
+            # Only channels that actually carry a mask are asked to concentrate. Without this gate
+            # a channel that is correctly silent - no motif of its sign present - would be pushed to
+            # concentrate its residual noise onto one node, which is the opposite of the intent.
+            alive = (l1 > 0.5).float()
+            loss_spread = (n_eff / counts * alive).sum() / (alive.sum() + 1e-8)
+
+        self.log(
+            'loss_spread', loss_spread.detach().cpu(),
+            prog_bar=False,
+            on_epoch=True,
+            on_step=False,
+            batch_size=batch_size,
+        )
+
         self.log(
             'loss_spar', loss_spar.detach().cpu(),
             prog_bar=True,
@@ -1123,8 +1472,15 @@ class Megan(MveMixin, AbstractGraphModel):
             self.prediction_factor * loss_pred
             # loss from the explanation co-training approximation
             + self.importance_factor * loss_expl
-            # loss to encourage sparsity of explanations
+            # loss to encourage sparsity of explanations (optionally annealed upward)
             + self.sparsity_factor * loss_spar
+            # loss to encourage the mask's mass to sit on few nodes rather than be smeared
+            + self.spread_factor * loss_spread
+            # loss requiring the prediction to survive randomising everything outside the
+            # explanation (annealed)
+            + rdt_weight * loss_rdt
+            # loss pushing raw attention toward 0 or 1, so the reported mask has a stable scale
+            + self.polar_factor * loss_polar
             # contrastive loss to encourage the formation of semantic embeddings
             + self.contrastive_factor * loss_cont
             # uniformity loss to spread embeddings on the hypersphere
@@ -1142,7 +1498,15 @@ class Megan(MveMixin, AbstractGraphModel):
             'loss_cont': loss_cont.detach().cpu(),
             'loss_unif': loss_unif.detach().cpu(),
             'loss_fid': loss_fid.detach().cpu(),
+            # ~ explanation-loss redesign
+            # Without these the training grid cannot show the terms that actually shape the mask,
+            # which is how two separate failures this session went unnoticed for whole runs.
+            'loss_rdt': loss_rdt.detach().cpu(),
+            'loss_polar': loss_polar.detach().cpu(),
+            'loss_spread': loss_spread.detach().cpu(),
         }
+        if self._last_margin_met is not None:
+            self.batch_metrics['margin_met'] = self._last_margin_met.cpu()
 
         return loss
 
@@ -1581,6 +1945,9 @@ class Megan(MveMixin, AbstractGraphModel):
             else:
                 # No margin: clean partition at the mean
                 regression_mean = out_true.mean()
+                # Also needed by the difference-margin objective, which scales its margin by the
+                # target's spread and must not depend on whether a sample margin was configured.
+                regression_std = out_true.std()
 
                 values_true = torch.cat([
                     out_true <= regression_mean,
@@ -1592,12 +1959,61 @@ class Megan(MveMixin, AbstractGraphModel):
             values_pred = torch.tanh(0.1 * pooled_importance)
             values_true = values_true * 0.9
 
-            if sample_mask is not None and sample_mask.any():
-                loss_expl += F.binary_cross_entropy(
-                    values_pred[sample_mask], values_true[sample_mask]
-                )
+            if self.explanation_objective == 'pooled_bce':
+
+                if sample_mask is not None and sample_mask.any():
+                    loss_expl += F.binary_cross_entropy(
+                        values_pred[sample_mask], values_true[sample_mask]
+                    )
+                else:
+                    loss_expl += F.binary_cross_entropy(values_pred, values_true)
+
             else:
-                loss_expl += F.binary_cross_entropy(values_pred, values_true)
+                # ~ difference margin
+                # The BCE above is a two-sided setpoint: it drives the on-channel's pooled mass to a
+                # fixed constant and the off-channel's to zero. The constant is the same whether the
+                # true explanation is three nodes or ten, and since the pooling is a sum, the whole
+                # objective is invariant to spreading that mass over more nodes. It therefore says
+                # how much to highlight and never where.
+                #
+                # This replaces only the on-channel half. The requirement becomes one-sided: the
+                # on-channel must exceed the off-channel by a margin proportional to how far the
+                # target sits from the mean. Once that holds the term is flat and stops pulling,
+                # which is the point - it leaves the prediction and spread terms to decide where the
+                # mass goes, in the null space of the discrimination objective.
+                on_is_positive = (out_true > regression_mean).view(-1).float()
+                # pooled_importance: (B, K) with channel 0 negative and channel 1 positive
+                n_pos = pooled_importance[:, 1]
+                n_neg = pooled_importance[:, 0]
+                n_on = torch.where(on_is_positive > 0.5, n_pos, n_neg)
+                n_off = torch.where(on_is_positive > 0.5, n_neg, n_pos)
+
+                delta = n_on - n_off
+                margin = self.difference_margin_scale * (
+                    (out_true.view(-1) - regression_mean).abs() / (regression_std + 1e-8)
+                )
+                # softplus rather than relu so the term keeps a gradient as it approaches
+                # satisfaction instead of switching off abruptly at the boundary.
+                loss_diff = F.softplus(margin - delta)
+
+                # The off-channel exclusivity term is deliberately kept in its original BCE form.
+                # It is the only thing holding background at the floor, and every reformulation the
+                # review looked at that weakened or replaced it collapsed.
+                off_pred = torch.where(on_is_positive > 0.5, values_pred[:, 0], values_pred[:, 1])
+                loss_off = F.binary_cross_entropy(
+                    off_pred, torch.zeros_like(off_pred)
+                )
+
+                margin_met = (delta >= margin).float().mean()
+                self._last_margin_met = margin_met.detach()
+                self.log('margin_met', margin_met,
+                         prog_bar=False, on_epoch=True, on_step=False)
+
+                if sample_mask is not None and sample_mask.any():
+                    loss_expl += loss_diff[sample_mask].mean()
+                else:
+                    loss_expl += loss_diff.mean()
+                loss_expl += loss_off
 
             values_pred_ = info['edge_importance']
             values_true_ = values_true[data.batch[data.edge_index[0]]]
@@ -1617,7 +2033,60 @@ class Megan(MveMixin, AbstractGraphModel):
             values_pred = torch.tanh(0.1 * pooled_importance)
             values_true = values_true * 0.9
 
-            loss_expl = F.binary_cross_entropy(values_pred, values_true)
+            if self.explanation_objective == 'pooled_bce':
+
+                loss_expl = F.binary_cross_entropy(values_pred, values_true)
+
+            else:
+                # ~ difference margin, classification form
+                # The same reasoning as the regression case: the BCE above is a two-sided setpoint
+                # that drives each channel's pooled mass to a fixed constant, so it dictates how
+                # much is highlighted and never where, and it can never be satisfied. Here the
+                # requirement becomes one-sided - the channel of the TRUE class must exceed the
+                # strongest competing channel by a margin - after which the term goes flat and
+                # leaves the allocation to the other terms.
+                #
+                # One deliberate difference from the regression form. There the margin is scaled by
+                # |y - mean| / std, because a target far from the mean is more emphatically a member
+                # of its class and deserves a stronger requirement. A classification label carries
+                # no such gradation: every example is equally a member of its class. So the margin
+                # is a CONSTANT here. Scaling it by the model's own predicted confidence was
+                # considered and rejected - that is self-referential, and the same feedback loop
+                # (worse mask -> worse confidence -> weaker demand -> worse mask) is what tore the
+                # subgraph-sufficiency run apart.
+                # on_idx: (B,) index of the true class for each graph
+                on_idx = out_true.argmax(dim=-1)
+                n_on = pooled_importance.gather(1, on_idx.unsqueeze(-1)).squeeze(-1)
+                # strongest competitor, i.e. the pooled mass of the best wrong channel
+                competitors = pooled_importance.scatter(
+                    1, on_idx.unsqueeze(-1), float('-inf')
+                )
+                n_off = competitors.max(dim=-1).values
+
+                loss_diff = F.softplus(self.difference_margin_scale - (n_on - n_off))
+
+                # The off-channel exclusivity term is kept, as in the regression form. It is the
+                # only thing holding background at the floor, and every reformulation that weakened
+                # it collapsed.
+                off_sel = (out_true < 0.5)
+                if off_sel.any():
+                    loss_off = F.binary_cross_entropy(
+                        values_pred[off_sel], torch.zeros_like(values_pred[off_sel])
+                    )
+                else:
+                    loss_off = torch.tensor(0.0, device=values_pred.device)
+
+                # Fraction of graphs on which the margin is already met. Logged because this
+                # constant does NOT transfer between datasets - the same value was satisfied on 6%
+                # of graphs on rb_dual_motifs and 83% on aqsoldb - and the existing mutagenicity
+                # checkpoint could not be loaded to calibrate it in advance. Watching this early in
+                # a run says immediately whether the term is binding or inert.
+                margin_met = ((n_on - n_off) >= self.difference_margin_scale).float().mean()
+                self._last_margin_met = margin_met.detach()
+                self.log('margin_met', margin_met,
+                         prog_bar=False, on_epoch=True, on_step=False)
+
+                loss_expl = loss_diff.mean() + loss_off
                         
         return loss_expl
     
