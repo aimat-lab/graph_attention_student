@@ -1,5 +1,82 @@
 # Changelog
 
+## 1.6.0 - 2026-08-15
+
+Explanation Objective Redesign
+
+The pooled explanation loss sums node importance, which makes it invariant to how
+that mass is distributed. A motif can be justified by any sufficient subset of its
+nodes, and the sparsity term then prunes the remainder — on the `rb_dual_motifs_v2`
+benchmark the green ring vertex settled at 0.0086, *below* the background level,
+because a ring is discriminable from its closing edge alone while only the spoke
+route pools importance onto that vertex.
+
+Four new opt-in terms on `Megan` address this. **All default to off**, so an
+existing configuration reproduces its previous behaviour exactly.
+
+- `explanation_objective='difference_margin'` (default `'pooled_bce'`, the previous
+  behaviour) asks the on-channel pooled importance to exceed the off-channel one by
+  a margin, instead of asking the on-channel value to be large in absolute terms.
+  For regression the margin scales with `|y - mean| / std` via
+  `difference_margin_scale`, so graphs sitting near the reference are not forced to
+  invent evidence; for classification it is a constant, labels having no gradation.
+  Both variants retain the off-channel exclusivity term.
+- `rdt_factor` adds RDT fidelity: entries outside the explanation are replaced with
+  random draws from the batch and the prediction is required to survive. This is the
+  term that defends the nodes the margin no longer needs. `rdt_mask_only` (default
+  `True`) freezes the weights for that pass so the gradient reaches only the mask,
+  which is what makes it effective rather than just another prediction loss.
+  Supporting knobs: `rdt_samples`, `rdt_use_raw`, `rdt_warmup`, `rdt_ramp`.
+- `polar_factor` drives mask values toward 0 or 1 through `x(1-x)`.
+- `spread_factor` penalises the effective support size `L1^2/L2^2` per graph and
+  channel, gated on the channel being alive.
+
+Two flattened, self-contained reference configurations ship with the reasoning for
+each value in their docstrings: `vgd_torch__megan__rb_dual_motifs_v2__redesign.py`
+(regression) and `vgd_torch__megan__mutagenicity__redesign.py` (classification, with
+polarization lowered to 0.1 — at 0.3 whole masks collapsed to nothing).
+
+On `rb_dual_motifs_v2` the combined recipe moves the green ring vertex from 0.0086
+to 0.991 in-mask and the ring leaf from 0.637 to 0.994, drops attention on near-miss
+decoys from 7–13x background to 0.4x, and raises test R² from 0.947 to 0.96.
+Reproduced across two seeds.
+
+Note that `difference_margin_scale` does **not** transfer between datasets: the same
+nominal value was satisfied by 6% of graphs on `rb_dual_motifs_v2` and 83% on
+`aqsoldb`. Read the new `margin_met` metric rather than assuming a value binds.
+
+Behaviour Change
+
+- `leave_one_out_fix` (new, **default `True`**) computes the importance normalizer
+  from the unmasked importances. Previously the per-graph maximum was taken *after*
+  the ablation mask was applied, so "removed channel k" was confounded with
+  "rescaled channel j" and the deviations were not comparable across channels. This
+  changes the output of `leave_one_out_deviations` relative to 1.5.0; set it to
+  `False` to reproduce the old numbers exactly.
+
+Training Metrics Grid
+
+- The tracked grid grows from 6x5 to 7x5 with a row that makes the new terms
+  observable during training rather than only in the final report: **Redesign
+  Losses** (RDT / polarization / spread on shared axes), **Margin Satisfied** (the
+  fraction of graphs meeting the difference margin), **Mask Scale** (the per-graph
+  raw maximum — masks can be structurally correct and numerically collapsed at the
+  same time, in which case recall at threshold 0.1 and at 0.5 differ by an order of
+  magnitude), **Empty Masks** per channel (graphs receiving no explanation at all,
+  which a mean over all graphs hides), and **Undecided Values** (the fraction in the
+  0.1–0.5 band, i.e. whether polarization is doing anything).
+- All ten loss terms are now logged to `metrics.csv`.
+
+Fixes
+
+- `export_metadatas_csv` left `value` unbound and raised `UnboundLocalError` when a
+  dataset ships neither a `repr` nor a `value` field, as the synthetic color graph
+  datasets do.
+- `vgd_torch__megan__aqsoldb.py` / `vgd_torch__megan__mutagenicity.py`: define
+  `UNIFORMITY_FACTOR` / `UNIFORMITY_T` — pycomex raises `KeyError` rather than
+  `AttributeError` for undefined uppercase parameters, so the base experiment's
+  lookup could not fall back to a default.
+
 ## 1.5.0 - 2026-07-23
 
 Post-Training Diagnostic (Self-Check)
