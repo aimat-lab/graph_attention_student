@@ -160,6 +160,14 @@ TRAIN_MVE: bool = False
 #       the NLL loss to train the variance as well. In general it is recommended to fully converge a model on the 
 #       normal loss before switching to the NLL loss.
 MVE_WARMUP_EPOCHS: int = 50
+# :param UNIFORMITY_FACTOR:
+#       This is the coefficient of the embedding uniformity regularization loss. If this value is 0.0 the
+#       uniformity regularization is disabled. The base experiment accesses this parameter, so it has to be
+#       defined here even when the regularization is not used.
+UNIFORMITY_FACTOR: float = 0.0
+# :param UNIFORMITY_T:
+#       This is the temperature hyperparameter of the embedding uniformity regularization loss.
+UNIFORMITY_T: float = 2.0
 
 EPOCHS: int = 150
 BATCH_SIZE: int = 32

@@ -196,6 +196,14 @@ CONTRASTIVE_BETA: float = 1.0
 #       durign the model training. Changing this from 1.0 should usually not be necessary except for regression
 #       tasks with a vastly different target value scale.
 PREDICTION_FACTOR: float = 1.0
+# :param UNIFORMITY_FACTOR:
+#       This is the coefficient of the embedding uniformity regularization loss. If this value is 0.0 the
+#       uniformity regularization is disabled. The base experiment accesses this parameter, so it has to be
+#       defined here even when the regularization is not used.
+UNIFORMITY_FACTOR: float = 0.0
+# :param UNIFORMITY_T:
+#       This is the temperature hyperparameter of the embedding uniformity regularization loss.
+UNIFORMITY_T: float = 2.0
 
 # == TRAINING PARAMETERS ==
 # These parameters configure the training process itself, such as how many epochs to train 

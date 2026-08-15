@@ -576,11 +576,38 @@ def train_model(e: Experiment,
         num_channels=e.NUM_CHANNELS,
         importance_factor=e.IMPORTANCE_FACTOR,
         importance_offset=e.IMPORTANCE_OFFSET,
-        importance_target='node',
+        # Whether the explanation lives on nodes or on edges. Defensive lookup so that every
+        # existing sub-experiment, none of which define this, keeps the previous hardcoded 'node'.
+        importance_target=(e.IMPORTANCE_TARGET
+                           if 'IMPORTANCE_TARGET' in e.parameters else 'node'),
         sparsity_factor=e.SPARSITY_FACTOR,
         fidelity_factor=e.FIDELITY_FACTOR,
         regression_reference=e.REGRESSION_REFERENCE,
         regression_margin=e.REGRESSION_MARGIN,
+        # Explanation-loss redesign options. Looked up defensively so that every existing
+        # sub-experiment, none of which define these, keeps running unchanged and gets the
+        # original behaviour - Experiment raises KeyError rather than AttributeError for an
+        # unknown parameter, so getattr with a default does not work here.
+        explanation_objective=(e.EXPLANATION_OBJECTIVE
+                               if 'EXPLANATION_OBJECTIVE' in e.parameters else 'pooled_bce'),
+        difference_margin_scale=(e.DIFFERENCE_MARGIN_SCALE
+                                 if 'DIFFERENCE_MARGIN_SCALE' in e.parameters else 1.0),
+        spread_factor=(e.SPREAD_FACTOR
+                       if 'SPREAD_FACTOR' in e.parameters else 0.0),
+        polar_factor=(e.POLAR_FACTOR
+                      if 'POLAR_FACTOR' in e.parameters else 0.0),
+        rdt_factor=(e.RDT_FACTOR
+                    if 'RDT_FACTOR' in e.parameters else 0.0),
+        rdt_use_raw=(e.RDT_USE_RAW
+                     if 'RDT_USE_RAW' in e.parameters else False),
+        rdt_mask_only=(e.RDT_MASK_ONLY
+                       if 'RDT_MASK_ONLY' in e.parameters else True),
+        rdt_samples=(e.RDT_SAMPLES
+                     if 'RDT_SAMPLES' in e.parameters else 1),
+        rdt_warmup=(e.RDT_WARMUP
+                    if 'RDT_WARMUP' in e.parameters else 0.0),
+        rdt_ramp=(e.RDT_RAMP
+                  if 'RDT_RAMP' in e.parameters else 0.3),
         prediction_mode=e.DATASET_TYPE,
         prediction_factor=e.PREDICTION_FACTOR,
         normalize_embedding=e.NORMALIZE_EMBEDDING,
