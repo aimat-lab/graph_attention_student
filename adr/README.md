@@ -9,6 +9,7 @@ This directory contains Architecture Decision Records (ADRs) documenting signifi
 | [001](001-random-access-data-stores.md) | Random Access Data Stores for Efficient Data Loading | Accepted | 2026-01-22 |
 | [002](002-onnx-export.md) | ONNX as the Portability Path for Trained MEGAN Models | Accepted | 2026-08-25 |
 | [003](003-portable-features-by-default.md) | Train on the Portable Feature Set by Default | Accepted | 2026-10-20 |
+| [004](004-javascript-runtime-in-every-export.md) | Ship the JavaScript Runtime in Every Export, Not as an npm Package | Accepted | 2026-10-20 |
 
 ## What is an ADR?
 

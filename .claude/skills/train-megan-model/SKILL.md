@@ -112,8 +112,9 @@ the run on coverage grounds alone. Full field-by-field meaning is in
   "explanations failed the fidelity-sign check — I'd recommend rerunning with X").
 - If the model is meant to run outside Python (a web page, a JavaScript tool, a non-Python
   service), point to `.../debug/onnx_export/`: `model.onnx` plus the `manifest.json`,
-  `featurization.json` and `fixtures.json` a consumer needs. `ONNX_EXPORT.md` in the repository
-  root explains how to run it. If the log says `WARNING: the ONNX export failed`, the reason is
+  `featurization.json` and `fixtures.json` a consumer needs, and `megan.js`, which predicts
+  from SMILES in a web page or in Node. `ONNX_EXPORT.md` in the repository root explains how
+  to run it. If the log says `WARNING: the ONNX export failed`, the reason is
   on that line, most often a missing `export` extra (`uv pip install -e ".[export]"`); the run
   can then be exported afterwards by running `megan export` inside `.../debug/`.
 

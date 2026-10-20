@@ -260,9 +260,10 @@ line or in Python:
     model.export_onnx("onnx_export", graphs, processing=processing)
 
 The export folder holds the model, a manifest of its inputs and outputs, a featurization
-contract and verification fixtures; ``js/featurizer.js`` turns SMILES into the model's inputs
-with RDKit.js. `ONNX_EXPORT.md`_ covers running the model in Python, Node and the browser,
-the portable feature set and what it costs, and the limitations.
+contract, verification fixtures and ``megan.js``, which predicts from SMILES in the browser
+or in Node with RDKit.js and ONNX Runtime Web. `ONNX_EXPORT.md`_ covers running the model in
+Python, Node and the browser, the portable feature set and what it costs, and the
+limitations.
 
 .. _`ONNX_EXPORT.md`: https://github.com/aimat-lab/graph_attention_student/blob/master/ONNX_EXPORT.md
 

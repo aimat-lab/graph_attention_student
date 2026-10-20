@@ -637,10 +637,10 @@ processing = dynamic_import('process.py').processing  # the processing the model
 # A few differently sized molecules. They trace the model and become the fixtures.
 graphs = [processing.process(s) for s in ['CCO', 'c1ccccc1O', 'CC(=O)Oc1ccccc1C(=O)O']]
 paths = model.export_onnx('onnx_export', graphs, processing=processing)
-# paths: {'model': ..., 'fixtures': ..., 'featurization': ..., 'manifest': ...}
+# paths: {'model': ..., 'fixtures': ..., 'featurization': ..., 'javascript': ..., 'manifest': ...}
 ```
 
-This writes `model.onnx` (self-contained), `manifest.json` (input/output signature, architecture, behavioural notes), `featurization.json` (the column-by-column featurization contract, only when every feature is portable) and `fixtures.json` (example inputs with their expected outputs). The model itself is not modified. `ExportError` (from `graph_attention_student.torch.export.onnx_export`) is raised for example molecules without bonds, a processing whose feature widths do not match the model, a `MeganEnsemble`, an opset below 18, or a missing `export` extra.
+This writes `model.onnx` (self-contained), `manifest.json` (input/output signature, architecture, behavioural notes), `featurization.json` (the column-by-column featurization contract, only when every feature is portable), `megan.js` (the JavaScript runtime, written together with `featurization.json`) and `fixtures.json` (example inputs with their expected outputs). The model itself is not modified. `ExportError` (from `graph_attention_student.torch.export.onnx_export`) is raised for example molecules without bonds, a processing whose feature widths do not match the model, a `MeganEnsemble`, an opset below 18, or a missing `export` extra.
 
 `train_model__megan.py` exports automatically into `<archive>/onnx_export` (`EXPORT_ONNX=True`), and the CLI has `megan export` (Section 13).
 
@@ -663,6 +663,7 @@ Inputs: `x` (N, F_node) float32, `edge_index` (2, E) int64, `edge_attr` (E, F_ed
 
 - `graph_output` is logits for classification, as in PyTorch.
 - For leave-one-out fidelity, run once with `node_mask` all ones and once per channel with that channel's column set to zero. The differences in `graph_output` reproduce `leave_one_out_deviations`.
+- In JavaScript, the export's `megan.js` featurizes, batches and splits the outputs back into molecules: `await MeganModel.load('onnx_export/', { RDKit, ort })`, then `await model.predict(['CCO'])` gives each molecule's `prediction` (probabilities for a classifier) and `nodeImportance` (per atom, per channel). See [ONNX_EXPORT.md](ONNX_EXPORT.md).
 
 ---
 

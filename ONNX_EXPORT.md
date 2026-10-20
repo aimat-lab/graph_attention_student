@@ -7,25 +7,29 @@ property and draw the explanation with nothing but files.
 
 The ONNX graph takes graph tensors, not SMILES, because RDKit's sanitization and
 aromaticity perception cannot be expressed as ONNX operators. Every export therefore comes
-with a machine-readable description of the featurization, and `js/featurizer.js` is a
-reference implementation of it on top of [RDKit.js](https://www.npmjs.com/package/@rdkit/rdkit).
+with a machine-readable description of the featurization, and with `megan.js`, one
+JavaScript file that implements it on top of
+[RDKit.js](https://www.npmjs.com/package/@rdkit/rdkit) and predicts molecules from their
+SMILES.
 
 The export is verified under ONNX Runtime on the CPU in Python and with ONNX Runtime
 Web's WASM backend in Node, both by the test suite, and in Chrome, by hand. The graph
 avoids `ScatterElements`, which ONNX Runtime Web's WebGPU backend lacks, so it should run
 there too, but that has not been tested. The design is recorded in
-[ADR-002](adr/002-onnx-export.md), and why training produces portable models by default in
-[ADR-003](adr/003-portable-features-by-default.md).
+[ADR-002](adr/002-onnx-export.md), why training produces portable models by default in
+[ADR-003](adr/003-portable-features-by-default.md), and why `megan.js` ships in every export
+rather than as an npm package in [ADR-004](adr/004-javascript-runtime-in-every-export.md).
 
 ## What an export contains
 
-Every export is a folder, by default named `onnx_export`, with four files:
+Every export is a folder, by default named `onnx_export`, with these files:
 
 | File | Contents |
 |---|---|
 | `model.onnx` | The model, self-contained (no external-data sidecar), typically 1–5 MB depending on layer sizes. Outputs predictions, node and edge importances, graph embeddings and the variance head. |
 | `manifest.json` | The data contract: file hash, opset, input and output signature, the model architecture and configuration, and notes on behaviour that is easy to get wrong. |
 | `featurization.json` | How to turn a molecule into the input tensors, column by column. Only written when every feature can be computed in JavaScript — see [The portable feature set](#the-portable-feature-set). |
+| `megan.js` | The JavaScript runtime: the featurizer, the input batching and `MeganModel`, which predicts from SMILES. It is the copy from the package version that wrote the export, so it always matches `featurization.json`, and it is only written together with it. |
 | `fixtures.json` | Example inputs with the outputs PyTorch produced for them, and the per-molecule features Python computed, so that a consumer can check itself. |
 
 ## Installing
@@ -39,7 +43,7 @@ pip install "graph_attention_student[export]"
 
 Consumers need an ONNX runtime and something to featurize molecules: in Python,
 `onnxruntime` and the model's `process.py` (which needs `visual_graph_datasets`); in
-JavaScript, `onnxruntime-web` and `js/featurizer.js` on top of `@rdkit/rdkit`.
+JavaScript, `onnxruntime-web`, `@rdkit/rdkit` and the export's own `megan.js`.
 
 ## Getting an exported model
 
@@ -60,7 +64,7 @@ Two parameters control this:
 
 | Parameter | Default | Effect |
 |---|---|---|
-| `PORTABLE_FEATURES` | `True` | Train on the 38 node / 11 edge features that `js/featurizer.js` can reproduce. `False` trains on the full 45 node features, for a model that is only ever used from Python. A `PROCESSING_PATH` of your own takes precedence over this flag. |
+| `PORTABLE_FEATURES` | `True` | Train on the 38 node / 11 edge features that `megan.js` can reproduce. `False` trains on the full 45 node features, for a model that is only ever used from Python. A `PROCESSING_PATH` of your own takes precedence over this flag. |
 | `EXPORT_ONNX` | `True` | Export the saved model into `<archive>/onnx_export`. Without the `export` extra, or if the export fails, the run still completes; it logs a warning and records the reason in the experiment data under `onnx/error`. |
 
 Why this is the default, and what it costs, is recorded in
@@ -101,8 +105,8 @@ graphs = [processing.process(smiles) for smiles in ['CCO', 'c1ccccc1O', 'CC(=O)O
 paths = model.export_onnx('onnx_export', graphs, processing=processing)
 ```
 
-`paths` maps each written file's role (`model`, `manifest`, `featurization`, `fixtures`) to
-its path. `export_megan_onnx` in `graph_attention_student.torch.export` is the same
+`paths` maps each written file's role (`model`, `manifest`, `featurization`, `javascript`,
+`fixtures`) to its path. `export_megan_onnx` in `graph_attention_student.torch.export` is the same
 function, for callers without a model method at hand.
 
 The processing must be the one the model was trained with. The exporter checks the feature
@@ -141,8 +145,8 @@ is the full processing without them:
 - **11 edge features**: bond type, stereo, aromaticity, ring membership, conjugation.
 
 Its columns are the first 38 of the full set, in the same order. Hybridization and
-conjugation are not exposed by RDKit.js either; `js/rdkit_algorithms.js` ports RDKit's own
-perception code for them.
+conjugation are not exposed by RDKit.js either; `megan.js` ports RDKit's own perception code
+for them.
 
 What dropping the descriptors costs was measured on AqSolDB, over five paired seeds (same
 splits, model and explanation objective in every arm):
@@ -222,52 +226,12 @@ print(results['graph_output'][0])       # the prediction
 print(results['node_importance_norm'])  # (atoms, channels), 0..1
 ```
 
-### In Node
-
-Copy `js/featurizer.js`, `js/rdkit_algorithms.js` and `js/periodic_table.js` next to your
-code — they are plain ES modules — and install `onnxruntime-web` and `@rdkit/rdkit`.
-`Featurizer.process` turns a SMILES into graph arrays, and `Featurizer.toFeeds` batches
-graphs into the input tensors exactly as PyTorch Geometric does.
-
-```js
-import fs from 'node:fs';
-import { createRequire } from 'node:module';
-import * as ort from 'onnxruntime-web';
-import { Featurizer } from './featurizer.js';
-
-const require = createRequire(import.meta.url);
-const RDKit = await require('@rdkit/rdkit')();
-const read = (name) => JSON.parse(fs.readFileSync(`onnx_export/${name}`, 'utf8'));
-const manifest = read('manifest.json');
-const featurizer = new Featurizer(RDKit, read('featurization.json'));
-const session = await ort.InferenceSession.create(fs.readFileSync('onnx_export/model.onnx'));
-
-const numChannels = manifest.architecture.config.num_channels;
-const graph = featurizer.process('CC(=O)Oc1ccccc1C(=O)O');
-const outputs = await session.run(Featurizer.toFeeds([graph], ort, numChannels));
-
-console.log(outputs.graph_output.data[0]);  // the prediction
-// node_importance_norm is (atoms, channels), flattened row by row.
-const importance = outputs.node_importance_norm.data;
-const atom = (index) => Array.from(importance.slice(index * numChannels, (index + 1) * numChannels));
-console.log(atom(0), atom(1));
-```
-
-`toFeeds` only needs the runtime's `Tensor` class, so the code should be the same with
-`onnxruntime-node`, which has not been tested.
-
 ### In the browser
 
-A static page needs these files next to it:
-
-- the export folder, `onnx_export/`;
-- `featurizer.js`, `rdkit_algorithms.js` and `periodic_table.js` from `js/`;
-- `RDKit_minimal.js` and `RDKit_minimal.wasm` from `@rdkit/rdkit/dist`;
-- `ort.min.mjs` and the `ort-wasm-*.mjs` / `ort-wasm-*.wasm` files from
-  `onnxruntime-web/dist`, which it picks from at runtime.
-
-This page runs the model on aspirin and draws the molecule with the atoms of channel 1
-highlighted:
+`megan.js` is one ES module with no dependencies of its own; you pass it RDKit.js and
+ONNX Runtime Web. Both load from a CDN, so a static page needs nothing next to it but the
+export folder. This page runs the model on aspirin and draws the molecule with the atoms
+of channel 1 highlighted:
 
 ```html
 <!doctype html>
@@ -275,35 +239,31 @@ highlighted:
 <p id="prediction"></p>
 <div id="drawing"></div>
 
-<script src="RDKit_minimal.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@rdkit/rdkit@2025.3.2-1.0.0/dist/RDKit_minimal.js"></script>
 <script type="module">
-  import * as ort from './ort.min.mjs';
-  import { Featurizer } from './featurizer.js';
+  import * as ort from 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.29.0/dist/ort.min.mjs';
+  import { MeganModel } from './onnx_export/megan.js';
 
-  const json = async (path) => (await fetch(path)).json();
   const RDKit = await window.initRDKitModule();
-  const manifest = await json('onnx_export/manifest.json');
-  const featurizer = new Featurizer(RDKit, await json('onnx_export/featurization.json'));
-  const session = await ort.InferenceSession.create('onnx_export/model.onnx');
-  const numChannels = manifest.architecture.config.num_channels;
+  const model = await MeganModel.load('onnx_export/', { RDKit, ort });
 
   const smiles = 'CC(=O)Oc1ccccc1C(=O)O';
-  const outputs = await session.run(
-    Featurizer.toFeeds([featurizer.process(smiles)], ort, numChannels));
-  document.getElementById('prediction').textContent = outputs.graph_output.data[0];
+  const [result] = await model.predict([smiles]);
+  document.getElementById('prediction').textContent = result.prediction[0];
 
-  // Highlight the atoms that channel 1 marks, i.e. those above the 0.1 threshold.
-  const importance = outputs.node_importance_norm.data;
-  const atoms = [];
-  for (let atom = 0; atom * numChannels < importance.length; atom++) {
-    if (importance[atom * numChannels + 1] >= 0.1) atoms.push(atom);
-  }
+  // Highlight the atoms that channel 1 marks, i.e. those at or above the 0.1 threshold.
+  const atoms = result.nodeImportance.flatMap((channels, atom) => (channels[1] >= 0.1 ? [atom] : []));
   const mol = RDKit.get_mol(smiles);
   document.getElementById('drawing').innerHTML =
     mol.get_svg_with_highlights(JSON.stringify({ atoms }));
   mol.delete();
 </script>
 ```
+
+The versions in the two URLs are the ones the tests run against. To do without a CDN, copy
+`RDKit_minimal.js` and `RDKit_minimal.wasm` from `@rdkit/rdkit/dist`, and `ort.min.mjs`
+with the `ort-wasm-*.mjs` and `ort-wasm-*.wasm` files from `onnxruntime-web/dist`, next to
+the page, and point the two URLs at the copies.
 
 The node order is RDKit's atom order for the same SMILES, so `RDKit.get_mol(smiles)`
 numbers the atoms exactly as the importances do. The page must be served over HTTP; it
@@ -312,19 +272,88 @@ cross-origin-isolated page; without it, as on GitHub Pages, it runs single-threa
 is plenty for one molecule at a time. The whole path takes about 4.5 ms per molecule,
 featurization included, for the `units=[128, 128, 128]` AqSolDB model (Node, one thread).
 
+**megan.js from a CDN.** jsDelivr serves the file straight from each release tag, for a
+page that runs several models with one copy, or an online editor with no folder to put it
+in:
+
+```js
+import { MeganModel } from 'https://cdn.jsdelivr.net/gh/aimat-lab/graph_attention_student@v1.7.0/graph_attention_student/torch/export/megan.js';
+```
+
+Use the version in the export's `manifest.json` (`generatedBy`). A `megan.js` that cannot
+read an export's contract refuses it with an error naming the version that wrote it. Do not
+link raw.githubusercontent.com instead: it serves files as `text/plain`, which browsers
+refuse to run as a module.
+
+### What `predict` returns
+
+`model.predict(smilesList)` featurizes a list of SMILES, runs them through the session as
+one batch and returns one result per molecule, in order:
+
+| Field | |
+|---|---|
+| `smiles` | The input. |
+| `prediction` | One value per target. Regression values as they are; for a classifier, probabilities (see [Classification models](#classification-models)). |
+| `nodeImportance` | One row per atom, in RDKit's atom order, with one value per explanation channel. This is `node_importance_norm`, the output an explanation drawing should use. |
+| `edgeImportance` | One row per edge, from `edge_importance_norm`. Every bond is two edges, forward then reverse, as listed in `graph.edgeIndices`. |
+| `outputs` | Every model output for this molecule, by its name in the table above: one row for `graph_*` outputs, one row per atom or edge for `node_*` and `edge_*`. |
+| `graph` | The featurized molecule: `nodeAttributes`, `edgeIndices` and `edgeAttributes`. |
+
+A SMILES that RDKit cannot parse, or a molecule without bonds, fails the whole call with an
+error naming it.
+
+`predict` combines two steps that `megan.js` exports as well, for code that runs the
+session itself: `model.featurizer.process(smiles)` (a `Featurizer`) turns a SMILES into
+graph arrays, and `Featurizer.toFeeds(graphs, ort, numChannels)` batches graphs into the
+input tensors exactly as PyTorch Geometric does.
+
+### In Node
+
+Install `onnxruntime-web` and `@rdkit/rdkit`, and import `megan.js` from the export folder.
+`MeganModel.load` fetches over HTTP, and Node's `fetch` cannot read local files, so in Node
+the model is put together from the files with the constructor:
+
+```js
+import fs from 'node:fs';
+import { createRequire } from 'node:module';
+import * as ort from 'onnxruntime-web';
+import { MeganModel } from './onnx_export/megan.js';
+
+const require = createRequire(import.meta.url);
+const model = new MeganModel({
+  manifest: JSON.parse(fs.readFileSync('onnx_export/manifest.json', 'utf8')),
+  session: await ort.InferenceSession.create(fs.readFileSync('onnx_export/model.onnx')),
+  RDKit: await require('@rdkit/rdkit')(),
+  ort,
+});
+
+const [aspirin] = await model.predict(['CC(=O)Oc1ccccc1C(=O)O']);
+console.log(aspirin.prediction);         // the prediction, one value per target
+console.log(aspirin.nodeImportance[0]);  // atom 0, one value per channel
+```
+
+Node 22 and later load `megan.js` as an ES module wherever it sits. On older versions, add
+`"type": "module"` to your project's `package.json`. `megan.js` only uses the runtime's
+`Tensor` class and `InferenceSession`, so the code should be the same with
+`onnxruntime-node`, which has not been tested.
+
 ### Several molecules at once
 
-`toFeeds` takes a list of graphs, and the Python inputs batch the same way: node and edge
+`predict` takes a list and runs it as one batch. Underneath, `toFeeds` batches graphs the
+way PyTorch Geometric does, which is also how to batch the Python inputs: node and edge
 arrays concatenated, edge indices offset by the number of atoms before them, and `batch`
 holding each node's molecule index. The outputs come back concatenated in the same order —
 `graph_*` has one row per molecule, `node_*` one block of rows per molecule (as many as it
 has atoms), and `edge_*` one block per molecule with two rows per bond, forward then
-reverse.
+reverse. `predict` splits them back into molecules; a caller of `toFeeds` has to do that
+itself.
 
 ### Classification models
 
-`graph_output` is raw logits; MEGAN applies no final activation. Apply a softmax (or a
-sigmoid, for a `prediction_mode='bce'` model) yourself.
+`graph_output` is raw logits; MEGAN applies no final activation. `predict` applies a
+softmax, or a sigmoid per target for a `prediction_mode='bce'` model, and returns the
+probabilities as `prediction`; the logits stay in `outputs.graph_output`. When you run the
+session yourself, apply the activation yourself.
 
 ### Explanation fidelity
 
@@ -345,20 +374,20 @@ This matches the PyTorch result to within 1e-4.
   `edge_indices` and `edge_attributes` Python computed. A featurizer has to reproduce these
   exactly.
 
-The JavaScript tests in `js/` check `featurizer.js`, `toFeeds` and the model against any
-export folder:
+The JavaScript tests in `js/` check `megan.js` — the featurizer, `toFeeds` and
+`MeganModel` — and the model against any export folder:
 
 ```bash
 cd js && npm install
 MEGAN_FIXTURES=/path/to/onnx_export npm test
 ```
 
-If it reports no tests, the folder has no `fixtures.json`.
+If it reports skipped tests, the folder has no `fixtures.json`.
 
 ## Limitations
 
 - **Molecules without bonds** (such as methane) cannot be processed. This is a limitation
-  of MEGAN itself, not of the export; the exporter and `featurizer.js` refuse them with a
+  of MEGAN itself, not of the export; the exporter and `megan.js` refuse them with a
   message saying so.
 - **`MeganEnsemble`** cannot be exported. Export each member model and combine their
   outputs yourself.
@@ -367,7 +396,7 @@ If it reports no tests, the folder has no `fixtures.json`.
   about 2e-3 away from the CPU's. In the measurements recorded in ADR-002 the highlighted
   atoms did not change; pass the provider option `use_tf32="0"` when CPU and GPU results
   have to agree tightly.
-- **Featurization fidelity.** `featurizer.js` reproduces the Python featurization exactly on
+- **Featurization fidelity.** `megan.js` reproduces the Python featurization exactly on
   the 1,200-molecule validation sample (`scripts/validate_js_featurizer.py` with
   `js/validate_broad.mjs`) and on the hand-picked edge cases in the test fixtures. Models
   trained on a precomputed visual graph dataset see the features stored when that dataset
@@ -381,6 +410,9 @@ If it reports no tests, the folder has no `fixtures.json`.
 | `The model takes 38 node and 11 edge features, but the processing has 45 node and 11 edge features.` | The processing is not the one the model was trained with — typically a portable model exported with the full `process.py`. The message names the portable processing when the sizes match it. |
 | `Exporting to ONNX needs the "export" extra, which provides onnxscript` | Install the extra: `pip install "graph_attention_student[export]"`. |
 | `Example graph 0 has no edges` | An example molecule has no bonds. Pick others. |
-| `featurization.json asks for the atom property "…", which this featurizer does not implement` | `featurizer.js` is older than the package that wrote the export. Use the `js/` files from the same version. |
+| `featurization.json has specVersion …, but this megan.js reads version …` or `featurization.json asks for the atom property "…", which this megan.js does not implement` | The `megan.js` comes from another package version than the export. Use the copy in the export folder, or the CDN URL with the version the message names. |
+| `This export has no featurization contract` | The model was trained on features a browser cannot compute; see [Models trained on the full feature set](#manually-from-a-checkpoint). |
+| `"onnx_export/" is not an absolute URL` | `MeganModel.load` outside a browser. Pass an `http://` URL, or build the model with the constructor, as in [In Node](#in-node). |
+| `Failed to load module script: … the server responded with a MIME type of "text/plain"` (in Chrome) | `megan.js` was linked from raw.githubusercontent.com. Use the jsDelivr URL or the copy in the export folder. |
 | `toFeeds needs the model's number of explanation channels` | Pass `manifest.architecture.config.num_channels` as the third argument. |
 | `Module.MountedFiles is not available` (in the browser) | The model uses an external-data sidecar, which ONNX Runtime Web cannot load. The exporter never writes one, so the file was re-saved elsewhere; export it again. |

@@ -9,12 +9,19 @@ Python, in Node, or directly in the browser, where a static page can predict a p
 and draw the explanation with no inference server. `ONNX_EXPORT.md` is the guide.
 
 - `megan export`, `Megan.export_onnx` and `export_megan_onnx` write a self-contained
-  `model.onnx` together with `manifest.json`, `featurization.json` and `fixtures.json`.
+  `model.onnx` together with `manifest.json`, `featurization.json`, `fixtures.json` and
+  `megan.js`.
   Every segment reduction lowers to `ScatterND`, avoiding the `ScatterElements` kernel that
   ONNX Runtime Web's WebGPU backend lacks. Verified on the CPU and on the WASM backend;
   WebGPU is untested. Design: ADR-002.
-- `js/featurizer.js` is a reference RDKit.js implementation of the featurization contract,
-  including ports of RDKit's conjugation and hybridization perception.
+- `megan.js` runs an export in the browser or in Node, with RDKit.js and ONNX Runtime Web:
+  `MeganModel.load(folder, { RDKit, ort })`, then `model.predict(smilesList)`, which
+  returns each molecule's prediction (probabilities for a classifier) and per-atom
+  importances. It is one ES module with no dependencies of its own and holds the
+  reference featurizer, with ports of RDKit's conjugation and hybridization perception.
+  Every export with a featurization contract carries a copy from the same package
+  version, and jsDelivr serves it from each release tag; there is no npm package.
+  Design: ADR-004.
 - `PortableMoleculeProcessing` is the molecule processing without its five per-atom
   descriptors, which RDKit.js cannot compute: 38 node and 11 edge features. On AqSolDB it
   matched the full set on test R² (-0.009, p = 0.18) at a small cost in explanation AUC

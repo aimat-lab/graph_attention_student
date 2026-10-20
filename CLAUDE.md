@@ -35,7 +35,7 @@ pytest tests/test_util.py
 # Using nox (recommended)
 nox -s test
 
-# JavaScript featurizer and ONNX Runtime Web tests (fixtures are generated, not checked in)
+# megan.js and ONNX Runtime Web tests (fixtures are generated, not checked in)
 python scripts/generate_js_fixtures.py
 cd js && npm install && npm test
 ```
@@ -88,8 +88,8 @@ python -m graph_attention_student.cli example -n quickstart
 **ONNX Export (`graph_attention_student.torch.export/`)**
 - `export_megan_onnx` / `Megan.export_onnx` / `megan export` write `model.onnx` plus manifest, featurization contract and fixtures
 - `portable_processing.py` - the 38-node-feature processing a browser can reproduce; `train_model__megan.py` trains on it by default
-- `js/featurizer.js` - reference RDKit.js featurizer for the exported models
-- User guide: `ONNX_EXPORT.md`; design: `adr/002-onnx-export.md`, `adr/003-portable-features-by-default.md`
+- `megan.js` - the JavaScript runtime every portable export carries (featurizer, batching, `MeganModel.predict`); its tests live in `js/`
+- User guide: `ONNX_EXPORT.md`; design: `adr/002-onnx-export.md`, `adr/003-portable-features-by-default.md`, `adr/004-javascript-runtime-in-every-export.md`
 
 ### Key Patterns
 
