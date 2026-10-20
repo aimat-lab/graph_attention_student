@@ -108,6 +108,7 @@ Detect it in step 1 by checking class counts. Remedies (parameters exist in the 
 | `LR_SCHEDULER` | `None` to stop cyclic-LR divergence | 'cyclic' / None |
 | `CLASS_OVERSAMPLING` | (clf) balance minority classes | True / False |
 | `SPARSITY_FACTOR` | (marked DEPRECATED; still applies a Hoyer sparsity reg) extra sparsity | 0.0 – 3.0 |
+| `PORTABLE_FEATURES` | feature set, not a tuning knob: 38 browser-portable features (default) vs all 45 (about +0.02 explanation AUC on AqSolDB, but no browser use) | True / False |
 
 `REGRESSION_REFERENCE` is intentionally absent — it is auto-managed, not a tuning knob (see above).
 

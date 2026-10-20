@@ -43,3 +43,8 @@ slurm-*
 *.sh
 !release.sh
 *.pdf
+# ONNX export artifacts and the JavaScript test fixtures generated from them
+js/node_modules/
+js/test/fixtures/
+onnx_export/
+js/test/broad/

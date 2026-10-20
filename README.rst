@@ -224,6 +224,49 @@ For custom workflows, use the Python API directly:
         output_path="report.pdf"
     )
 
+🌐 Exporting to ONNX
+--------------------
+
+A trained model can be exported to ONNX to run it without PyTorch: in a Python service, in
+Node, or directly in the browser, where a static page can predict a property and draw the
+explanation with no inference server. Exporting needs the ``export`` extra:
+
+.. code-block:: bash
+
+    uv pip install -e ".[export]"
+
+The training experiment does this by default. ``train_model__megan.py`` trains on a feature
+set that a browser can compute and writes the export into the ``onnx_export`` folder of the
+run's archive. Set ``PORTABLE_FEATURES=False`` to train on the full feature set instead, or
+``EXPORT_ONNX=False`` to skip the export.
+
+Any other model can be exported from its checkpoint and processing module, on the command
+line or in Python:
+
+.. code-block:: bash
+
+    # In a folder with model.ckpt and process.py; writes onnx_export/
+    megan export
+
+.. code-block:: python
+
+    from graph_attention_student import Megan
+    from visual_graph_datasets.util import dynamic_import
+
+    model = Megan.load("model.ckpt")
+    processing = dynamic_import("process.py").processing
+
+    graphs = [processing.process(smiles) for smiles in ["CCO", "c1ccccc1O", "CC(=O)Oc1ccccc1C(=O)O"]]
+    model.export_onnx("onnx_export", graphs, processing=processing)
+
+The export folder holds the model, a manifest of its inputs and outputs, a featurization
+contract, verification fixtures and ``megan.js``, which predicts from SMILES in the browser
+or in Node with RDKit.js and ONNX Runtime Web. `ONNX_EXPORT.md`_ covers running the model in
+Python, Node and the browser, the portable feature set and what it costs, and the
+limitations.
+
+.. _`ONNX_EXPORT.md`: https://github.com/aimat-lab/graph_attention_student/blob/master/ONNX_EXPORT.md
+
 🔍 Examples
 -----------
 

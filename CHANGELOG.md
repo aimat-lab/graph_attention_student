@@ -1,5 +1,47 @@
 # Changelog
 
+## 1.7.0 - 2026-10-20
+
+ONNX Export and Browser-Ready Training
+
+Trained models can be exported to ONNX and run without PyTorch: under ONNX Runtime in
+Python, in Node, or directly in the browser, where a static page can predict a property
+and draw the explanation with no inference server. `ONNX_EXPORT.md` is the guide.
+
+- `megan export`, `Megan.export_onnx` and `export_megan_onnx` write a self-contained
+  `model.onnx` together with `manifest.json`, `featurization.json`, `fixtures.json` and
+  `megan.js`.
+  Every segment reduction lowers to `ScatterND`, avoiding the `ScatterElements` kernel that
+  ONNX Runtime Web's WebGPU backend lacks. Verified on the CPU and on the WASM backend;
+  WebGPU is untested. Design: ADR-002.
+- `megan.js` runs an export in the browser or in Node, with RDKit.js and ONNX Runtime Web:
+  `MeganModel.load(folder, { RDKit, ort })`, then `model.predict(smilesList)`, which
+  returns each molecule's prediction (probabilities for a classifier) and per-atom
+  importances. It is one ES module with no dependencies of its own and holds the
+  reference featurizer, with ports of RDKit's conjugation and hybridization perception.
+  Every export with a featurization contract carries a copy from the same package
+  version, and jsDelivr serves it from each release tag; there is no npm package.
+  Design: ADR-004.
+- `PortableMoleculeProcessing` is the molecule processing without its five per-atom
+  descriptors, which RDKit.js cannot compute: 38 node and 11 edge features. On AqSolDB it
+  matched the full set on test R² (-0.009, p = 0.18) at a small cost in explanation AUC
+  (-0.024, p = 0.03); the experiments are `vgd_torch__megan__aqsoldb__featureset*.py`.
+- **Changed default:** `train_model__megan.py` now trains on the portable feature set
+  (`PORTABLE_FEATURES = True`) and exports the saved model into `<archive>/onnx_export`
+  (`EXPORT_ONNX = True`). Sub-experiments that set neither train on 38 instead of 45 node
+  features, so their models come out slightly different from before; set
+  `PORTABLE_FEATURES = False` for the previous behaviour. Design: ADR-003.
+- **Changed requirement:** torch moves from `>=2.1.2,<2.5.1` to `>=2.7.1,<2.8`.
+- The export needs the new `export` extra (`onnx`, `onnxruntime`, `onnxscript`).
+- `Megan.forward` routes its segment reductions through `_segment_max` / `_segment_sum`
+  and takes an optional `num_graphs`. The defaults are the previous calls, so outputs are
+  unchanged. The `lay_pool` and `lay_pool_edge` modules they replace are removed; they
+  had no parameters, so existing checkpoints load as before.
+- `train_model.py` applies a new `after_save` hook once the checkpoint and the processing
+  module are on disk. It archives as `process.py` the module the processing was actually
+  loaded from, which a `load_processing` hook records in `e['_processing_path']`, rather
+  than always `PROCESSING_PATH`.
+
 ## 1.6.0 - 2026-08-15
 
 Explanation Objective Redesign

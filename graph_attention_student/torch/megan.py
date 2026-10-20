@@ -14,7 +14,6 @@ from sklearn.isotonic import IsotonicRegression
 from sklearn.linear_model import LinearRegression
 from torch_geometric.nn.aggr import SumAggregation
 from torch_geometric.nn.aggr import MeanAggregation
-from torch_geometric.nn.aggr import MaxAggregation
 from torch_geometric.data import Data
 from torch_geometric.utils import scatter
 
@@ -664,10 +663,9 @@ class Megan(MveMixin, AbstractGraphModel):
         self.lay_dropout_encoder = nn.Dropout(p=encoder_dropout_rate)
             
         # At the end of the graph encoder, the node embeddings for all the nodes are aggregated into one final 
-        # graph embedding vector by doing an attention-weighted sum.
-        self.lay_pool = SumAggregation()
+        # graph embedding vector by doing an attention-weighted sum. That sum, and the max pooling of the edge
+        # importances onto the nodes, go through _segment_sum and _segment_max rather than aggregation modules.
         self.lay_pool_mean = MeanAggregation()
-        self.lay_pool_edge = MaxAggregation()
         self.lay_pool_importance = SumAggregation()
             
         # ~ Importance/Attention Layers
@@ -852,13 +850,45 @@ class Megan(MveMixin, AbstractGraphModel):
         # TODO: comment
         MveMixin.__init__(self)
             
-    def forward(self, 
-                data: Data, 
+    # ~ segment reductions
+    # Every segment reduction in "forward" goes through these two methods rather than calling
+    # scatter / the aggregation layers directly. The default implementations below ARE the direct
+    # calls, so behaviour is unchanged - the indirection exists so that the ONNX exporter can swap
+    # in implementations that lower to the ScatterND operator, which is the only scatter op that
+    # ONNX Runtime Web's WebGPU backend implements. See torch/export/scatter_ops.py.
+
+    def _segment_max(self,
+                     src: torch.Tensor,
+                     index: torch.Tensor,
+                     dim_size: t.Optional[int] = None,
+                     ) -> torch.Tensor:
+        """
+        Max-reduces the rows of ``src`` into the segments given by ``index``.
+
+        A ``dim_size`` of None lets the number of segments be inferred from ``index``.
+        """
+        return scatter(src, index, dim=0, dim_size=dim_size, reduce='max')
+
+    def _segment_sum(self,
+                     src: torch.Tensor,
+                     index: torch.Tensor,
+                     dim_size: t.Optional[int] = None,
+                     ) -> torch.Tensor:
+        """
+        Sums the rows of ``src`` into the segments given by ``index``.
+
+        A ``dim_size`` of None lets the number of segments be inferred from ``index``.
+        """
+        return scatter(src, index, dim=0, dim_size=dim_size, reduce='sum')
+
+    def forward(self,
+                data: Data,
                 node_mask: t.Optional[torch.Tensor] = None,
                 node_importance_overwrite: t.Optional[torch.Tensor] = None,
                 node_feature_mask: t.Optional[torch.Tensor] = None,
                 stop_importance_grad: bool = False,
                 edge_importance_overwrite: t.Optional[torch.Tensor] = None,
+                num_graphs: t.Optional[int] = None,
                 ) -> t.Dict[str, torch.Tensor]:
     
         node_input, edge_input, edge_index = data.x, data.edge_attr, data.edge_index
@@ -946,10 +976,9 @@ class Megan(MveMixin, AbstractGraphModel):
         # some nodes have no edges (isolated nodes).
         num_nodes = node_input.size(0)
         edge_importance_pooled = 0.5 * (
-            self.lay_pool_edge(edge_importance, edge_index[0], dim_size=num_nodes) +
-            self.lay_pool_edge(edge_importance, edge_index[1], dim_size=num_nodes)
+            self._segment_max(edge_importance, edge_index[0], dim_size=num_nodes) +
+            self._segment_max(edge_importance, edge_index[1], dim_size=num_nodes)
         )
-        # edge_importance_pooled = self.lay_pool_edge(edge_importance, edge_index[1])
             
         # ~ importance masks / explanations
         node_importance = edge_importance_pooled
@@ -1004,7 +1033,7 @@ class Megan(MveMixin, AbstractGraphModel):
         norm_source = (node_importance_unmasked
                        if (self.leave_one_out_fix and node_mask is not None)
                        else node_importance)
-        max_values = scatter(norm_source, data.batch, dim=0, reduce='max')
+        max_values = self._segment_max(norm_source, data.batch, dim_size=num_graphs)
         # max_values: (B, K)
         # One denominator per graph, shared by every channel. A per-channel variant was tried and
         # was harmful: giving each channel its own scale collapsed whichever channel was working.
@@ -1026,7 +1055,7 @@ class Megan(MveMixin, AbstractGraphModel):
 
         # max_edge_values: (B, K)
         #max_edge_values = torch_scatter.scatter_max(edge_importance, data.batch[edge_index[0]], dim=0)[0]
-        max_edge_values = scatter(edge_importance, data.batch[edge_index[0]], dim=0, reduce='max')
+        max_edge_values = self._segment_max(edge_importance, data.batch[edge_index[0]], dim_size=num_graphs)
         # max_edge_values: (B, K)
         # Kept consistent with the node path - normalizing nodes per channel while still normalizing
         # edges across channels would leave the same coupling in place on the edge masks.
@@ -1064,7 +1093,7 @@ class Megan(MveMixin, AbstractGraphModel):
             if node_feature_mask is not None:
                 node_embedding_ *= node_feature_mask[:, k].unsqueeze(-1)
             
-            graph_embedding_ = self.lay_pool(node_embedding_, data.batch)
+            graph_embedding_ = self._segment_sum(node_embedding_, data.batch, dim_size=num_graphs)
 
             # The following layers implement the projection feed forward network for 
             # the individual channels.
@@ -2200,6 +2229,33 @@ class Megan(MveMixin, AbstractGraphModel):
     
         return config
     
+    def export_onnx(self,
+                    out_dir: str,
+                    example_graphs: t.List[tv.GraphDict],
+                    processing=None,
+                    **kwargs,
+                    ) -> t.Dict[str, str]:
+        """
+        Exports this model to ONNX, together with the metadata a non-Python consumer
+        needs to feed it correctly.
+
+        A thin convenience wrapper around
+        :func:`graph_attention_student.torch.export.export_megan_onnx` - see there for
+        the full parameter documentation. Requires the ``export`` extra
+        (``pip install graph_attention_student[export]``).
+
+        :param out_dir: directory to write the model and its metadata into.
+        :param example_graphs: representative graph dicts, used to trace the model and
+            to generate the verification fixtures.
+        :param processing: the MoleculeProcessing used to build the training data. When
+            given, the featurization contract is written out alongside the model.
+
+        :returns: a dict of the written paths, keyed by role.
+        """
+        from graph_attention_student.torch.export import export_megan_onnx
+        return export_megan_onnx(
+            self, out_dir, example_graphs, processing=processing, **kwargs)
+
     def leave_one_out_deviations(self,
                                  graphs: t.List[tv.GraphDict],
                                  batch_size: int = 10_000,

@@ -43,7 +43,9 @@ def compiler_env() -> dict:
 def test(session: nox.Session) -> None:
     """Run tests with pytest and coverage."""
     session.install("pytest", "pytest-cov", "pytest-xdist")
-    session.install("-e", ".", env=compiler_env())
+    # The "export" extra, so tests/test_torch_export.py runs instead of skipping on the
+    # pytest.importorskip at the top of it.
+    session.install("-e", ".[export]", env=compiler_env())
     session.run(
         "pytest",
         *session.posargs
