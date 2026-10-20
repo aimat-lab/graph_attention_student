@@ -3,9 +3,10 @@ Extraction of a portable, JSON-serializable description of a model's architectur
 
 This is deliberately independent of any one export target. The ONNX exporter writes
 it into ``manifest.json`` so a consumer can see what it is running without loading
-the graph, and the Rust/WebAssembly compilation path described in ``RUST_COMPILE.md``
-and ``WASM_COMPILE.md`` needs the same information to generate code. Keeping one
-extractor means the two paths cannot disagree about what a model *is*.
+the graph, and a compiled Rust/WebAssembly path (designed in ``RUST_COMPILE.md`` and
+``WASM_COMPILE.md`` on the ``compile-design-docs`` branch, not implemented) would need
+the same information to generate code. Keeping one extractor means the two paths cannot
+disagree about what a model *is*.
 """
 import typing as t
 

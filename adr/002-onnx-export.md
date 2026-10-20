@@ -12,7 +12,8 @@ case is a static website that predicts a molecular property and renders the expl
 heatmap client-side, with no inference server at all.
 
 Two design documents already targeted this goal by a different route.
-`RUST_COMPILE.md` and `WASM_COMPILE.md` describe a compiler that extracts the model
+`RUST_COMPILE.md` and `WASM_COMPILE.md` (kept on the `compile-design-docs` branch, since
+nothing in them is implemented) describe a compiler that extracts the model
 architecture, folds BatchNorm into the preceding linear layers, and generates
 hand-written Rust which is then built to WebAssembly with `wasm-bindgen`. That approach
 is fast — it eliminates Python dispatch, PyG's message-passing plumbing and per-op
