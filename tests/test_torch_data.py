@@ -544,6 +544,8 @@ class TestSmilesStore:
         # Create initial store
         store1 = SmilesStore.from_csv(sample_csv_file, sample_sqlite_path)
         len1 = len(store1)
+        # Windows cannot replace a file that an open connection still holds.
+        store1.close()
 
         # Create new CSV with different data
         with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
@@ -651,6 +653,7 @@ class TestSmilesGraphStore:
 
         yield store
 
+        store.close()
         try:
             os.unlink(csv_path)
             os.unlink(sqlite_path)
@@ -674,6 +677,7 @@ class TestSmilesGraphStore:
 
         yield store
 
+        store.close()
         try:
             os.unlink(csv_path)
             os.unlink(sqlite_path)
@@ -903,6 +907,7 @@ class TestGraphDataLoader:
 
         yield graph_store
 
+        smiles_store.close()
         try:
             os.unlink(csv_path)
             os.unlink(sqlite_path)
@@ -933,6 +938,7 @@ class TestGraphDataLoader:
 
         yield graph_store
 
+        smiles_store.close()
         try:
             os.unlink(csv_path)
             os.unlink(sqlite_path)

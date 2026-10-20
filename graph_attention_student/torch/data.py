@@ -332,6 +332,19 @@ class SmilesStore(Sequence):
             self._local.conn.row_factory = sqlite3.Row
         return self._local.conn
 
+    def close(self) -> None:
+        """
+        Close the calling thread's database connection, if it has one.
+
+        On Windows an open connection locks the SQLite file, so it cannot be deleted or
+        overwritten - for example by another ``from_csv`` - until it is closed. The store stays
+        usable: the next access opens a new connection.
+        """
+        conn = getattr(self._local, 'conn', None)
+        if conn is not None:
+            conn.close()
+            self._local.conn = None
+
     @property
     def columns(self) -> List[str]:
         """Get the list of column names (excluding _id)."""
