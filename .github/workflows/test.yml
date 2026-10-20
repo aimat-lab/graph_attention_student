@@ -10,6 +10,8 @@ jobs:
   test:
     runs-on: ${{ matrix.os }}
     strategy:
+      # A failure on one platform should not cancel the other and hide its result.
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
         python-version: ['3.10']
@@ -26,6 +28,9 @@ jobs:
       uses: astral-sh/setup-uv@v4
 
     - name: Create and activate virtual environment
+      # Windows has its own step below. Running both makes the second "uv venv" fail,
+      # because uv refuses to replace an existing environment.
+      if: runner.os != 'Windows'
       run: |
         uv venv
         echo "VIRTUAL_ENV=.venv" >> $GITHUB_ENV
