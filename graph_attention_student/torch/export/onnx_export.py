@@ -58,6 +58,64 @@ def _validate_graphs(graphs: t.List[dict]) -> None:
             )
 
 
+def _portable_hint(sizes: t.Tuple[int, int]) -> str:
+    """
+    :returns: a pointer to the portable processing when ``sizes`` are its feature
+        widths, else an empty string.
+    """
+    from graph_attention_student.torch.export import portable_processing
+
+    processing = portable_processing.processing
+    portable = (processing.get_num_node_attributes(), processing.get_num_edge_attributes())
+    if tuple(sizes) != portable:
+        return ''
+
+    return (
+        f' These are the sizes of the portable feature set, so the model was most likely '
+        f'trained on it. Export it with the portable processing: pass --processing-path '
+        f'{portable_processing.__file__} to "megan export", or processing='
+        f'PortableMoleculeProcessing() in Python.'
+    )
+
+
+def _validate_dimensions(model, graphs: t.List[dict], processing=None) -> None:
+    """
+    Rejects a processing object or example graphs whose feature widths do not match
+    the ones the model was trained on.
+
+    Checked up front because the trace itself fails deep inside a matmul, with "a and b
+    must have same reduction dim", which says nothing about the cause. The usual cause
+    is a model trained on the portable feature set being exported with the full
+    processing module that sits next to its checkpoint.
+
+    :raises ExportError: naming both sets of sizes.
+    """
+    expected = (int(model.node_dim), int(model.edge_dim))
+
+    found = []
+    if processing is not None:
+        try:
+            found.append(('the processing', (processing.get_num_node_attributes(),
+                                             processing.get_num_edge_attributes())))
+        except Exception:
+            # Not every processing class can report its sizes; the example graphs it
+            # produced are checked below either way.
+            pass
+    for index, graph in enumerate(graphs):
+        found.append((f'example graph {index}', (
+            np.asarray(graph['node_attributes']).shape[-1],
+            np.asarray(graph['edge_attributes']).shape[-1],
+        )))
+
+    for source, sizes in found:
+        if tuple(sizes) != expected:
+            raise ExportError(
+                f'The model takes {expected[0]} node and {expected[1]} edge features, but '
+                f'{source} has {sizes[0]} node and {sizes[1]} edge features. Export with '
+                f'the processing the model was trained with.' + _portable_hint(expected)
+            )
+
+
 def _tensors_from_graphs(graphs: t.List[dict], num_channels: int) -> t.Tuple[torch.Tensor, ...]:
     """
     Builds the wrapper's input tuple from a list of graph dicts, going through the same
@@ -129,7 +187,8 @@ def export_megan_onnx(model,
         ``featurization.json``, provided every encoder has a JavaScript equivalent.
     :param opset: ONNX opset. Must be at least 18.
 
-    :raises ExportError: on an unsupported model or unusable example graphs.
+    :raises ExportError: on an unsupported model, unusable example graphs, or a
+        processing whose feature widths do not match the model's.
 
     :returns: a dict of the paths written, keyed by role.
     """
@@ -149,6 +208,7 @@ def export_megan_onnx(model,
         raise ExportError('example_graphs must not be empty; it is needed to trace the model.')
 
     _validate_graphs(example_graphs)
+    _validate_dimensions(model, example_graphs, processing)
     os.makedirs(out_dir, exist_ok=True)
 
     wrapper = MeganOnnxWrapper(model).eval()

@@ -19,9 +19,11 @@
  *
  *     const RDKit = await initRDKit();
  *     const spec = await (await fetch('./featurization.json')).json();
+ *     const manifest = await (await fetch('./manifest.json')).json();
  *     const featurizer = new Featurizer(RDKit, spec);
  *     const graph = featurizer.process('CCO');
- *     const feeds = Featurizer.toFeeds([graph], ort);
+ *     const feeds = Featurizer.toFeeds(
+ *       [graph], ort, manifest.architecture.config.num_channels);
  */
 
 import { ATOMIC_MASS, ELEMENT_SYMBOL, ISOTOPE_MASS } from './periodic_table.js';
@@ -278,9 +280,17 @@ export class Featurizer {
    *
    * @param {Array} graphs output of `process`
    * @param {object} ort the onnxruntime module, for its Tensor constructor
-   * @param {number} numChannels the model's `num_channels`, for the node_mask
+   * @param {number} numChannels the model's `num_channels`, for the node_mask. Read it
+   *   from `manifest.architecture.config.num_channels`; there is deliberately no
+   *   default, since a wrong guess only fails once the session runs.
    */
-  static toFeeds(graphs, ort, numChannels = 2) {
+  static toFeeds(graphs, ort, numChannels) {
+    if (!Number.isInteger(numChannels) || numChannels < 1) {
+      throw new Error(
+        `toFeeds needs the model's number of explanation channels, got ${numChannels}. ` +
+        `Read it from manifest.json as manifest.architecture.config.num_channels.`);
+    }
+
     const x = [];
     const batch = [];
     const src = [];

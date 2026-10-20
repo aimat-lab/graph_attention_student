@@ -73,6 +73,23 @@ def _tensors(graphs, num_channels=2):
     )
 
 
+def _rank_flips(expected, actual, tolerance=1e-4):
+    """
+    Counts the pairs of elements that ``actual`` does not order the way ``expected``
+    does, ignoring pairs that ``expected`` itself ties to within ``tolerance``.
+
+    Comparing argsorts directly fails on a trained model: symmetric atoms often get
+    exactly equal importances, and float noise between the two runtimes then swaps
+    their order without changing the explanation. On a trained AqSolDB model that made
+    383 of 1,000 test molecules "rank differently" with no pair actually out of order.
+    """
+    gap_expected = expected[:, None] - expected[None, :]
+    gap_actual = actual[:, None] - actual[None, :]
+    flipped = ((np.sign(gap_expected) * np.sign(gap_actual) <= 0)
+               & (np.abs(gap_expected) > tolerance))
+    return int(flipped.sum()) // 2
+
+
 # == segment reductions ==
 
 def test_segment_ops_match_pyg():
@@ -339,12 +356,10 @@ def test_onnx_preserves_explanations_at_the_task_level(exported):
             expected >= 0.1, actual >= 0.1,
             err_msg=f'{name}: a different set of elements is above the threshold')
 
-        # And they are ranked the same way within each channel.
+        # And they are ranked the same way within each channel, up to exact ties.
         for channel in range(expected.shape[1]):
-            np.testing.assert_array_equal(
-                np.argsort(-expected[:, channel], kind='stable'),
-                np.argsort(-actual[:, channel], kind='stable'),
-                err_msg=f'{name}: channel {channel} ranks elements differently')
+            flips = _rank_flips(expected[:, channel], actual[:, channel])
+            assert flips == 0, f'{name}: channel {channel} orders {flips} pairs differently'
 
 
 def test_node_mask_reproduces_leave_one_out(exported):
@@ -459,6 +474,32 @@ def test_edgeless_graph_is_rejected_with_an_explanation():
     model = _model()
     with pytest.raises(ExportError, match='no edges'):
         export_megan_onnx(model, tempfile.mkdtemp(), graphs, processing=processing)
+
+
+def test_mismatched_processing_is_rejected_with_a_hint():
+    """
+    A model trained on the portable feature set, exported with the full processing that
+    sits next to its checkpoint, should be refused with a pointer to the portable
+    processing - not fail with a shape error from inside the trace.
+    """
+    from graph_attention_student.torch.export.portable_processing import (
+        PortableMoleculeProcessing)
+
+    portable = PortableMoleculeProcessing()
+    model = _model(node_dim=portable.get_num_node_attributes(),
+                   edge_dim=portable.get_num_edge_attributes())
+    # The default processing produces 10 node and 4 edge features.
+    processing, graphs = _graphs(SMILES[:3])
+    with pytest.raises(ExportError, match='portable_processing'):
+        export_megan_onnx(model, tempfile.mkdtemp(), graphs, processing=processing)
+
+
+def test_mismatched_example_graphs_are_rejected():
+    """Example graphs of the wrong width should be refused even without a processing."""
+    _, graphs = _graphs(SMILES[:3])
+    model = _model(node_dim=12)
+    with pytest.raises(ExportError, match='takes 12 node'):
+        export_megan_onnx(model, tempfile.mkdtemp(), graphs)
 
 
 def test_low_opset_is_rejected():

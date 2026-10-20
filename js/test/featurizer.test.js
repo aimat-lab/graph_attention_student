@@ -78,6 +78,39 @@ describe('featurizer', { skip: available ? false : `no fixtures in ${FIXTURE_DIR
   });
 });
 
+describe('toFeeds', { skip: available ? false : `no fixtures in ${FIXTURE_DIR}` }, () => {
+  test('collates featurized molecules into exactly the tensors PyG built', async () => {
+    // The fixture inputs are the PyG batch the model was traced with, so this covers the
+    // whole consumer path up to the session: featurization, edge offsets, batch vector,
+    // graph_ids and node_mask.
+    const initRDKit = require('@rdkit/rdkit');
+    const RDKit = await initRDKit();
+    const ort = (await import('onnxruntime-web')).default;
+    const read = (name) => JSON.parse(fs.readFileSync(path.join(FIXTURE_DIR, name), 'utf8'));
+    const fixtures = read('fixtures.json');
+    const manifest = read('manifest.json');
+
+    const featurizer = new Featurizer(RDKit, read('featurization.json'));
+    const graphs = fixtures.featurization.map((entry) => featurizer.process(entry.smiles));
+    const feeds = Featurizer.toFeeds(graphs, ort, manifest.architecture.config.num_channels);
+
+    for (const [name, expected] of Object.entries(fixtures.inputs)) {
+      const got = feeds[name];
+      assert.ok(got, `toFeeds produced no input named "${name}"`);
+      assert.deepEqual([...got.dims], expected.dims, `dims differ for "${name}"`);
+      assert.deepEqual(Array.from(got.data, Number), expected.data, `values differ for "${name}"`);
+    }
+  });
+
+  test('refuses to guess the number of channels', async () => {
+    const ort = (await import('onnxruntime-web')).default;
+    const graph = {
+      nodeAttributes: [[1], [1]], edgeIndices: [[0, 1], [1, 0]], edgeAttributes: [[1], [1]],
+    };
+    assert.throws(() => Featurizer.toFeeds([graph], ort), /num_channels/);
+  });
+});
+
 describe('onnx model', { skip: available ? false : `no fixtures in ${FIXTURE_DIR}` }, () => {
   test('reproduces the PyTorch outputs under ONNX Runtime Web', async () => {
     const ort = (await import('onnxruntime-web')).default;

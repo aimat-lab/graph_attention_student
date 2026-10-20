@@ -69,8 +69,11 @@ any number of channels.
 
 **Good**
 
-- A trained model runs under ONNX Runtime in Python, Node and the browser, on both the
-  WASM and (by construction) the WebGPU backends. Exported models are around 1 MB.
+- A trained model runs under ONNX Runtime in Python, Node and the browser on the WASM
+  backend, which the tests cover. The graph contains only `ScatterND`, so it should also
+  run on the WebGPU backend, but no exported model has been run there yet. Exported
+  models are 1–5 MB: 1.1 MB for the `units=[16, 16]` test model, 5.4 MB for the
+  `units=[128, 128, 128]` AqSolDB model.
 - The export is verified rather than asserted: bit-identical layer parity, PyTorch vs
   onnxruntime numerics across batch sizes, and *task-level* explanation equivalence —
   the same atoms above the threshold and the same importance ranking. The last of these

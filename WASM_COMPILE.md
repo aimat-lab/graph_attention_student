@@ -6,7 +6,7 @@ Design document for a system that takes a trained PyTorch GNN model and compiles
 > **See also:** [ADR-002](adr/002-onnx-export.md). An ONNX export now exists at
 > `graph_attention_student/torch/export/`, covering the same browser use case with far
 > less owned code. The two are complementary: ONNX is the *portability* path (Python,
-> Node and the browser, on both the WASM and WebGPU backends), while this document
+> Node and the browser; tested on WASM, not yet on WebGPU), while this document
 > describes the *speed* path. Both consume the same architecture description from
 > `graph_attention_student/torch/export/architecture.py`, so they cannot disagree about
 > what a model is. The explanation of why direct export was viable at all — MEGAN uses
