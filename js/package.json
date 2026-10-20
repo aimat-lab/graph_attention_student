@@ -1,0 +1,14 @@
+{
+  "name": "graph-attention-student-js",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Reference JavaScript featurizer and verification tests for MEGAN ONNX exports.",
+  "scripts": {
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "@rdkit/rdkit": "^2025.3.2-1.0.0",
+    "onnxruntime-web": "^1.23.0"
+  }
+}
