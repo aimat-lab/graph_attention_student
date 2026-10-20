@@ -60,10 +60,12 @@ def _run_training(base_path, **parameters) -> str:
         yaml.dump(config, file)
 
     pycomex = shutil.which('pycomex', path=os.path.dirname(sys.executable)) or 'pycomex'
+    # UTF-8 mode on both ends: on Windows a piped child would otherwise write cp1252 and
+    # fail on the first character outside it that the experiment logs.
     result = subprocess.run(
         [pycomex, 'run', config_path],
-        capture_output=True, text=True,
-        env={**os.environ, 'CUDA_VISIBLE_DEVICES': ''},
+        capture_output=True, encoding='utf-8', errors='replace',
+        env={**os.environ, 'CUDA_VISIBLE_DEVICES': '', 'PYTHONUTF8': '1'},
     )
     # The experiment is in debug mode, so its archive is always the "debug" folder.
     archive = os.path.join(base_path, 'run', 'debug')
