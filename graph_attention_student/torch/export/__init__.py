@@ -4,7 +4,14 @@ Export of trained MEGAN models to portable formats.
 The entry point is :func:`export_megan_onnx`, which writes an ONNX model plus the
 metadata a non-Python consumer needs in order to feed it correctly.
 """
-__all__ = ['export_megan_onnx']
+import os
+
+__all__ = ['export_megan_onnx', 'MEGAN_JS_PATH']
+
+#: The JavaScript runtime for exported models: the reference featurizer, the input
+#: batching and a ``MeganModel`` class that predicts from SMILES. It ships inside the
+#: package so that every export can carry a copy written by the same version.
+MEGAN_JS_PATH: str = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'megan.js')
 
 
 def __getattr__(name):

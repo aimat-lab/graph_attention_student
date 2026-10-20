@@ -8,12 +8,14 @@ outputs so an independent implementation can verify itself.
 import importlib.util
 import json
 import os
+import shutil
 import typing as t
 
 import numpy as np
 import torch
 from torch.export import Dim
 
+from graph_attention_student.torch.export import MEGAN_JS_PATH
 from graph_attention_student.torch.export.architecture import extract_architecture
 from graph_attention_student.torch.export.featurization import derive_featurization_spec
 from graph_attention_student.torch.export.manifest import build_manifest
@@ -200,7 +202,8 @@ def export_megan_onnx(model,
         verification fixtures. Use a handful of representative, differently-sized graphs.
     :param processing: the :class:`MoleculeProcessing` used to build the training data.
         When given, its featurization contract is derived and written to
-        ``featurization.json``, provided every encoder has a JavaScript equivalent.
+        ``featurization.json``, provided every encoder has a JavaScript equivalent, and
+        ``megan.js``, the JavaScript runtime that implements it, is copied alongside.
     :param opset: ONNX opset. Must be at least 18.
 
     :raises ExportError: on an unsupported model, unusable example graphs, or a
@@ -319,6 +322,12 @@ def export_megan_onnx(model,
             with open(path, 'w') as file:
                 json.dump(result.spec, file, indent=2)
             written['featurization'] = path
+
+            # The copy of the runtime from this very package version, so that the folder
+            # can be served as it is and its featurizer always matches the contract.
+            path = os.path.join(out_dir, 'megan.js')
+            shutil.copyfile(MEGAN_JS_PATH, path)
+            written['javascript'] = path
         else:
             featurization_reason = result.reason
 

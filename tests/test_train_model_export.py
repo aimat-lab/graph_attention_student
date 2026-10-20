@@ -85,7 +85,8 @@ def test_default_training_run_is_browser_ready(tmp_path):
                        shallow=False), 'the archived process.py is not the portable one'
 
     onnx_path = os.path.join(archive, 'onnx_export')
-    for name in ('model.onnx', 'manifest.json', 'featurization.json', 'fixtures.json'):
+    for name in ('model.onnx', 'manifest.json', 'featurization.json', 'fixtures.json',
+                 'megan.js'):
         assert os.path.exists(os.path.join(onnx_path, name)), f'{name} was not exported'
 
     manifest = json.load(open(os.path.join(onnx_path, 'manifest.json')))

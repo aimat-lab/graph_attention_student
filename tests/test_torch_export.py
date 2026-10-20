@@ -19,6 +19,7 @@ from graph_attention_student.torch.layers import (
 from graph_attention_student.torch.export.layers_explicit import (
     explicit_layer_from, UnsupportedLayerError,
 )
+from graph_attention_student.torch.export import MEGAN_JS_PATH
 from graph_attention_student.torch.export.scatter_ops import segment_max, segment_sum
 from graph_attention_student.torch.export.featurization import derive_featurization_spec
 from graph_attention_student.torch.export.architecture import extract_architecture
@@ -243,11 +244,17 @@ def exported():
 
 
 def test_export_writes_the_expected_artifacts(exported):
-    """The export should produce a model, a manifest, fixtures and a featurization spec."""
+    """
+    The export should produce a model, a manifest, fixtures, a featurization spec and the
+    package's own copy of megan.js, the runtime that implements that spec.
+    """
     _, _, _, paths = exported
-    for role in ('model', 'manifest', 'fixtures', 'featurization'):
+    for role in ('model', 'manifest', 'fixtures', 'featurization', 'javascript'):
         assert role in paths, f'no {role} was written'
         assert os.path.getsize(paths[role]) > 0
+
+    with open(paths['javascript'], 'rb') as copy, open(MEGAN_JS_PATH, 'rb') as original:
+        assert copy.read() == original.read()
 
 
 def test_exported_graph_is_valid_and_uses_only_scatter_nd(exported):
@@ -438,7 +445,7 @@ def test_unportable_encoder_withholds_the_spec_but_still_exports():
             'chiral_tag': {
                 'callback': chem_prop('GetChiralTag', list_identity),
                 'description': 'Chiral tag - works fine in Python, but is not one of '
-                               'the properties featurizer.js implements',
+                               'the properties megan.js implements',
             },
         }
 
@@ -456,6 +463,9 @@ def test_unportable_encoder_withholds_the_spec_but_still_exports():
 
     assert 'featurization' not in paths
     assert not os.path.exists(os.path.join(directory, 'featurization.json'))
+    # Without a contract to implement, a copy of the runtime would only mislead.
+    assert 'javascript' not in paths
+    assert not os.path.exists(os.path.join(directory, 'megan.js'))
 
     manifest = json.load(open(paths['manifest']))
     assert manifest['featurization'] is None
