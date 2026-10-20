@@ -215,10 +215,11 @@ function atomValences(atom, accum) {
  * marked together. That is why ethylene's lone C=C is not conjugated - with implicit
  * hydrogens there is no second bond at either carbon to pair it with.
  *
+ * @param {object} topo the result of topology(atoms, bonds)
  * @returns {boolean[]} one flag per bond, in input order
  */
-function setConjugation(atoms, bonds) {
-  const { degree, accum, incident } = topology(atoms, bonds);
+function setConjugation(atoms, bonds, topo) {
+  const { degree, accum, incident } = topo;
   const valences = atoms.map((atom, i) => atomValences(atom, accum[i]));
 
   // Aromatic bonds start conjugated; everything else starts false.
@@ -282,13 +283,14 @@ function numBondsPlusLonePairs(atom, degree, totalValence) {
  * Verified against RDKit over 409,678 atoms - AqSolDB, lipophilicity and logp - with zero
  * disagreements.
  *
+ * @param {object} topo the result of topology(atoms, bonds)
+ * @param {boolean[]} conjugated the result of setConjugation(atoms, bonds, topo)
  * @returns {string[]} 'S' | 'SP' | 'SP2' | 'SP3' | 'SP3D' | 'SP3D2' | 'UNSPECIFIED'
  */
-function hybridizations(atoms, bonds) {
-  const { degree, accum, incident } = topology(atoms, bonds);
+function hybridizations(atoms, bonds, topo, conjugated) {
+  const { degree, accum, incident } = topo;
   const totalValence = atoms.map((atom, i) => atomValences(atom, accum[i]).total);
 
-  const conjugated = setConjugation(atoms, bonds);
   const hasConjugatedBond = atoms.map(() => false);
   bonds.forEach((bond, k) => {
     if (conjugated[k]) {
@@ -345,9 +347,9 @@ const HYBRIDIZATION = {
 
 /**
  * RDKit BondStereo integers, keyed by the string CommonChem reports.
- * Absent means STEREONONE.
+ * Absent means STEREONONE. CommonChem writes STEREOANY as "either", not "any".
  */
-const BOND_STEREO = { unspecified: 0, any: 1, cis: 2, trans: 3 };
+const BOND_STEREO = { unspecified: 0, either: 1, cis: 2, trans: 3 };
 
 /** Everything this featurizer knows how to compute. */
 export const SUPPORTED_ATOM_PROPERTIES = new Set([
@@ -490,16 +492,19 @@ export class Featurizer {
       const inRingBond = bonds.map(({ i, j }) =>
         ringEdges.has(i < j ? `${i}-${j}` : `${j}-${i}`));
 
-      const { degree } = topology(atoms, bonds);
+      // Computed once and shared: hybridization depends on conjugation, and both on
+      // the topology.
+      const topo = topology(atoms, bonds);
+      const conjugated = setConjugation(atoms, bonds, topo);
 
       return {
         atoms,
         bonds,
         inRingAtom,
         inRingBond,
-        degree,
-        conjugated: setConjugation(atoms, bonds),
-        hybridization: hybridizations(atoms, bonds),
+        degree: topo.degree,
+        conjugated,
+        hybridization: hybridizations(atoms, bonds, topo, conjugated),
       };
     } finally {
       mol.delete();

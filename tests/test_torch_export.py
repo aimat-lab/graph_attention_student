@@ -132,6 +132,24 @@ def test_segment_ops_match_the_aggregation_layers():
         MaxAggregation()(src, index, dim_size=num_segments))
 
 
+def test_segment_max_matches_pyg_on_negative_inputs():
+    """
+    ``segment_max`` should return the true maximum of an all-negative segment, as PyG
+    does, rather than clamping it to zero, while an empty segment still comes out as zero.
+    """
+    torch.manual_seed(0)
+    num_segments = 5
+    src = -torch.rand(11, 3) - 0.5
+    index = torch.randint(0, num_segments, (11,))
+    index[index == 2] = 0
+
+    expected = scatter(src, index, dim=0, dim_size=num_segments, reduce='max')
+    got = segment_max(src, index, num_segments)
+    assert torch.equal(got, expected)
+    assert (got[index.unique()] < 0).all()
+    assert (got[2] == 0).all()
+
+
 # == explicit layers ==
 
 @pytest.mark.parametrize('layer_class,kwargs', [
@@ -229,6 +247,19 @@ def test_wrapper_does_not_mutate_the_model():
 
     assert torch.equal(before, after)
     assert type(model.encoder_layers[0]).__name__ == 'ParallelHeadAttention'
+
+
+def test_wrapper_rejects_a_segment_reduction_without_dim_size():
+    """
+    A segment count inferred from the index cannot be traced, so the wrapper's segment
+    reductions should refuse a missing dim_size with a message that says so.
+    """
+    wrapper = MeganOnnxWrapper(_model())
+    src, index = torch.rand(4, 2), torch.tensor([0, 0, 1, 1])
+    with pytest.raises(ValueError, match='dim_size'):
+        wrapper.model._segment_max(src, index)
+    with pytest.raises(ValueError, match='dim_size'):
+        wrapper.model._segment_sum(src, index)
 
 
 # == the export ==
@@ -533,6 +564,22 @@ def test_low_opset_is_rejected():
     with pytest.raises(ExportError, match='opset'):
         export_megan_onnx(model, tempfile.mkdtemp(), graphs,
                           processing=processing, opset=17)
+
+
+def test_single_example_graph_exports_with_a_dynamic_batch():
+    """
+    A single example graph should export, and the result should still accept other batch
+    sizes. Traced as it is, a batch of one would fix num_graphs to the constant 1.
+    """
+    processing, graphs = _graphs(['CCO'])
+    model = _model()
+    paths = export_megan_onnx(model, tempfile.mkdtemp(), graphs, processing=processing)
+
+    _, args = _tensors(_graphs(SMILES[:3])[1])
+    session = ort.InferenceSession(paths['model'], providers=['CPUExecutionProvider'])
+    got = session.run(None, {name: tensor.numpy()
+                             for name, tensor in zip(INPUT_NAMES, args)})
+    assert got[0].shape[0] == 3
 
 
 def test_empty_example_graphs_are_rejected():

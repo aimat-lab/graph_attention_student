@@ -263,28 +263,29 @@ def load_processing(e: Experiment) -> object:
     """
     Load the processing, swapping in the portable feature set when PORTABLE_FEATURES is set.
 
-    The swap points PROCESSING_PATH at the portable processing module rather than merely
-    returning a different object, because train_model.py later copies the module at
-    PROCESSING_PATH into the archive as process.py. Returning the portable processing while
-    leaving the path alone would archive the full 45-column module next to a 38-column
-    model - exactly the mismatch that makes "megan export" fail.
+    The swap records the portable processing module in ``e['_processing_path']``, which is
+    the file train_model.py archives as process.py. Archiving the full 45-column module
+    next to a 38-column model is exactly the mismatch that makes "megan export" fail.
     """
     default_path = os.path.join(ASSETS_PATH, 'molecule_processing.py')
-    uses_default = (e.PROCESSING_PATH is not None
-                    and os.path.abspath(e.PROCESSING_PATH) == os.path.abspath(default_path))
+    path = e.PROCESSING_PATH
+    uses_default = (path is not None
+                    and os.path.abspath(path) == os.path.abspath(default_path))
 
     if e.PORTABLE_FEATURES and uses_default:
         e.log('using the portable feature set (PORTABLE_FEATURES)...')
-        e.PROCESSING_PATH = portable_processing.__file__
+        path = portable_processing.__file__
     elif e.PORTABLE_FEATURES:
         e.log('PORTABLE_FEATURES is set, but PROCESSING_PATH names a processing module of '
               'its own, which takes precedence')
 
-    if e.PROCESSING_PATH is not None and os.path.exists(e.PROCESSING_PATH):
-        e.log(f'loading processing from {e.PROCESSING_PATH}...')
-        return dynamic_import(e.PROCESSING_PATH, 'process').processing
+    if path is not None and os.path.exists(path):
+        e.log(f'loading processing from {path}...')
+        e['_processing_path'] = path
+        return dynamic_import(path, 'process').processing
 
     e.log('using default MoleculeProcessing...')
+    e['_processing_path'] = None
     return MoleculeProcessing()
 
 
@@ -1315,7 +1316,11 @@ def export_onnx(e: Experiment,
     # Up to eight test molecules spread over the size range, so the trace sees differently
     # sized graphs. They double as the verification fixtures in fixtures.json.
     graphs = [index_data_map[i]['metadata']['graph'] for i in test_indices]
-    graphs = [graph for graph in graphs if np.asarray(graph['edge_indices']).ndim == 2]
+    # The same test the exporter applies, so an edgeless graph is skipped here rather
+    # than failing the whole export.
+    graphs = [graph for graph in graphs
+              if np.asarray(graph['edge_indices']).ndim == 2
+              and np.asarray(graph['edge_indices']).shape[0] > 0]
     graphs.sort(key=lambda graph: len(graph['node_attributes']))
     positions = np.linspace(0, len(graphs) - 1, num=min(8, len(graphs)))
     example_graphs = [graphs[int(round(position))] for position in positions]

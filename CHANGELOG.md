@@ -35,9 +35,12 @@ and draw the explanation with no inference server. `ONNX_EXPORT.md` is the guide
 - The export needs the new `export` extra (`onnx`, `onnxruntime`, `onnxscript`).
 - `Megan.forward` routes its segment reductions through `_segment_max` / `_segment_sum`
   and takes an optional `num_graphs`. The defaults are the previous calls, so outputs are
-  unchanged.
+  unchanged. The `lay_pool` and `lay_pool_edge` modules they replace are removed; they
+  had no parameters, so existing checkpoints load as before.
 - `train_model.py` applies a new `after_save` hook once the checkpoint and the processing
-  module are on disk.
+  module are on disk. It archives as `process.py` the module the processing was actually
+  loaded from, which a `load_processing` hook records in `e['_processing_path']`, rather
+  than always `PROCESSING_PATH`.
 
 ## 1.6.0 - 2026-08-15
 

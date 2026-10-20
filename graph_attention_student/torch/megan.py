@@ -14,7 +14,6 @@ from sklearn.isotonic import IsotonicRegression
 from sklearn.linear_model import LinearRegression
 from torch_geometric.nn.aggr import SumAggregation
 from torch_geometric.nn.aggr import MeanAggregation
-from torch_geometric.nn.aggr import MaxAggregation
 from torch_geometric.data import Data
 from torch_geometric.utils import scatter
 
@@ -664,10 +663,9 @@ class Megan(MveMixin, AbstractGraphModel):
         self.lay_dropout_encoder = nn.Dropout(p=encoder_dropout_rate)
             
         # At the end of the graph encoder, the node embeddings for all the nodes are aggregated into one final 
-        # graph embedding vector by doing an attention-weighted sum.
-        self.lay_pool = SumAggregation()
+        # graph embedding vector by doing an attention-weighted sum. That sum, and the max pooling of the edge
+        # importances onto the nodes, go through _segment_sum and _segment_max rather than aggregation modules.
         self.lay_pool_mean = MeanAggregation()
-        self.lay_pool_edge = MaxAggregation()
         self.lay_pool_importance = SumAggregation()
             
         # ~ Importance/Attention Layers
@@ -981,7 +979,6 @@ class Megan(MveMixin, AbstractGraphModel):
             self._segment_max(edge_importance, edge_index[0], dim_size=num_nodes) +
             self._segment_max(edge_importance, edge_index[1], dim_size=num_nodes)
         )
-        # edge_importance_pooled = self.lay_pool_edge(edge_importance, edge_index[1])
             
         # ~ importance masks / explanations
         node_importance = edge_importance_pooled

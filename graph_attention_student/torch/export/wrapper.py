@@ -45,6 +45,30 @@ INPUT_NAMES: t.List[str] = [
 ]
 
 
+def _with_dim_size(reduction: t.Callable) -> t.Callable:
+    """
+    Adapts a ``scatter_ops`` reduction to the signature of ``Megan._segment_max`` and
+    ``Megan._segment_sum``, rejecting the ``dim_size=None`` that those allow.
+
+    Inferring the segment count from ``index`` is data-dependent and cannot be traced,
+    so every call site in ``Megan.forward`` has to pass ``dim_size`` explicitly.
+    """
+    def segment(src: torch.Tensor,
+                index: torch.Tensor,
+                dim_size: t.Optional[int] = None,
+                ) -> torch.Tensor:
+        if dim_size is None:
+            raise ValueError(
+                f'{reduction.__name__} was called without dim_size while tracing for '
+                f'ONNX export. Every segment reduction in Megan.forward must pass '
+                f'dim_size, since the segment count cannot be inferred from the index '
+                f'in an exported graph.'
+            )
+        return reduction(src, index, dim_size)
+
+    return segment
+
+
 class MeganOnnxWrapper(nn.Module):
     """
     Wraps a :class:`Megan` so that it can be traced by :func:`torch.onnx.export`.
@@ -68,10 +92,8 @@ class MeganOnnxWrapper(nn.Module):
         )
         # Route the two segment reductions in Megan.forward onto the ScatterND path.
         # Bound as plain functions on the instance, ignoring "self".
-        model_copy._segment_max = lambda src, index, dim_size=None: segment_max(
-            src, index, dim_size)
-        model_copy._segment_sum = lambda src, index, dim_size=None: segment_sum(
-            src, index, dim_size)
+        model_copy._segment_max = _with_dim_size(segment_max)
+        model_copy._segment_sum = _with_dim_size(segment_sum)
 
         self.model = model_copy
         self.num_channels = model_copy.num_channels

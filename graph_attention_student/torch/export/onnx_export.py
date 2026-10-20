@@ -19,7 +19,6 @@ from graph_attention_student.torch.export import MEGAN_JS_PATH
 from graph_attention_student.torch.export.architecture import extract_architecture
 from graph_attention_student.torch.export.featurization import derive_featurization_spec
 from graph_attention_student.torch.export.manifest import build_manifest
-from graph_attention_student.torch.export.scatter_ops import CUSTOM_TRANSLATION_TABLE
 from graph_attention_student.torch.export.wrapper import (
     MeganOnnxWrapper, INPUT_NAMES, OUTPUT_NAMES)
 
@@ -200,6 +199,7 @@ def export_megan_onnx(model,
     :param out_dir: directory to write into; created if it does not exist.
     :param example_graphs: graph dicts used both to trace the model and to generate the
         verification fixtures. Use a handful of representative, differently-sized graphs.
+        A single graph is traced twice, since the batch axis cannot be traced at size 1.
     :param processing: the :class:`MoleculeProcessing` used to build the training data.
         When given, its featurization contract is derived and written to
         ``featurization.json``, provided every encoder has a JavaScript equivalent, and
@@ -227,6 +227,11 @@ def export_megan_onnx(model,
 
     if not example_graphs:
         raise ExportError('example_graphs must not be empty; it is needed to trace the model.')
+    if len(example_graphs) == 1:
+        # torch.export specializes a dimension that has size 1 at trace time, so tracing a
+        # single graph would fix num_graphs to the constant 1 and fail on the dynamic
+        # shape constraint. Tracing the graph twice keeps the batch axis dynamic.
+        example_graphs = list(example_graphs) * 2
 
     _validate_graphs(example_graphs)
     _validate_dimensions(model, example_graphs, processing)
@@ -247,6 +252,10 @@ def export_megan_onnx(model,
         'node_mask': {0: node_dim},
     }
 
+    # Imported here rather than at the top because it requires onnxscript, which
+    # _require_export_dependencies has only now confirmed is installed.
+    from graph_attention_student.torch.export.onnx_translation import build_translation_table
+
     model_path = os.path.join(out_dir, 'model.onnx')
     try:
         torch.onnx.export(
@@ -262,7 +271,7 @@ def export_megan_onnx(model,
             input_names=list(INPUT_NAMES),
             output_names=list(OUTPUT_NAMES),
             dynamic_shapes=dynamic_shapes,
-            custom_translation_table=CUSTOM_TRANSLATION_TABLE,
+            custom_translation_table=build_translation_table(),
         )
     except Exception as exc:
         raise ExportError(f'torch.onnx.export failed for this model: {exc}') from exc

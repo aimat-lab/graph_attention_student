@@ -223,14 +223,21 @@ def load_processing(e: Experiment) -> object:
 
     If PROCESSING_PATH is specified, loads the processing instance from that module.
     Otherwise, creates a default MoleculeProcessing instance.
+
+    An implementation that loads the processing from a module other than PROCESSING_PATH
+    should record that module's path in ``e['_processing_path']``, since that is the file
+    archived as process.py next to the model. Setting it to None archives a module
+    generated from the processing instance instead.
     """
     if e.PROCESSING_PATH is not None and os.path.exists(e.PROCESSING_PATH):
         e.log(f'loading processing from {e.PROCESSING_PATH}...')
         module = dynamic_import(e.PROCESSING_PATH, 'process')
         processing = module.processing
+        e['_processing_path'] = e.PROCESSING_PATH
     else:
         e.log('using default MoleculeProcessing...')
         processing = MoleculeProcessing()
+        e['_processing_path'] = None
 
     return processing
 
@@ -858,10 +865,20 @@ def experiment(e: Experiment):
     # ~ saving the processing module
     e.log('saving the processing module to the disk...')
     processing_path = os.path.join(e.path, 'process.py')
-    if e.PROCESSING_PATH is not None and os.path.exists(e.PROCESSING_PATH):
-        # If a processing module file was provided, copy it directly
-        e.log(f' * copying processing module from {e.PROCESSING_PATH}')
-        shutil.copy(e.PROCESSING_PATH, processing_path)
+    # The module the processing was actually loaded from, as recorded by load_processing,
+    # which is not necessarily PROCESSING_PATH. A load_processing or load_dataset
+    # implementation that records nothing keeps the previous behaviour of archiving
+    # PROCESSING_PATH.
+    if '_processing_path' in e.data:
+        source_path = e['_processing_path']
+    elif e.PROCESSING_PATH is not None and os.path.exists(e.PROCESSING_PATH):
+        source_path = e.PROCESSING_PATH
+    else:
+        source_path = None
+    if source_path is not None:
+        # If the processing came from a module file, copy it directly
+        e.log(f' * copying processing module from {source_path}')
+        shutil.copy(source_path, processing_path)
     else:
         # Otherwise, generate the processing module code from the processing instance
         e.log(' * generating processing module from Processing instance')
