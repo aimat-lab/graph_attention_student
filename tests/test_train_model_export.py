@@ -52,6 +52,9 @@ def _run_training(base_path, **parameters) -> str:
             'TRACK_EMBEDDING_UNIFORMITY': False,
             'TRACK_EMBEDDING_TARGET_ALIGNMENT': False,
             'TRACK_EMBEDDING_PROJECTIONS': False,
+            # pycomex's desktop notification has no use in a test, and on Windows CI its
+            # winrt import crashes after an otherwise successful run.
+            '__NOTIFY__': False,
             **parameters,
         },
     }
