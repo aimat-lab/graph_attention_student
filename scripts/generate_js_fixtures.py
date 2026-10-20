@@ -1,7 +1,7 @@
 """
 Generates the export fixtures that the JavaScript test suite in ``js/`` checks against.
 
-The reference featurizer in ``js/featurizer.js`` has to reproduce the Python
+The featurizer in ``megan.js`` has to reproduce the Python
 featurization column for column - a consumer that gets this wrong feeds the model
 plausible but incorrect features and gets plausible but incorrect predictions. The only
 way to know it is right is to compare against output that Python actually produced,
@@ -11,8 +11,8 @@ Run it before ``npm test``::
 
     python scripts/generate_js_fixtures.py
 
-The fixtures are build products and are not checked in; ``js/test/featurizer.test.js``
-skips itself when they are absent.
+The fixtures are build products and are not checked in; the tests in
+``js/test/megan.test.js`` that need them skip themselves when they are absent.
 """
 import os
 import sys

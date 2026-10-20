@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Reference JavaScript featurizer and verification tests for MEGAN ONNX exports.",
+  "description": "Tests for megan.js, the JavaScript runtime that ships with MEGAN ONNX exports.",
   "scripts": {
     "test": "node --test"
   },

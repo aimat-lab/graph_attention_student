@@ -26,7 +26,7 @@ __all__ = [
     'derive_featurization_spec',
 ]
 
-#: RDKit atom properties with a verified RDKit.js equivalent in ``featurizer.js``.
+#: RDKit atom properties with a verified RDKit.js equivalent in ``megan.js``.
 #: Every entry here is covered by the Python-vs-JS fixture test; nothing is listed
 #: on the assumption that it "should work".
 PORTABLE_ATOM_PROPERTIES: t.Set[str] = {
@@ -39,13 +39,12 @@ PORTABLE_ATOM_PROPERTIES: t.Set[str] = {
     'GetMass',
     'IsInRing',
     # Not exposed by RDKit.js and not naively derivable - RDKit's perception accounts for
-    # conjugation, so an amide nitrogen comes out SP2 rather than SP3. featurizer.js
-    # reproduces it for 99.93% of atoms; the residue is bracketed silicon in siloxanes,
-    # organometallics and nitroxide radicals.
+    # conjugation, so an amide nitrogen comes out SP2 rather than SP3. megan.js ports
+    # RDKit's own setHybridization, verified with zero disagreements over 409,678 atoms.
     'GetHybridization',
 }
 
-#: RDKit bond properties with a verified RDKit.js equivalent in ``featurizer.js``.
+#: RDKit bond properties with a verified RDKit.js equivalent in ``megan.js``.
 PORTABLE_BOND_PROPERTIES: t.Set[str] = {
     'GetBondType',
     'GetIsAromatic',
@@ -174,7 +173,7 @@ def _describe_map(processing, attribute_map: dict, mock, portable: t.Set[str]
         elif described['property'] not in portable:
             problems.append(
                 f'encoder "{name}" reads "{described["property"]}", which has no verified '
-                f'RDKit.js equivalent in featurizer.js'
+                f'RDKit.js equivalent in megan.js'
             )
 
     return encoders, problems

@@ -13,7 +13,7 @@ model was statistically indistinguishable from the full 45-column one on test R2
 well cost four times as much accuracy (delta = -0.036, p = 0.035) - and it turned out to
 be reproducible in JavaScript after all.
 
-Every property here has a verified equivalent in ``js/featurizer.js``.
+Every property here has a verified equivalent in ``megan.js``, next to this module.
 """
 from rdkit import Chem
 from visual_graph_datasets.processing.molecules import MoleculeProcessing

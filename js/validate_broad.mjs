@@ -1,5 +1,5 @@
 /**
- * Broad validation: does featurizer.js reproduce Python over thousands of molecules?
+ * Broad validation: does megan.js featurize thousands of molecules exactly as Python does?
  *
  * Generate the cases first with scripts/validate_js_featurizer.py. This is deliberately
  * not part of `npm test` - it is a bulk check to run when the featurizer changes, while
@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { Featurizer } from './featurizer.js';
+import { Featurizer } from '../graph_attention_student/torch/export/megan.js';
 
 const require = createRequire(import.meta.url);
 const HERE = path.dirname(fileURLToPath(import.meta.url));

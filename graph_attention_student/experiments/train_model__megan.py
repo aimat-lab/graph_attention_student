@@ -67,7 +67,7 @@ mpl.use('Agg')
 
 # :param PORTABLE_FEATURES:
 #       Whether to featurize the molecules with the portable feature set: the 38 node and
-#       11 edge features that js/featurizer.js reproduces from RDKit.js. It drops the five
+#       11 edge features that megan.js reproduces from RDKit.js. It drops the five
 #       per-atom descriptors of the full set (Crippen, TPSA, Labute ASA, Gasteiger, EState),
 #       which RDKit.js cannot compute. On AqSolDB that left test R2 unchanged (-0.009,
 #       p=0.18) at a small cost in explanation AUC (-0.024, p=0.03). Set to False to train
