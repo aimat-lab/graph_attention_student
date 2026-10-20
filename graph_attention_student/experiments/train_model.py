@@ -872,6 +872,15 @@ def experiment(e: Experiment):
 
     e.log(f' * processing module saved to {processing_path}')
 
+    # For anything that needs the finished archive - the checkpoint and the processing
+    # module are both on disk at this point.
+    e.apply_hook(
+        'after_save',
+        model=model,
+        index_data_map=index_data_map,
+        test_indices=test_indices,
+    )
+
 
 @experiment.analysis
 def analysis(e: Experiment):

@@ -502,6 +502,20 @@ def test_mismatched_example_graphs_are_rejected():
         export_megan_onnx(model, tempfile.mkdtemp(), graphs)
 
 
+def test_missing_export_extra_is_named(monkeypatch):
+    """
+    Without onnxscript the export should say which extra to install, rather than fail
+    inside torch.onnx with a message that blames the model.
+    """
+    import sys
+
+    # A None entry in sys.modules is how Python marks a module as not importable.
+    monkeypatch.setitem(sys.modules, 'onnxscript', None)
+    processing, graphs = _graphs(SMILES[:3])
+    with pytest.raises(ExportError, match=r'"export" extra'):
+        export_megan_onnx(_model(), tempfile.mkdtemp(), graphs, processing=processing)
+
+
 def test_low_opset_is_rejected():
     """Opset 17 cannot express ScatterND with reduction='max', so it must be refused."""
     processing, graphs = _graphs()

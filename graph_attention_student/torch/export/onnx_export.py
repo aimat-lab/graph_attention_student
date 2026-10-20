@@ -5,6 +5,7 @@ The canonical ONNX export for MEGAN models.
 non-Python consumer needs to feed it correctly, and fixtures that pin the expected
 outputs so an independent implementation can verify itself.
 """
+import importlib.util
 import json
 import os
 import typing as t
@@ -37,6 +38,21 @@ MAX_GRAPHS: int = 2 ** 16
 
 class ExportError(RuntimeError):
     """Raised when a model or its example data cannot be exported."""
+
+
+def _require_export_dependencies() -> None:
+    """
+    :raises ExportError: when onnx or onnxscript is missing, naming the extra that provides
+        them. Without this check a missing package surfaces from inside the exporter as
+        "torch.onnx.export failed for this model", which blames the model.
+    """
+    missing = [name for name in ('onnx', 'onnxscript')
+               if importlib.util.find_spec(name) is None]
+    if missing:
+        raise ExportError(
+            f'Exporting to ONNX needs {" and ".join(missing)}, which come with the "export" '
+            f'extra: pip install "graph_attention_student[export]"'
+        )
 
 
 def _validate_graphs(graphs: t.List[dict]) -> None:
@@ -192,6 +208,8 @@ def export_megan_onnx(model,
 
     :returns: a dict of the paths written, keyed by role.
     """
+    _require_export_dependencies()
+
     if opset < DEFAULT_OPSET:
         raise ExportError(
             f'opset {opset} is too low: the segment max lowers to ScatterND with '

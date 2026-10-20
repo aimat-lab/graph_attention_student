@@ -38,7 +38,11 @@ from visual_graph_datasets.visualization.importances import create_importances_p
 from visual_graph_datasets.visualization.importances import plot_node_importances_background
 from visual_graph_datasets.visualization.importances import plot_edge_importances_background
 from visual_graph_datasets.visualization.base import draw_image
+from visual_graph_datasets.processing.molecules import MoleculeProcessing
+from visual_graph_datasets.util import dynamic_import
 
+from graph_attention_student.util import ASSETS_PATH
+from graph_attention_student.torch.export import portable_processing
 from graph_attention_student.visualization import plot_regression_fit
 from graph_attention_student.visualization import generate_contrastive_colors
 from graph_attention_student.visualization import plot_embeddings_3d
@@ -55,6 +59,30 @@ from sklearn.metrics import accuracy_score, f1_score, confusion_matrix
 import seaborn as sns
 
 mpl.use('Agg')
+
+
+# == PORTABILITY PARAMETERS ==
+# The following parameters make the trained model usable outside Python - in Node or
+# directly in a browser - through an ONNX export. See ONNX_EXPORT.md.
+
+# :param PORTABLE_FEATURES:
+#       Whether to featurize the molecules with the portable feature set: the 38 node and
+#       11 edge features that js/featurizer.js reproduces from RDKit.js. It drops the five
+#       per-atom descriptors of the full set (Crippen, TPSA, Labute ASA, Gasteiger, EState),
+#       which RDKit.js cannot compute. On AqSolDB that left test R2 unchanged (-0.009,
+#       p=0.18) at a small cost in explanation AUC (-0.024, p=0.03). Set to False to train
+#       on all 45 node features, for a model that is only ever used from Python. Only the
+#       default PROCESSING_PATH is replaced - a processing module of your own takes
+#       precedence over this flag.
+PORTABLE_FEATURES: bool = True
+# :param EXPORT_ONNX:
+#       Whether to export the trained model to ONNX at the end of the run, into the
+#       "onnx_export" folder of the experiment archive - the same layout that "megan export"
+#       writes. Together with PORTABLE_FEATURES that folder holds everything a browser
+#       needs. The export requires the "export" extra
+#       (pip install "graph_attention_student[export]"); without it, or if the export fails,
+#       the run still completes and logs a warning.
+EXPORT_ONNX: bool = True
 
 
 # == MODEL PARAMETERS ==
@@ -228,6 +256,36 @@ experiment = Experiment.extend(
     namespace=file_namespace(__file__),
     glob=globals(),
 )
+
+
+@experiment.hook('load_processing', default=False, replace=True)
+def load_processing(e: Experiment) -> object:
+    """
+    Load the processing, swapping in the portable feature set when PORTABLE_FEATURES is set.
+
+    The swap points PROCESSING_PATH at the portable processing module rather than merely
+    returning a different object, because train_model.py later copies the module at
+    PROCESSING_PATH into the archive as process.py. Returning the portable processing while
+    leaving the path alone would archive the full 45-column module next to a 38-column
+    model - exactly the mismatch that makes "megan export" fail.
+    """
+    default_path = os.path.join(ASSETS_PATH, 'molecule_processing.py')
+    uses_default = (e.PROCESSING_PATH is not None
+                    and os.path.abspath(e.PROCESSING_PATH) == os.path.abspath(default_path))
+
+    if e.PORTABLE_FEATURES and uses_default:
+        e.log('using the portable feature set (PORTABLE_FEATURES)...')
+        e.PROCESSING_PATH = portable_processing.__file__
+    elif e.PORTABLE_FEATURES:
+        e.log('PORTABLE_FEATURES is set, but PROCESSING_PATH names a processing module of '
+              'its own, which takes precedence')
+
+    if e.PROCESSING_PATH is not None and os.path.exists(e.PROCESSING_PATH):
+        e.log(f'loading processing from {e.PROCESSING_PATH}...')
+        return dynamic_import(e.PROCESSING_PATH, 'process').processing
+
+    e.log('using default MoleculeProcessing...')
+    return MoleculeProcessing()
 
 
 @experiment.hook('train_model', default=False, replace=True)
@@ -1232,6 +1290,53 @@ def after_experiment(e: Experiment,
     if torch.cuda.is_available():
         e.log('memory summary:')
         e.log('\n' + torch.cuda.memory_summary(device=None, abbreviated=False))
+
+
+@experiment.hook('after_save', default=False, replace=False)
+def export_onnx(e: Experiment,
+                model: Megan,
+                index_data_map: dict,
+                test_indices: t.List[int],
+                **kwargs,
+                ) -> None:
+    """
+    Export the saved model to ONNX, into the "onnx_export" folder of the archive, when
+    EXPORT_ONNX is set.
+
+    A failed export never fails the run: the model is already saved, and losing a finished
+    training run to an optional artifact would be the worse outcome. The failure is logged
+    as a warning instead, and its reason recorded under "onnx/error".
+    """
+    if not e.EXPORT_ONNX:
+        return
+
+    from graph_attention_student.torch.export.onnx_export import export_megan_onnx
+
+    # Up to eight test molecules spread over the size range, so the trace sees differently
+    # sized graphs. They double as the verification fixtures in fixtures.json.
+    graphs = [index_data_map[i]['metadata']['graph'] for i in test_indices]
+    graphs = [graph for graph in graphs if np.asarray(graph['edge_indices']).ndim == 2]
+    graphs.sort(key=lambda graph: len(graph['node_attributes']))
+    positions = np.linspace(0, len(graphs) - 1, num=min(8, len(graphs)))
+    example_graphs = [graphs[int(round(position))] for position in positions]
+
+    path = os.path.join(e.path, 'onnx_export')
+    e.log(f'exporting the model to ONNX at {path}...')
+    try:
+        paths = export_megan_onnx(model, path, example_graphs, processing=e['_processing'])
+    except Exception as exc:
+        e.log(f'WARNING: the ONNX export failed, the run itself is unaffected: {exc}')
+        e['onnx/error'] = str(exc)
+        return
+
+    e['onnx/path'] = path
+    for role, file_path in paths.items():
+        e.log(f' * {role}: {os.path.basename(file_path)}')
+    if 'featurization' not in paths:
+        e.log(' * no featurization.json: the processing has features a browser cannot '
+              'compute, so a browser cannot featurize molecules for this model. The portable '
+              'feature set (PORTABLE_FEATURES=True with the default PROCESSING_PATH) avoids '
+              'that.')
 
 
 @experiment.analysis
