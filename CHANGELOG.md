@@ -1,5 +1,37 @@
 # Changelog
 
+## Unreleased
+
+ONNX Export and Browser-Ready Training
+
+Trained models can be exported to ONNX and run without PyTorch: under ONNX Runtime in
+Python, in Node, or directly in the browser, where a static page can predict a property
+and draw the explanation with no inference server. `ONNX_EXPORT.md` is the guide.
+
+- `megan export`, `Megan.export_onnx` and `export_megan_onnx` write a self-contained
+  `model.onnx` together with `manifest.json`, `featurization.json` and `fixtures.json`.
+  Every segment reduction lowers to `ScatterND`, avoiding the `ScatterElements` kernel that
+  ONNX Runtime Web's WebGPU backend lacks. Verified on the CPU and on the WASM backend;
+  WebGPU is untested. Design: ADR-002.
+- `js/featurizer.js` is a reference RDKit.js implementation of the featurization contract,
+  including ports of RDKit's conjugation and hybridization perception.
+- `PortableMoleculeProcessing` is the molecule processing without its five per-atom
+  descriptors, which RDKit.js cannot compute: 38 node and 11 edge features. On AqSolDB it
+  matched the full set on test R² (-0.009, p = 0.18) at a small cost in explanation AUC
+  (-0.024, p = 0.03); the experiments are `vgd_torch__megan__aqsoldb__featureset*.py`.
+- **Changed default:** `train_model__megan.py` now trains on the portable feature set
+  (`PORTABLE_FEATURES = True`) and exports the saved model into `<archive>/onnx_export`
+  (`EXPORT_ONNX = True`). Sub-experiments that set neither train on 38 instead of 45 node
+  features, so their models come out slightly different from before; set
+  `PORTABLE_FEATURES = False` for the previous behaviour. Design: ADR-003.
+- **Changed requirement:** torch moves from `>=2.1.2,<2.5.1` to `>=2.7.1,<2.8`.
+- The export needs the new `export` extra (`onnx`, `onnxruntime`, `onnxscript`).
+- `Megan.forward` routes its segment reductions through `_segment_max` / `_segment_sum`
+  and takes an optional `num_graphs`. The defaults are the previous calls, so outputs are
+  unchanged.
+- `train_model.py` applies a new `after_save` hook once the checkpoint and the processing
+  module are on disk.
+
 ## 1.6.0 - 2026-08-15
 
 Explanation Objective Redesign

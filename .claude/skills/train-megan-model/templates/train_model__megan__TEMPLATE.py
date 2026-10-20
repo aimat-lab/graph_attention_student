@@ -20,6 +20,8 @@ HOW TO USE THIS TEMPLATE
 6. Read the diagnostic self-check:
        graph_attention_student/experiments/results/train_model__megan__<dataset>/debug/report.json
    plus scorecard.png / examples.png / fidelity.png in the same folder.
+7. The same folder holds  onnx_export/  - the model exported to ONNX for use outside Python
+   (a web page, Node, a non-Python service). See ONNX_EXPORT.md in the repository root.
 """
 import typing as t
 from typing import List, Optional
@@ -126,6 +128,18 @@ TRACK_EMBEDDING_HEALTH: bool = False
 TRACK_EMBEDDING_UNIFORMITY: bool = False
 TRACK_EMBEDDING_TARGET_ALIGNMENT: bool = False
 TRACK_EMBEDDING_PROJECTIONS: bool = False
+
+
+# == PORTABILITY ==
+# :param PORTABLE_FEATURES: train on the 38 node features a browser can compute with RDKit.js
+#   instead of all 45. On AqSolDB: same test R2, slightly lower explanation AUC (-0.024). Set to
+#   False only if the model will never be used outside Python.
+PORTABLE_FEATURES: bool = True
+# :param EXPORT_ONNX: export the trained model into .../debug/onnx_export/ (the ONNX model plus
+#   the manifest, featurization contract and fixtures a consumer needs), ready for a browser or
+#   any non-Python consumer. Needs the "export" extra; without it the run still finishes and logs
+#   a warning. See ONNX_EXPORT.md in the repository root.
+EXPORT_ONNX: bool = True
 
 
 # Keep __DEBUG__ = True so results land in a predictable .../<experiment>/debug/ folder that the

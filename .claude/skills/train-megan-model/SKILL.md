@@ -8,7 +8,8 @@ description: >-
   and report the explanations". Covers: writing a pycomex sub-experiment that extends
   train_model__megan.py, smoke-testing then running it, reading the automatic post-training
   diagnostic (report.json + scorecard/examples/fidelity images), tuning the explanation knobs
-  when a run fails its self-check, and assembling a human-facing explanation report.
+  when a run fails its self-check, and assembling a human-facing explanation report. Runs also
+  export the model to ONNX, for use in a browser or any other non-Python consumer.
 ---
 
 # Train a MEGAN model on a new molecular dataset
@@ -74,7 +75,8 @@ Always work inside the project venv: `source .venv/bin/activate`.
 - **What to expect:** a full run is `EPOCHS` epochs (a few seconds/epoch on GPU) followed by a
   heavier analysis/evaluation phase. It writes **many auxiliary files** into the archive — the
   diagnostic reports/images (below) plus supporting PDFs. Only `report.json` / `report_test.json`
-  and the `scorecard`/`examples`/`fidelity` images matter; ignore the rest. A noisy log is normal.
+  and the `scorecard`/`examples`/`fidelity` images matter for judging the run, plus `onnx_export/`
+  if the model is to be used outside Python (step 6); ignore the rest. A noisy log is normal.
 - Output (including the diagnostic) is written to
   `graph_attention_student/experiments/results/train_model__megan__<dataset>/**debug**/`. The folder
   is literally named `debug` **because the template sets `__DEBUG__ = True`** — keep it that way so
@@ -108,6 +110,12 @@ the run on coverage grounds alone. Full field-by-field meaning is in
   actually asked for — separate from the fixed diagnostic).
 - Always state the diagnostic verdict plainly (e.g. "explanations passed the self-check" or
   "explanations failed the fidelity-sign check — I'd recommend rerunning with X").
+- If the model is meant to run outside Python (a web page, a JavaScript tool, a non-Python
+  service), point to `.../debug/onnx_export/`: `model.onnx` plus the `manifest.json`,
+  `featurization.json` and `fixtures.json` a consumer needs. `ONNX_EXPORT.md` in the repository
+  root explains how to run it. If the log says `WARNING: the ONNX export failed`, the reason is
+  on that line, most often a missing `export` extra (`uv pip install -e ".[export]"`); the run
+  can then be exported afterwards by running `megan export` inside `.../debug/`.
 
 ## Deciding whether to rerun (remediation philosophy)
 The diagnostic **detects and flags**; it does not auto-tune. Keep model selection honest:
@@ -136,3 +144,7 @@ The diagnostic **detects and flags**; it does not auto-tune. Keep model selectio
   during training) and is NOT a tuning knob — leave it at the default.
 - Sparsity and explanation-accuracy are **antagonists** — pushing masks sparser can drop the
   explanation-accuracy AUC. Aim for "in the right ballpark", not a maximum of either alone.
+- Runs train on the **38 browser-portable features** by default (`PORTABLE_FEATURES = True`), so
+  that the exported model can run in a browser. On AqSolDB that left R² unchanged and cost a
+  little explanation AUC (−0.024). Set it to `False` only when the model will never leave Python;
+  it is a choice of feature set, not a fix for a failed diagnostic — tune the knobs first.

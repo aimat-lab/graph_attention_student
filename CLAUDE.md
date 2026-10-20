@@ -14,10 +14,11 @@ source .venv/bin/activate
 ### Setup and Installation
 ```bash
 # Install torch first due to dependency requirements
-uv pip install torch==2.1.2
+uv pip install torch==2.7.1
 
-# Install package in development mode
-uv pip install -e .
+# Install package in development mode, with the "export" extra (onnx, onnxruntime,
+# onnxscript) that the ONNX export and its tests need
+uv pip install -e ".[export]"
 
 # Alternative: Install from PyPI
 uv pip install graph_attention_student
@@ -33,6 +34,10 @@ pytest tests/test_util.py
 
 # Using nox (recommended)
 nox -s test
+
+# JavaScript featurizer and ONNX Runtime Web tests (fixtures are generated, not checked in)
+python scripts/generate_js_fixtures.py
+cd js && npm install && npm test
 ```
 
 ### Building
@@ -79,6 +84,12 @@ python -m graph_attention_student.cli example -n quickstart
 - `model.py` - Base model abstractions and mixins
 - `megan.py` - MEGAN model implementation with explanation capabilities
 - `data.py` - Data loading and preprocessing utilities
+
+**ONNX Export (`graph_attention_student.torch.export/`)**
+- `export_megan_onnx` / `Megan.export_onnx` / `megan export` write `model.onnx` plus manifest, featurization contract and fixtures
+- `portable_processing.py` - the 38-node-feature processing a browser can reproduce; `train_model__megan.py` trains on it by default
+- `js/featurizer.js` - reference RDKit.js featurizer for the exported models
+- User guide: `ONNX_EXPORT.md`; design: `adr/002-onnx-export.md`, `adr/003-portable-features-by-default.md`
 
 ### Key Patterns
 

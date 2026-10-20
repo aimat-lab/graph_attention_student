@@ -1,11 +1,12 @@
 """
 Coverage for the Python API code blocks documented in README.rst.
 
-Mirrors the two snippets under "Python API" and "Loading and Using Models":
-training via :class:`SmilesDataset` + :class:`Megan` + ``pl.Trainer``, then
-``Megan.load`` + ``forward_graph`` + ``megan_prediction_report``. Sizes and
-epoch counts are scaled down so the tests run quickly; the public API
-surface exercised is identical to what the README promises.
+Mirrors the snippets under "Python API", "Loading and Using Models" and
+"Exporting to ONNX": training via :class:`SmilesDataset` + :class:`Megan` +
+``pl.Trainer``, then ``Megan.load`` + ``forward_graph`` +
+``megan_prediction_report``, then ``Megan.export_onnx``. Sizes and epoch
+counts are scaled down so the tests run quickly; the public API surface
+exercised is identical to what the README promises.
 """
 import os
 import pytest
@@ -106,3 +107,21 @@ def test_readme_python_api_load_infer_report(trained_checkpoint, processing, tmp
     )
     assert report_path.exists()
     assert report_path.stat().st_size > 0
+
+
+def test_readme_onnx_export(trained_checkpoint, processing, tmp_path):
+    """
+    README "Exporting to ONNX" snippet: Megan.load, then export_onnx with a few example
+    molecules writes the model and all three metadata files. The default processing is
+    portable, so the featurization contract is among them.
+    """
+    pytest.importorskip('onnxscript')
+
+    model = Megan.load(trained_checkpoint)
+
+    graphs = [processing.process(smiles)
+              for smiles in ["CCO", "c1ccccc1O", "CC(=O)Oc1ccccc1C(=O)O"]]
+    paths = model.export_onnx(str(tmp_path / "onnx_export"), graphs, processing=processing)
+
+    for role in ('model', 'manifest', 'featurization', 'fixtures'):
+        assert os.path.exists(paths[role]), f'no {role} was written'

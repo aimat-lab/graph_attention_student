@@ -50,8 +50,8 @@ def _require_export_dependencies() -> None:
                if importlib.util.find_spec(name) is None]
     if missing:
         raise ExportError(
-            f'Exporting to ONNX needs {" and ".join(missing)}, which come with the "export" '
-            f'extra: pip install "graph_attention_student[export]"'
+            f'Exporting to ONNX needs the "export" extra, which provides '
+            f'{" and ".join(missing)}: pip install "graph_attention_student[export]"'
         )
 
 

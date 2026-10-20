@@ -7,7 +7,7 @@ Reference guide for the `graph_attention_student` Python package. This document 
 MEGAN is a self-explaining graph neural network for graph-level property prediction (regression or classification). It produces multiple explanation channels that highlight which nodes/edges of a graph are responsible for the prediction. The primary domain is molecular property prediction using SMILES strings, but the architecture is domain-agnostic.
 
 **Key dependencies** (from pyproject.toml):
-- `torch>=2.1.2,<2.5.1`
+- `torch>=2.7.1,<2.8`
 - `torch_geometric>=2.4.0`
 - `lightning>=2.1.3` (PyTorch Lightning)
 - `visual_graph_datasets>=0.17.0`
@@ -621,7 +621,52 @@ The MVE head trains with a Negative Log-Likelihood loss that replaces the standa
 
 ---
 
-## 12. CLI
+## 12. ONNX Export
+
+A trained model can be exported to ONNX and run without PyTorch: under ONNX Runtime in Python, in Node, or in the browser. This needs the `export` extra (`pip install "graph_attention_student[export]"`). The full guide, including the JavaScript side, is [ONNX_EXPORT.md](ONNX_EXPORT.md).
+
+### Exporting
+
+```python
+from graph_attention_student import Megan
+from visual_graph_datasets.util import dynamic_import
+
+model = Megan.load('model.ckpt')
+processing = dynamic_import('process.py').processing  # the processing the model was trained with
+
+# A few differently sized molecules. They trace the model and become the fixtures.
+graphs = [processing.process(s) for s in ['CCO', 'c1ccccc1O', 'CC(=O)Oc1ccccc1C(=O)O']]
+paths = model.export_onnx('onnx_export', graphs, processing=processing)
+# paths: {'model': ..., 'fixtures': ..., 'featurization': ..., 'manifest': ...}
+```
+
+This writes `model.onnx` (self-contained), `manifest.json` (input/output signature, architecture, behavioural notes), `featurization.json` (the column-by-column featurization contract, only when every feature is portable) and `fixtures.json` (example inputs with their expected outputs). The model itself is not modified. `ExportError` (from `graph_attention_student.torch.export.onnx_export`) is raised for example molecules without bonds, a processing whose feature widths do not match the model, a `MeganEnsemble`, an opset below 18, or a missing `export` extra.
+
+`train_model__megan.py` exports automatically into `<archive>/onnx_export` (`EXPORT_ONNX=True`), and the CLI has `megan export` (Section 13).
+
+### The Portable Feature Set
+
+A browser can only reproduce features that RDKit.js can compute. `PortableMoleculeProcessing` is the full molecule processing without its five per-atom descriptors (Crippen, TPSA, Labute ASA, Gasteiger, EState): 38 node and 11 edge features, the node features being the first 38 columns of the full set, in the same order.
+
+```python
+from graph_attention_student.torch.export.portable_processing import PortableMoleculeProcessing
+
+processing = PortableMoleculeProcessing()
+processing.get_num_node_attributes()  # 38
+```
+
+`train_model__megan.py` trains on it by default (`PORTABLE_FEATURES=True`). On AqSolDB it matched the full set on test R² (-0.009, p = 0.18) at a small cost in explanation AUC (-0.024, p = 0.03). The default `MoleculeProcessing()` (10 node / 4 edge features) is portable too. A model trained on unportable features still exports, but without `featurization.json`; `manifest.json` names the offending encoder under `featurizationOmittedBecause`.
+
+### Running the Exported Model
+
+Inputs: `x` (N, F_node) float32, `edge_index` (2, E) int64, `edge_attr` (E, F_edge) float32, `batch` (N,) int64, `graph_ids` = `arange(B)` int64 (only its length is read), and `node_mask` (N, K) float32, all ones for a normal prediction. The outputs, in order, are `graph_output`, `graph_embedding`, `node_importance`, `node_importance_norm`, `edge_importance`, `edge_importance_norm` and `graph_variance`: the keys of `forward()` (Section 4) without `node_embedding`.
+
+- `graph_output` is logits for classification, as in PyTorch.
+- For leave-one-out fidelity, run once with `node_mask` all ones and once per channel with that channel's column set to zero. The differences in `graph_output` reproduce `leave_one_out_deviations`.
+
+---
+
+## 13. CLI
 
 The package provides a `megan` CLI (installed via the package entry point):
 
@@ -644,25 +689,33 @@ megan predict "CCO" \
     --model-path model.ckpt \
     --processing-path process.py \
     --output-path report.pdf
+
+# Export to ONNX (needs the "export" extra)
+megan export \
+    --model-path model.ckpt \
+    --processing-path process.py \
+    --output-path onnx_export
 ```
 
-The `train` command saves both `model.ckpt` and `process.py` (the processing module).
+The `train` command saves both `model.ckpt` and `process.py` (the processing module), which is what `export` reads by default.
 
 ---
 
-## 13. Experiment Framework
+## 14. Experiment Framework
 
 The repository includes a set of experiment scripts built on PyComex (a microframework for reproducible ML experiments). These are located in `graph_attention_student/experiments/`:
 
 - `vgd_torch__megan.py` - Base MEGAN training experiment
 - `vgd_torch__megan__aqsoldb.py` - AqSolDB solubility dataset
 - `vgd_torch__megan__mutagenicity.py` - Mutagenicity classification
+- `train_model__megan.py` - MEGAN from a CSV file of SMILES and targets. Trains on the portable feature set and exports to ONNX by default (`PORTABLE_FEATURES`, `EXPORT_ONNX`; see Section 12)
+- `vgd_torch__megan__aqsoldb__featureset*.py` - The AqSolDB comparison behind the portable feature set
 
 Experiments inherit from the base and override parameters at module level. See separate PyComex documentation for details on running and extending experiments.
 
 ---
 
-## 14. Architecture Internals
+## 15. Architecture Internals
 
 ### Layer Structure
 
@@ -722,7 +775,7 @@ Returns `(node_embedding, attention_logits)`.
 
 ---
 
-## 15. Common Patterns
+## 16. Common Patterns
 
 ### Full Training + Inference Pipeline
 
@@ -807,7 +860,7 @@ predicted_class = torch.argmax(logits).item()
 
 ---
 
-## 16. Testing Utilities
+## 17. Testing Utilities
 
 The `graph_attention_student.testing` module provides helpers for tests:
 
@@ -827,11 +880,13 @@ model = model_from_processing(processing, prediction_mode='regression')
 
 ---
 
-## 17. Common Pitfalls
+## 18. Common Pitfalls
 
 - **Forgetting `model.eval()`**: The model uses BatchNorm layers. Running inference in training mode will produce incorrect results. `Megan.load()` calls `eval()` automatically, but after `trainer.fit()` you must call it manually.
 - **SMILES silently skipped**: `SmilesDataset` skips unparseable SMILES without any log output. If your dataset seems smaller than expected, validate SMILES separately.
 - **Classification outputs are logits**: The model always outputs raw logits, never probabilities. Apply `softmax` (classification) or `sigmoid` (bce) manually.
 - **`forward()` vs `forward_graph()`**: `forward()` returns torch tensors with flattened batch dimensions (B*V, B*E). `forward_graph()` / `forward_graphs()` return numpy arrays split per graph. Use the latter for inference convenience.
 - **Ensemble save path**: `MeganEnsemble.save(path)` creates a new directory at `path`. It will fail if the directory already exists. `Megan.save(path)` creates a single file.
+- **Exporting with the wrong processing**: Export with the processing the model was trained with. The feature-set experiments (`vgd_torch__megan__aqsoldb__featureset__portable*`) train on a column slice of a precomputed dataset, so their archive holds the dataset's full 45-column `process.py`; export those models with `--processing-path graph_attention_student/torch/export/portable_processing.py`. The exporter refuses a mismatch with a message naming both sizes.
+- **No `featurization.json` in an export**: The processing has features JavaScript cannot compute, so a browser cannot build the model's inputs. Retrain with the portable feature set.
 - **Training `RuntimeError` silently caught**: If a `RuntimeError` occurs during `training_step` (e.g., shape mismatch from a malformed graph), the error is printed but training continues with a zero loss for that batch. Watch training logs for these messages.
