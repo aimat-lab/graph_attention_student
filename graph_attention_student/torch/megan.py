@@ -190,8 +190,13 @@ class Megan(MveMixin, AbstractGraphModel):
         dimensionality of the graph embeddings for each channel. Every explanation channel, will 
         have it's own projection network.
     :param sparsity_factor: A float factor that is multiplied with the sparsity regularization loss.
-        The higher this factor the more the explanations will be promoted to be sparse (less nodes 
+        The higher this factor the more the explanations will be promoted to be sparse (less nodes
         being highlighted as important)
+    :param node_supervision_factor: The weight of the explanation supervision loss on the node
+        attributions. Supervision needs reference explanations attached to the training data as
+        ``node_importances`` and ``edge_importances``, see ``training_supervision``.
+    :param edge_supervision_factor: The weight of the explanation supervision loss on the edge
+        attributions.
     :param final_units: A list of integers, where each entry defines one layer in the final prediction 
         MLP of the network. Each integer entry defines the hidden layers size of the corresponding layer.
         The last value in this list determines the output shape of the entire network and therefore has 
@@ -234,6 +239,9 @@ class Megan(MveMixin, AbstractGraphModel):
                  regression_reference: float = 0.0,
                  regression_margin: float = 0.0,
                  sparsity_factor: float = 0.0,
+                 # ~ explanation supervision
+                 node_supervision_factor: float = 0.0,
+                 edge_supervision_factor: float = 0.0,
                  # ~ explanation loss redesign
                  # These defaults reproduce the original behaviour, so an experiment that does not
                  # set them trains exactly as it did before. See the attribute docstrings below.
@@ -320,6 +328,14 @@ class Megan(MveMixin, AbstractGraphModel):
         self.importance_target = importance_target
         self.regression_margin = regression_margin
         self.sparsity_factor = sparsity_factor
+        # :attr node_supervision_factor:
+        #       Weight of the binary cross-entropy between the node attributions and given reference
+        #       explanations. 0 disables the supervision, which is the default.
+        self.node_supervision_factor = node_supervision_factor
+        # :attr edge_supervision_factor:
+        #       The same for the edge attributions. Separate from the node weight, so that nodes
+        #       and edges can be supervised independently.
+        self.edge_supervision_factor = edge_supervision_factor
         # :attr explanation_objective:
         #       'pooled_bce' is the original: drive a per-channel SUM of importances to a constant
         #       setpoint. Because it only sees the sum, it is invariant to spreading the same total
@@ -527,6 +543,8 @@ class Megan(MveMixin, AbstractGraphModel):
             'importance_factor':        importance_factor,
             'importance_offset':        importance_offset,
             'importance_target':        importance_target,
+            'node_supervision_factor':  node_supervision_factor,
+            'edge_supervision_factor':  edge_supervision_factor,
             'projection_units':         projection_units,
             'normalize_embedding':      normalize_embedding,
             'attention_aggregation':    attention_aggregation,
@@ -1408,7 +1426,26 @@ class Megan(MveMixin, AbstractGraphModel):
             on_step=False,
             batch_size=batch_size,
         )
-        
+
+        # ~ explanation supervision
+        # Where reference explanations are attached to the batch, the attributions are trained
+        # towards them directly. The two supervision factors are already applied inside.
+        loss_sup = torch.tensor(0.0, device=data.y.device)
+        if ((self.node_supervision_factor != 0 or self.edge_supervision_factor != 0)
+                and getattr(data, 'node_importances', None) is not None):
+            loss_sup = self.training_supervision(
+                data=data,
+                info=info,
+            )
+
+        self.log(
+            'loss_sup', loss_sup.detach().cpu(),
+            prog_bar=True,
+            on_epoch=True,
+            on_step=False,
+            batch_size=batch_size,
+        )
+
         # ~ contrastive loss
         # The contrastive loss is applied to improve the *representation learning*. More specifically we 
         # want to learn semantic representations of the explained subgraphs. So in each channel's graph 
@@ -1503,6 +1540,8 @@ class Megan(MveMixin, AbstractGraphModel):
             + self.importance_factor * loss_expl
             # loss to encourage sparsity of explanations (optionally annealed upward)
             + self.sparsity_factor * loss_spar
+            # loss towards given reference explanations, already weighted per nodes and edges
+            + loss_sup
             # loss to encourage the mask's mass to sit on few nodes rather than be smeared
             + self.spread_factor * loss_spread
             # loss requiring the prediction to survive randomising everything outside the
@@ -1524,6 +1563,7 @@ class Megan(MveMixin, AbstractGraphModel):
             'loss_pred': loss_pred.detach().cpu(),
             'loss_expl': loss_expl.detach().cpu(),
             'loss_spar': loss_spar.detach().cpu(),
+            'loss_sup': loss_sup.detach().cpu(),
             'loss_cont': loss_cont.detach().cpu(),
             'loss_unif': loss_unif.detach().cpu(),
             'loss_fid': loss_fid.detach().cpu(),
@@ -1870,8 +1910,58 @@ class Megan(MveMixin, AbstractGraphModel):
             fidelity -= torch.sum((1.0 - torch.eye(self.num_channels)).to(self.device).unsqueeze(0) * deviations, dim=-2)
     
         return torch.mean(F.relu(-fidelity)) + 0.1 * torch.mean(torch.square(fidelity))
-    
-    def training_explanation(self, 
+
+    def training_supervision(self,
+                             data: Data,
+                             info: dict,
+                             ) -> torch.Tensor:
+        """
+        Computes the explanation supervision loss: the binary cross-entropy between the node and
+        edge attributions and the reference explanations that are attached to the batch as
+        ``node_importances`` (B * V, K) and ``edge_importances`` (B * E, K). The loss acts on the
+        raw attributions that are reported as the explanation, not on their normalized versions.
+        It is averaged over the channels and over the nodes or edges of each graph, then over the
+        graphs that carry a reference.
+
+        Which graphs carry a reference is read from the optional graph attribute
+        ``explanation_weight`` (B, ), which is 0 for graphs without one. Without that attribute,
+        every graph of the batch is supervised.
+
+        :param data: The batch of graphs with the reference explanations.
+        :param info: The output dict of the forward pass on that batch.
+
+        :returns: The node loss weighted by node_supervision_factor plus the edge loss weighted by
+            edge_supervision_factor, as a scalar tensor.
+        """
+        num_graphs = int(data.batch.max().item()) + 1
+        edge_batch = data.batch[data.edge_index[0]]
+
+        node_true = data.node_importances.view(-1, self.num_channels)
+        edge_true = data.edge_importances.view(-1, self.num_channels)
+        # The attributions are already within [0, 1], the clamp only keeps the logarithms finite.
+        node_pred = info['node_importance'].clamp(1e-6, 1 - 1e-6)
+        edge_pred = info['edge_importance'].clamp(1e-6, 1 - 1e-6)
+
+        # node_loss: (B, ) and edge_loss: (B, )
+        node_loss = F.binary_cross_entropy(node_pred, node_true, reduction='none').mean(dim=-1)
+        node_loss = scatter(node_loss, data.batch, dim=0, reduce='mean', dim_size=num_graphs)
+        edge_loss = F.binary_cross_entropy(edge_pred, edge_true, reduction='none').mean(dim=-1)
+        edge_loss = scatter(edge_loss, edge_batch, dim=0, reduce='mean', dim_size=num_graphs)
+
+        weight = getattr(data, 'explanation_weight', None)
+        if weight is None:
+            weight = torch.ones(num_graphs, device=node_loss.device)
+        weight = weight.view(-1).to(node_loss.dtype)
+        # Dividing by the total weight instead of the batch size keeps the strength of the
+        # supervision independent of how many supervised graphs a batch happens to contain.
+        total = weight.sum().clamp(min=1e-8)
+
+        return (
+            self.node_supervision_factor * (weight * node_loss).sum() / total
+            + self.edge_supervision_factor * (weight * edge_loss).sum() / total
+        )
+
+    def training_explanation(self,
                              data: Data,
                              info: dict,
                              batch_size: int

@@ -80,7 +80,13 @@ def data_from_graph(graph: tv.GraphDict,
     # model training.
     if 'graph_weight' in graph:
         data.train_weight = torch.tensor(graph['graph_weight'], dtype=dtype)
-    
+
+    # Graphs that carry reference explanations for explanation supervision can be marked with a
+    # weight, which is 0 for graphs whose node_importances and edge_importances are only
+    # placeholders. A batch needs these arrays on all of its graphs or on none.
+    if 'explanation_weight' in graph:
+        data.explanation_weight = torch.tensor([graph['explanation_weight']], dtype=dtype)
+
     return data
 
 

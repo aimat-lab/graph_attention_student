@@ -581,6 +581,12 @@ def train_model(e: Experiment,
         importance_target=(e.IMPORTANCE_TARGET
                            if 'IMPORTANCE_TARGET' in e.parameters else 'node'),
         sparsity_factor=e.SPARSITY_FACTOR,
+        # Explanation supervision towards reference explanations, which the sub-experiment has to
+        # attach to the graphs as node_importances and edge_importances. Off unless it is set.
+        node_supervision_factor=(e.NODE_SUPERVISION_FACTOR
+                                 if 'NODE_SUPERVISION_FACTOR' in e.parameters else 0.0),
+        edge_supervision_factor=(e.EDGE_SUPERVISION_FACTOR
+                                 if 'EDGE_SUPERVISION_FACTOR' in e.parameters else 0.0),
         fidelity_factor=e.FIDELITY_FACTOR,
         regression_reference=e.REGRESSION_REFERENCE,
         regression_margin=e.REGRESSION_MARGIN,

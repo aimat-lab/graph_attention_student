@@ -488,3 +488,105 @@ class TestMegan:
         assert isinstance(out_pred, np.ndarray)
         assert out_true.shape == (num_graphs, num_channels)
         assert out_pred.shape == (num_graphs, num_channels)
+
+
+def _add_mock_references(graphs: list[dict]) -> None:
+    """
+    Attaches two-channel reference explanations that the model can learn from the node features:
+    a node belongs to channel 0 when its first feature is above 0.5 and to channel 1 otherwise,
+    and an edge belongs to a channel when both of its nodes do.
+    """
+    for graph in graphs:
+        high = graph['node_attributes'][:, 0] > 0.5
+        node_importances = np.stack([high, ~high], axis=-1).astype(float)
+        source, target = graph['edge_indices'][:, 0], graph['edge_indices'][:, 1]
+        graph['node_importances'] = node_importances
+        graph['edge_importances'] = node_importances[source] * node_importances[target]
+        graph['graph_labels'] = np.array([1.0, 0.0])
+
+
+def test_megan_explanation_supervision_ignores_unweighted_graphs():
+    """
+    The supervision loss should only depend on the graphs whose explanation_weight is nonzero, so
+    that graphs without a reference can carry placeholder masks.
+    """
+    graphs = get_mock_graphs(num=4, num_node_attributes=5, num_edge_attributes=2)
+    _add_mock_references(graphs)
+    for index, graph in enumerate(graphs):
+        graph['explanation_weight'] = float(index % 2 == 0)
+
+    model = Megan(
+        node_dim=5,
+        edge_dim=2,
+        units=[16, 16],
+        num_channels=2,
+        final_units=[16, 2],
+        prediction_mode='classification',
+        node_supervision_factor=1.0,
+        edge_supervision_factor=1.0,
+    )
+    model.eval()
+
+    def loss_of(graphs_: list[dict]) -> float:
+        data = next(iter(DataLoader(data_list_from_graphs(graphs_), batch_size=len(graphs_))))
+        with torch.no_grad():
+            return float(model.training_supervision(data=data, info=model(data)))
+
+    loss = loss_of(graphs)
+    # Changing the placeholder masks of the unweighted graphs leaves the loss unchanged...
+    for graph in graphs[1::2]:
+        graph['node_importances'] = 1.0 - graph['node_importances']
+        graph['edge_importances'] = 1.0 - graph['edge_importances']
+    assert loss_of(graphs) == pytest.approx(loss)
+    # ...while changing the masks of the weighted graphs does not.
+    for graph in graphs[0::2]:
+        graph['node_importances'] = 1.0 - graph['node_importances']
+    assert loss_of(graphs) != pytest.approx(loss)
+
+
+def test_megan_explanation_supervision_fits_references():
+    """
+    Training with explanation supervision and without co-training should fit learnable reference
+    explanations: the supervision loss drops and the node attributions separate the referenced
+    nodes from the others.
+    """
+    torch.manual_seed(0)
+    graphs = get_mock_graphs(num=64, num_node_attributes=5, num_edge_attributes=2)
+    _add_mock_references(graphs)
+    for graph in graphs:
+        graph['explanation_weight'] = 1.0
+
+    model = Megan(
+        node_dim=5,
+        edge_dim=2,
+        units=[32, 32],
+        num_channels=2,
+        importance_factor=0.0,
+        final_units=[16, 2],
+        prediction_mode='classification',
+        node_supervision_factor=1.0,
+        edge_supervision_factor=1.0,
+        learning_rate=1e-2,
+    )
+    loader = DataLoader(data_list_from_graphs(graphs), batch_size=64, shuffle=False)
+    data = next(iter(loader))
+
+    model.eval()
+    with torch.no_grad():
+        loss_before = float(model.training_supervision(data=data, info=model(data)))
+    model.train()
+
+    trainer = pl.Trainer(max_epochs=60, accelerator='cpu', logger=False,
+                         enable_checkpointing=False, enable_progress_bar=False)
+    trainer.fit(model, train_dataloaders=loader)
+
+    model.eval()
+    with torch.no_grad():
+        info = model(data)
+        loss_after = float(model.training_supervision(data=data, info=info))
+
+    assert loss_after < 0.5 * loss_before
+    node_pred = info['node_importance'].numpy()
+    node_true = data.node_importances.numpy()
+    for k in range(2):
+        assert node_pred[node_true[:, k] == 1, k].mean() > node_pred[node_true[:, k] == 0, k].mean() + 0.2
