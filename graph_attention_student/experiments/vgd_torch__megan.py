@@ -34,6 +34,7 @@ from sklearn.neighbors import NearestNeighbors
 from sklearn.metrics import pairwise_distances
 from sklearn.metrics import r2_score
 from sklearn.metrics import mean_absolute_error
+from sklearn.metrics import roc_auc_score
 from torch_geometric.loader import DataLoader
 from lightning.pytorch.loggers import CSVLogger
 from visual_graph_datasets.visualization.importances import create_importances_pdf
@@ -678,7 +679,52 @@ def train_model(e: Experiment,
         callbacks.append(MveCallback(
             warmup_epochs=e.MVE_WARMUP_EPOCHS,
         ))
-    
+
+    class BestEpochCallback(pl.Callback):
+        """
+        Scores the validation set after every epoch and keeps a copy of the weights of the best
+        epoch, so that they can be restored after the training. The score is the AUROC for
+        classification and the negative MAE for regression.
+        """
+        def __init__(self):
+            self.best_score = -np.inf
+            self.best_epoch = None
+            self.best_state = None
+
+        def on_train_epoch_end(self, trainer: pl.Trainer, pl_module: Megan):
+            device = pl_module.device
+            pl_module.eval()
+            pl_module.to('cpu')
+
+            results = pl_module.forward_graphs(graphs_val)
+            values_true = np.array([graph['graph_labels'] for graph in graphs_val])
+            values_pred = np.array([result['graph_output'] for result in results])
+            if e.DATASET_TYPE == 'classification':
+                labels = np.argmax(values_true, axis=1)
+                probabilities = torch.softmax(torch.tensor(values_pred), dim=-1).numpy()
+                if probabilities.shape[1] == 2:
+                    score = roc_auc_score(labels, probabilities[:, 1])
+                else:
+                    score = roc_auc_score(labels, probabilities, multi_class='ovr')
+            else:
+                score = -mean_absolute_error(values_true, values_pred)
+
+            if score > self.best_score:
+                self.best_score = float(score)
+                self.best_epoch = trainer.current_epoch
+                self.best_state = {key: value.detach().clone()
+                                   for key, value in pl_module.state_dict().items()}
+
+            pl_module.train()
+            pl_module.to(device)
+
+    # Whether to restore the weights of the epoch with the best validation score at the end of the
+    # training. Defensive lookup, so that every existing sub-experiment keeps the last epoch.
+    select_best = e.SELECT_BEST if 'SELECT_BEST' in e.parameters else False
+    best_epoch_callback = BestEpochCallback()
+    if select_best:
+        callbacks.append(best_epoch_callback)
+
     trainer = pl.Trainer(
         max_epochs=e.EPOCHS,
         logger=logger,
@@ -697,10 +743,17 @@ def train_model(e: Experiment,
     del train_loader
     del test_loader
     torch.cuda.empty_cache()
-    
+
     model.eval()
     model.to('cpu')
-    
+
+    if select_best and best_epoch_callback.best_state is not None:
+        model.load_state_dict(best_epoch_callback.best_state)
+        e['best_epoch'] = best_epoch_callback.best_epoch
+        e['best_epoch_score'] = best_epoch_callback.best_score
+        e.log(f'restored the best epoch {best_epoch_callback.best_epoch} with validation score '
+              f'{best_epoch_callback.best_score:.3f}')
+
     return model, trainer
 
 
